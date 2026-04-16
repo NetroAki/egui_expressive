@@ -17,6 +17,9 @@ daw = []
 egui = "0.34"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+lopdf = "0.34"
+flate2 = "1.0"
+regex = "1"
 
 [dev-dependencies]
 eframe = "0.34"
@@ -24,6 +27,10 @@ eframe = "0.34"
 [[bin]]
 name = "figma-export"
 path = "src/bin/figma_export.rs"
+
+[[bin]]
+name = "ai-parser"
+path = "src/bin/ai_parser.rs"
 
 [[example]]
 name = "daw_strip"

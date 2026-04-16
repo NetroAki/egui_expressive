@@ -525,6 +525,104 @@ function generateSidecar(ab, els, colorMap) {
   }, null, 2);
 }
 
+// ─── ai-parser Integration ────────────────────────────────────────────────────
+let aiParserAvailable = false;
+
+async function runAiParser(filePath) {
+    try {
+        // Find binary relative to plugin location
+        const pluginDir = __dirname || '.';
+        const binaryName = process.platform === 'win32' ? 'ai-parser.exe' : 'ai-parser';
+        const binaryPath = path.join(pluginDir, '..', 'target', 'release', binaryName);
+
+        // Try execSync (UXP may have limited Node.js support)
+        let output;
+        try {
+            const { execSync } = require('child_process');
+            output = execSync(`"${binaryPath}" "${filePath}" --pretty`, {
+                encoding: 'utf8',
+                timeout: 10000
+            });
+        } catch (e) {
+            // Fallback: try using shell if execSync fails
+            try {
+                const { shell } = require('uxp');
+                // Try to execute via shell.openExternal would require URL scheme
+                // Instead, just log and return null
+                console.warn('ai-parser not available via execSync:', e.message);
+                aiParserAvailable = false;
+                return null;
+            } catch (e2) {
+                console.warn('ai-parser not available:', e.message);
+                aiParserAvailable = false;
+                return null;
+            }
+        }
+        
+        aiParserAvailable = true;
+        return JSON.parse(output);
+    } catch (e) {
+        console.warn('ai-parser execution failed:', e.message);
+        aiParserAvailable = false;
+        return null;
+    }
+}
+
+function mergeAiParserData(domElements, aiParserResult) {
+    if (!aiParserResult || !aiParserResult.elements) return domElements;
+
+    const aiMap = {};
+    for (const el of aiParserResult.elements) {
+        aiMap[el.id] = el;
+    }
+
+    return domElements.map(el => {
+        const aiEl = aiMap[el.id];
+        if (!aiEl) return el;
+
+        return {
+            ...el,
+            live_effects: aiEl.live_effects?.length ? aiEl.live_effects : el.effects,
+            appearance_fills: aiEl.appearance_fills?.length ? aiEl.appearance_fills : undefined,
+            appearance_strokes: aiEl.appearance_strokes?.length ? aiEl.appearance_strokes : undefined,
+            mesh_patches: aiEl.mesh_patches?.length ? aiEl.mesh_patches : undefined,
+            envelope_mesh: aiEl.envelope_mesh || undefined,
+            three_d: aiEl.three_d || undefined,
+        };
+    });
+}
+
+async function extractFromProjectFile(artboardsData) {
+    try {
+        const doc = app.activeDocument;
+        if (!doc) return artboardsData;
+
+        const docPath = doc.fullName?.fsName || (doc.path && doc.name ? doc.path + '/' + doc.name : null);
+        if (!docPath) {
+            console.warn('Could not get document path for ai-parser');
+            return artboardsData;
+        }
+
+        const aiParserResult = await runAiParser(docPath);
+        if (!aiParserResult) return artboardsData;
+
+        // Merge ai-parser data into each artboard's elements
+        for (const artboard of artboardsData) {
+            artboard.elements = mergeAiParserData(artboard.elements, aiParserResult);
+        }
+
+        return artboardsData;
+    } catch (e) {
+        console.warn('extractFromProjectFile failed:', e.message);
+        return artboardsData;
+    }
+}
+
+// Expose availability check for UI
+function isAiParserAvailable() {
+    return aiParserAvailable;
+}
+
 // ─── Main Export ─────────────────────────────────────────────────────────────
 async function exportArtboards(selectedIndices, options) {
   const doc = app.activeDocument;
@@ -541,6 +639,18 @@ async function exportArtboards(selectedIndices, options) {
     allEls.push(...els);
     results.push({ artboard: abInfo, elements: els });
   }
+
+  // Try to enrich with project file data from ai-parser
+  try {
+    await extractFromProjectFile(results);
+  } catch (e) {
+    // Gracefully degrade if ai-parser integration fails
+    console.warn('ai-parser enrichment skipped:', e.message);
+  }
+
+  // Re-collect all elements after potential enrichment
+  allEls.length = 0;
+  for (const r of results) allEls.push(...r.elements);
 
   const { colorMap, constants } = extractAndNameColors(allEls);
   const comps = findReusableComponents(allEls);
@@ -566,6 +676,7 @@ async function exportArtboards(selectedIndices, options) {
 window.addEventListener("message", async (event) => {
   const { type, payload } = event.data;
   if (type === "GET_ARTBOARDS") { try { window.postMessage({ type: "ARTBOARDS_RESULT", boards: await getArtboards() }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
+  if (type === "CHECK_AI_PARSER") { window.postMessage({ type: "AI_PARSER_STATUS", available: aiParserAvailable }); }
   if (type === "EXPORT") { try { const { selectedIndices, options } = payload || {}; const r = await exportArtboards(selectedIndices || [], options || {}); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, colorMap: r.colorMap, zipBlob: r.zipBlob } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
   if (type === "EXPORT_SINGLE") { try { const { artboardIndex, options } = payload || {}; const r = await exportArtboards([artboardIndex], options || {}); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, colorMap: r.colorMap, zipBlob: r.zipBlob } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
   if (type === "EXPAND_AND_EXTRACT") {

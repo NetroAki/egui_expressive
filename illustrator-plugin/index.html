@@ -238,8 +238,28 @@
       color: var(--on-surface-variant);
       border-top: 1px solid var(--outline-variant);
       flex-shrink: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
-    
+
+    .ai-parser-status {
+      font-size: 10px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .ai-parser-status .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--outline);
+    }
+    .ai-parser-status.available .dot { background: #4caf50; }
+    .ai-parser-status.available { color: #4caf50; }
+    .ai-parser-status.unavailable .dot { background: var(--outline); }
+    .ai-parser-status.unavailable { color: var(--on-surface-variant); }
+
     .empty-state {
       display: flex;
       flex-direction: column;
@@ -312,6 +332,7 @@
   </div>
   
   <div class="status-bar" id="status-bar">Ready</div>
+  <div class="ai-parser-status" id="ai-parser-status" title="Project file analysis via ai-parser"></div>
 
   <script>
     const options = { naming: true, gaps: true, sidecar: true, native: true };
@@ -335,12 +356,14 @@
     // Request artboard list on load
     window.addEventListener('load', () => {
       try {
-        window.__adobe_cep__ ? 
+        window.__adobe_cep__ ?
           window.__adobe_cep__.evalScript('getArtboards()', loadArtboards) :
           window.uxpHost?.postMessage({ type: 'GET_ARTBOARDS' });
       } catch(e) {
         setStatus('Connect to Illustrator to load artboards');
       }
+      // Check ai-parser availability
+      checkAiParser();
     });
     
     function loadArtboards(data) {
@@ -383,13 +406,31 @@
     window.addEventListener('message', (event) => {
       const msg = event.data;
       if (!msg) return;
-      
+
       if (msg.type === 'ARTBOARDS_RESULT') {
         loadArtboards(msg.artboards);
       } else if (msg.type === 'EXPORT_RESULT') {
         handleExportResult(msg);
+      } else if (msg.type === 'AI_PARSER_STATUS') {
+        updateAiParserStatus(msg.available);
       }
     });
+
+    // Check ai-parser availability on load
+    function checkAiParser() {
+      try {
+        window.uxpHost?.postMessage({ type: 'CHECK_AI_PARSER' });
+      } catch(e) {
+        // Not in UXP context or host not available
+      }
+    }
+
+    function updateAiParserStatus(available) {
+      const el = document.getElementById('ai-parser-status');
+      if (!el) return;
+      el.className = 'ai-parser-status ' + (available ? 'available' : 'unavailable');
+      el.innerHTML = `<span class="dot"></span>Project file analysis: ${available ? 'Available' : 'Not available'}`;
+    }
     
     function handleExportResult(result) {
       document.getElementById('export-btn').disabled = false;

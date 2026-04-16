@@ -35,14 +35,48 @@ pub struct GradientDef {
 }
 
 /// Blend mode for compositing.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub enum BlendMode {
+    #[default]
     Normal,
     Multiply,
     Screen,
     Overlay,
     Darken,
     Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+}
+
+impl BlendMode {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "multiply" => Self::Multiply,
+            "screen" => Self::Screen,
+            "overlay" => Self::Overlay,
+            "darken" => Self::Darken,
+            "lighten" => Self::Lighten,
+            "color_dodge" => Self::ColorDodge,
+            "color_burn" => Self::ColorBurn,
+            "hard_light" => Self::HardLight,
+            "soft_light" => Self::SoftLight,
+            "difference" => Self::Difference,
+            "exclusion" => Self::Exclusion,
+            "hue" => Self::Hue,
+            "saturation" => Self::Saturation,
+            "color" => Self::Color,
+            "luminosity" => Self::Luminosity,
+            _ => Self::Normal,
+        }
+    }
 }
 
 /// Effect type for shadows/glow.
@@ -50,7 +84,13 @@ pub enum BlendMode {
 pub enum EffectType {
     DropShadow,
     InnerShadow,
-    Glow,
+    OuterGlow,
+    InnerGlow,
+    GaussianBlur,
+    Bevel,
+    Feather,
+    LiveEffect,
+    Unknown(String),
 }
 
 /// Effect definition.
@@ -60,7 +100,35 @@ pub struct EffectDef {
     pub x: f32,
     pub y: f32,
     pub blur: f32,
+    pub spread: f32,
     pub color: Color32,
+    pub blend_mode: BlendMode,
+    // For bevel
+    pub depth: f32,
+    pub angle: f32,
+    pub highlight: Option<Color32>,
+    pub shadow_color: Option<Color32>,
+    // For blur/feather
+    pub radius: f32,
+}
+
+impl Default for EffectDef {
+    fn default() -> Self {
+        Self {
+            effect_type: EffectType::DropShadow,
+            x: 0.0,
+            y: 0.0,
+            blur: 0.0,
+            spread: 0.0,
+            color: Color32::BLACK,
+            blend_mode: BlendMode::Normal,
+            depth: 0.0,
+            angle: 0.0,
+            highlight: None,
+            shadow_color: None,
+            radius: 0.0,
+        }
+    }
 }
 
 /// Text alignment options.
@@ -70,6 +138,110 @@ pub enum TextAlign {
     Center,
     Right,
     Justified,
+}
+
+/// Stroke cap style.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StrokeCap {
+    Butt,
+    Round,
+    Square,
+}
+
+impl StrokeCap {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "round" => Self::Round,
+            "square" => Self::Square,
+            _ => Self::Butt,
+        }
+    }
+}
+
+/// Stroke join style.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StrokeJoin {
+    Miter,
+    Round,
+    Bevel,
+}
+
+impl StrokeJoin {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "round" => Self::Round,
+            "bevel" => Self::Bevel,
+            _ => Self::Miter,
+        }
+    }
+}
+
+/// Text decoration.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TextDecoration {
+    Underline,
+    Strikethrough,
+    Both,
+}
+
+impl TextDecoration {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "strikethrough" => Self::Strikethrough,
+            "underline_strikethrough" | "both" => Self::Both,
+            _ => Self::Underline,
+        }
+    }
+}
+
+/// Text transform.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TextTransform {
+    AllCaps,
+    SmallCaps,
+}
+
+impl TextTransform {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "small_caps" => Self::SmallCaps,
+            _ => Self::AllCaps,
+        }
+    }
+}
+
+/// A single text run with its own style (for mixed-style text).
+#[derive(Clone, Debug)]
+pub struct TextRun {
+    pub text: String,
+    pub size: f32,
+    pub weight: u16,
+    pub color: Option<Color32>,
+}
+
+/// A third-party effect detected on an element.
+#[derive(Clone, Debug)]
+pub struct ThirdPartyEffect {
+    pub effect_type: String,
+    pub opaque: bool,
+    pub note: String,
+}
+
+/// A fill from the appearance stack (multiple fills per element).
+#[derive(Clone, Debug)]
+pub struct AppearanceFill {
+    pub color: Color32,
+    pub opacity: f32,
+    pub blend_mode: BlendMode,
+}
+
+/// A stroke from the appearance stack (multiple strokes per element).
+#[derive(Clone, Debug)]
+pub struct AppearanceStroke {
+    pub color: Color32,
+    pub width: f32,
+    pub opacity: f32,
+    pub blend_mode: BlendMode,
 }
 
 /// A parsed element from SVG/Illustrator export.
@@ -98,6 +270,25 @@ pub struct LayoutElement {
     pub text_align: Option<TextAlign>,
     pub letter_spacing: Option<f32>,
     pub line_height: Option<f32>,
+    // Stroke details (from Illustrator)
+    pub stroke_cap: Option<StrokeCap>,
+    pub stroke_join: Option<StrokeJoin>,
+    pub stroke_miter_limit: Option<f32>,
+    // Text details (from Illustrator)
+    pub text_decoration: Option<TextDecoration>,
+    pub text_transform: Option<TextTransform>,
+    pub text_runs: Vec<TextRun>,
+    // Element metadata
+    pub symbol_name: Option<String>,
+    pub is_compound_path: bool,
+    pub is_gradient_mesh: bool,
+    pub is_chart: bool,
+    pub is_opaque: bool,
+    pub third_party_effects: Vec<ThirdPartyEffect>,
+    pub notes: Vec<String>,
+    // Appearance stack (multiple fills/strokes from expand+analyze)
+    pub appearance_fills: Vec<AppearanceFill>,
+    pub appearance_strokes: Vec<AppearanceStroke>,
 }
 
 impl LayoutElement {
@@ -125,6 +316,21 @@ impl LayoutElement {
             text_align: None,
             letter_spacing: None,
             line_height: None,
+            stroke_cap: None,
+            stroke_join: None,
+            stroke_miter_limit: None,
+            text_decoration: None,
+            text_transform: None,
+            text_runs: vec![],
+            symbol_name: None,
+            is_compound_path: false,
+            is_gradient_mesh: false,
+            is_chart: false,
+            is_opaque: false,
+            third_party_effects: vec![],
+            notes: vec![],
+            appearance_fills: vec![],
+            appearance_strokes: vec![],
         }
     }
 }
@@ -1848,6 +2054,21 @@ pub fn parse_svg_elements(svg: &str) -> Vec<LayoutElement> {
                         text_align: None,
                         letter_spacing: None,
                         line_height: None,
+                        stroke_cap: None,
+                        stroke_join: None,
+                        stroke_miter_limit: None,
+                        text_decoration: None,
+                        text_transform: None,
+                        text_runs: vec![],
+                        symbol_name: None,
+                        is_compound_path: false,
+                        is_gradient_mesh: false,
+                        is_chart: false,
+                        is_opaque: false,
+                        third_party_effects: vec![],
+                        notes: vec![],
+                        appearance_fills: vec![],
+                        appearance_strokes: vec![],
                     });
                 }
             }
@@ -1909,6 +2130,21 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 text_align: None,
                 letter_spacing: None,
                 line_height: None,
+                stroke_cap: None,
+                stroke_join: None,
+                stroke_miter_limit: None,
+                text_decoration: None,
+                text_transform: None,
+                text_runs: vec![],
+                symbol_name: None,
+                is_compound_path: false,
+                is_gradient_mesh: false,
+                is_chart: false,
+                is_opaque: false,
+                third_party_effects: vec![],
+                notes: vec![],
+                appearance_fills: vec![],
+                appearance_strokes: vec![],
             });
 
             rect_start = tag_end + 1;
@@ -1965,6 +2201,21 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                     text_align: None,
                     letter_spacing: None,
                     line_height: None,
+                    stroke_cap: None,
+                    stroke_join: None,
+                    stroke_miter_limit: None,
+                    text_decoration: None,
+                    text_transform: None,
+                    text_runs: vec![],
+                    symbol_name: None,
+                    is_compound_path: false,
+                    is_gradient_mesh: false,
+                    is_chart: false,
+                    is_opaque: false,
+                    third_party_effects: vec![],
+                    notes: vec![],
+                    appearance_fills: vec![],
+                    appearance_strokes: vec![],
                 });
             }
 
@@ -2020,6 +2271,21 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 text_align: None,
                 letter_spacing: None,
                 line_height: None,
+                stroke_cap: None,
+                stroke_join: None,
+                stroke_miter_limit: None,
+                text_decoration: None,
+                text_transform: None,
+                text_runs: vec![],
+                symbol_name: None,
+                is_compound_path: false,
+                is_gradient_mesh: false,
+                is_chart: false,
+                is_opaque: false,
+                third_party_effects: vec![],
+                notes: vec![],
+                appearance_fills: vec![],
+                appearance_strokes: vec![],
             });
 
             path_start = tag_end + 1;
@@ -2065,6 +2331,21 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 text_align: None,
                 letter_spacing: None,
                 line_height: None,
+                stroke_cap: None,
+                stroke_join: None,
+                stroke_miter_limit: None,
+                text_decoration: None,
+                text_transform: None,
+                text_runs: vec![],
+                symbol_name: None,
+                is_compound_path: false,
+                is_gradient_mesh: false,
+                is_chart: false,
+                is_opaque: false,
+                third_party_effects: vec![],
+                notes: vec![],
+                appearance_fills: vec![],
+                appearance_strokes: vec![],
             });
 
             img_start = tag_end + 1;
@@ -2120,6 +2401,21 @@ fn parse_top_level_elements(svg: &str) -> Vec<LayoutElement> {
                     text_align: None,
                     letter_spacing: None,
                     line_height: None,
+                    stroke_cap: None,
+                    stroke_join: None,
+                    stroke_miter_limit: None,
+                    text_decoration: None,
+                    text_transform: None,
+                    text_runs: vec![],
+                    symbol_name: None,
+                    is_compound_path: false,
+                    is_gradient_mesh: false,
+                    is_chart: false,
+                    is_opaque: false,
+                    third_party_effects: vec![],
+                    notes: vec![],
+                    appearance_fills: vec![],
+                    appearance_strokes: vec![],
                 });
             }
 
@@ -2179,6 +2475,21 @@ fn parse_top_level_elements(svg: &str) -> Vec<LayoutElement> {
                         text_align: None,
                         letter_spacing: None,
                         line_height: None,
+                        stroke_cap: None,
+                        stroke_join: None,
+                        stroke_miter_limit: None,
+                        text_decoration: None,
+                        text_transform: None,
+                        text_runs: vec![],
+                        symbol_name: None,
+                        is_compound_path: false,
+                        is_gradient_mesh: false,
+                        is_chart: false,
+                        is_opaque: false,
+                        third_party_effects: vec![],
+                        notes: vec![],
+                        appearance_fills: vec![],
+                        appearance_strokes: vec![],
                     });
                 }
             }
@@ -2630,18 +2941,172 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
             .map(|v| v as f32);
 
         // Parse blend mode
-        let blend_mode = elem_value
-            .get("blendMode")
+        let blend_mode = BlendMode::from_str(
+            elem_value
+                .get("blendMode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("normal"),
+        );
+
+        // Parse new fields from Illustrator
+        let stroke_cap = elem_value
+            .get("strokeCap")
             .and_then(|v| v.as_str())
-            .map(|s| match s {
-                "multiply" => BlendMode::Multiply,
-                "screen" => BlendMode::Screen,
-                "overlay" => BlendMode::Overlay,
-                "darken" => BlendMode::Darken,
-                "lighten" => BlendMode::Lighten,
-                _ => BlendMode::Normal,
-            })
-            .unwrap_or(BlendMode::Normal);
+            .map(StrokeCap::from_str);
+        let stroke_join = elem_value
+            .get("strokeJoin")
+            .and_then(|v| v.as_str())
+            .map(StrokeJoin::from_str);
+        let stroke_miter_limit = elem_value
+            .get("strokeMiterLimit")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32);
+        let text_decoration = elem_value
+            .get("textDecoration")
+            .and_then(|v| v.as_str())
+            .map(TextDecoration::from_str);
+        let text_transform = elem_value
+            .get("textTransform")
+            .and_then(|v| v.as_str())
+            .map(TextTransform::from_str);
+        let symbol_name = elem_value
+            .get("symbolName")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let is_compound_path = elem_value
+            .get("isCompoundPath")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let is_gradient_mesh = elem_value
+            .get("isGradientMesh")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let is_chart = elem_value
+            .get("isChart")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let is_opaque = elem_value
+            .get("isOpaque")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let text_runs: Vec<TextRun> =
+            if let Some(runs) = elem_value.get("textRuns").and_then(|v| v.as_array()) {
+                runs.iter()
+                    .filter_map(|r| {
+                        let ro = r.as_object()?;
+                        Some(TextRun {
+                            text: ro.get("text")?.as_str()?.to_string(),
+                            size: ro
+                                .get("style")
+                                .and_then(|s| s.get("size"))
+                                .and_then(|v| v.as_f64())
+                                .unwrap_or(14.0) as f32,
+                            weight: ro
+                                .get("style")
+                                .and_then(|s| s.get("weight"))
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(400) as u16,
+                            color: ro.get("style").and_then(|s| s.get("color")).and_then(|c| {
+                                let co = c.as_object()?;
+                                Some(Color32::from_rgb(
+                                    co.get("r")?.as_u64()? as u8,
+                                    co.get("g")?.as_u64()? as u8,
+                                    co.get("b")?.as_u64()? as u8,
+                                ))
+                            }),
+                        })
+                    })
+                    .collect()
+            } else {
+                vec![]
+            };
+
+        let third_party_effects: Vec<ThirdPartyEffect> = if let Some(tpe) = elem_value
+            .get("thirdPartyEffects")
+            .and_then(|v| v.as_array())
+        {
+            tpe.iter()
+                .filter_map(|e| {
+                    let eo = e.as_object()?;
+                    Some(ThirdPartyEffect {
+                        effect_type: eo.get("type")?.as_str()?.to_string(),
+                        opaque: eo.get("opaque").and_then(|v| v.as_bool()).unwrap_or(false),
+                        note: eo
+                            .get("note")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    })
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+
+        let notes: Vec<String> =
+            if let Some(notes_arr) = elem_value.get("notes").and_then(|v| v.as_array()) {
+                notes_arr
+                    .iter()
+                    .filter_map(|n| n.as_str().map(|s| s.to_string()))
+                    .collect()
+            } else {
+                vec![]
+            };
+
+        let appearance_fills: Vec<AppearanceFill> = if let Some(fills) =
+            elem_value.get("appearanceFills").and_then(|v| v.as_array())
+        {
+            fills
+                .iter()
+                .filter_map(|f| {
+                    let fo = f.as_object()?;
+                    Some(AppearanceFill {
+                        color: Color32::from_rgb(
+                            fo.get("r")?.as_u64()? as u8,
+                            fo.get("g")?.as_u64()? as u8,
+                            fo.get("b")?.as_u64()? as u8,
+                        ),
+                        opacity: fo.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                        blend_mode: BlendMode::from_str(
+                            fo.get("blendMode")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("normal"),
+                        ),
+                    })
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+
+        let appearance_strokes: Vec<AppearanceStroke> = if let Some(strokes) = elem_value
+            .get("appearanceStrokes")
+            .and_then(|v| v.as_array())
+        {
+            strokes
+                .iter()
+                .filter_map(|s| {
+                    let so = s.as_object()?;
+                    Some(AppearanceStroke {
+                        color: Color32::from_rgb(
+                            so.get("r")?.as_u64()? as u8,
+                            so.get("g")?.as_u64()? as u8,
+                            so.get("b")?.as_u64()? as u8,
+                        ),
+                        width: so.get("width").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                        opacity: so.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                        blend_mode: BlendMode::from_str(
+                            so.get("blendMode")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("normal"),
+                        ),
+                    })
+                })
+                .collect()
+        } else {
+            vec![]
+        };
 
         // Parse gradient if present
         let gradient = elem_value
@@ -2689,11 +3154,17 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
             .map(|arr| {
                 arr.iter()
                     .filter_map(|e| {
-                        let effect_type = match e.get("type")?.as_str()? {
+                        let effect_type_str = e.get("type")?.as_str()?;
+                        let effect_type = match effect_type_str {
                             "dropShadow" | "drop-shadow" => EffectType::DropShadow,
                             "innerShadow" | "inner-shadow" => EffectType::InnerShadow,
-                            "glow" => EffectType::Glow,
-                            _ => return None,
+                            "outerGlow" | "outer-glow" => EffectType::OuterGlow,
+                            "innerGlow" | "inner-glow" => EffectType::InnerGlow,
+                            "gaussianBlur" | "gaussian-blur" => EffectType::GaussianBlur,
+                            "bevel" => EffectType::Bevel,
+                            "feather" => EffectType::Feather,
+                            "liveEffect" | "live-effect" => EffectType::LiveEffect,
+                            _ => EffectType::Unknown(effect_type_str.to_string()),
                         };
                         let x = e
                             .get("x")
@@ -2710,17 +3181,57 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
                             .and_then(|v| v.as_f64())
                             .map(|v| v as f32)
                             .unwrap_or(0.0);
+                        let spread = e
+                            .get("spread")
+                            .and_then(|v| v.as_f64())
+                            .map(|v| v as f32)
+                            .unwrap_or(0.0);
                         let color = e
                             .get("color")?
                             .as_str()
                             .and_then(|s| crate::svg::parse_svg_color(s))
                             .unwrap_or(egui::Color32::BLACK);
+                        let blend_mode = BlendMode::from_str(
+                            e.get("blendMode")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("normal"),
+                        );
+                        let depth = e
+                            .get("depth")
+                            .and_then(|v| v.as_f64())
+                            .map(|v| v as f32)
+                            .unwrap_or(0.0);
+                        let angle = e
+                            .get("angle")
+                            .and_then(|v| v.as_f64())
+                            .map(|v| v as f32)
+                            .unwrap_or(0.0);
+                        let highlight = e
+                            .get("highlight")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| crate::svg::parse_svg_color(s));
+                        let shadow_color = e
+                            .get("shadowColor")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| crate::svg::parse_svg_color(s));
+                        let radius = e
+                            .get("radius")
+                            .and_then(|v| v.as_f64())
+                            .map(|v| v as f32)
+                            .unwrap_or(0.0);
                         Some(EffectDef {
                             effect_type,
                             x,
                             y,
                             blur,
+                            spread,
                             color,
+                            blend_mode,
+                            depth,
+                            angle,
+                            highlight,
+                            shadow_color,
+                            radius,
                         })
                     })
                     .collect()
@@ -2798,6 +3309,21 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
                                 text_align: None,
                                 letter_spacing: None,
                                 line_height: None,
+                                stroke_cap: None,
+                                stroke_join: None,
+                                stroke_miter_limit: None,
+                                text_decoration: None,
+                                text_transform: None,
+                                text_runs: vec![],
+                                symbol_name: None,
+                                is_compound_path: false,
+                                is_gradient_mesh: false,
+                                is_chart: false,
+                                is_opaque: false,
+                                third_party_effects: vec![],
+                                notes: vec![],
+                                appearance_fills: vec![],
+                                appearance_strokes: vec![],
                             })
                         })
                         .collect()
@@ -2830,6 +3356,21 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
             text_align,
             letter_spacing,
             line_height,
+            stroke_cap,
+            stroke_join,
+            stroke_miter_limit,
+            text_decoration,
+            text_transform,
+            text_runs,
+            symbol_name,
+            is_compound_path,
+            is_gradient_mesh,
+            is_chart,
+            is_opaque,
+            third_party_effects,
+            notes,
+            appearance_fills,
+            appearance_strokes,
         });
     }
 

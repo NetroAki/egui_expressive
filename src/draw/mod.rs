@@ -528,6 +528,17 @@ pub fn blend_color(
         }
         crate::codegen::BlendMode::Darken => (bg.0.min(fg.0), bg.1.min(fg.1), bg.2.min(fg.2)),
         crate::codegen::BlendMode::Lighten => (bg.0.max(fg.0), bg.1.max(fg.1), bg.2.max(fg.2)),
+        // Advanced blend modes - fall back to normal for now
+        crate::codegen::BlendMode::ColorDodge
+        | crate::codegen::BlendMode::ColorBurn
+        | crate::codegen::BlendMode::HardLight
+        | crate::codegen::BlendMode::SoftLight
+        | crate::codegen::BlendMode::Difference
+        | crate::codegen::BlendMode::Exclusion
+        | crate::codegen::BlendMode::Hue
+        | crate::codegen::BlendMode::Saturation
+        | crate::codegen::BlendMode::Color
+        | crate::codegen::BlendMode::Luminosity => (fg.0, fg.1, fg.2),
     };
 
     // Convert back to u8
