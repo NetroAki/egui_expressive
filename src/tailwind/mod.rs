@@ -1,4 +1,4 @@
-use egui::{Color32, CornerRadius, Frame, Margin, Response, Stroke, Ui, Vec2};
+use egui::{Color32, CornerRadius, Frame, Margin, Response, Stroke, Ui};
 
 // ── Supporting types ──────────────────────────────────────────────────────────
 
@@ -58,30 +58,6 @@ pub enum Size {
 }
 
 #[derive(Clone, Copy, Default, Debug)]
-pub enum Direction {
-    #[default]
-    Column,
-    Row,
-}
-
-#[derive(Clone, Copy, Default, Debug)]
-pub enum Align {
-    #[default]
-    Start,
-    Center,
-    End,
-}
-
-#[derive(Clone, Copy, Default, Debug)]
-pub enum Justify {
-    #[default]
-    Start,
-    Center,
-    End,
-    Between,
-}
-
-#[derive(Clone, Copy, Default, Debug)]
 pub enum FontWeight {
     Light,
     #[default]
@@ -116,7 +92,6 @@ pub const TW_64: f32 = 256.0;
 pub struct Tw {
     // Spacing
     pub padding: Edges,
-    pub gap: f32,
 
     // Colors
     pub bg: Option<Color32>,
@@ -129,11 +104,6 @@ pub struct Tw {
     pub font_weight: FontWeight,
     /// Note: `letter_spacing` must be applied per-widget using `RichText::new(text).letter_spacing(spacing)`.
     pub letter_spacing: Option<f32>,
-
-    // Layout
-    pub direction: Direction,
-    pub align_items: Align,
-    pub justify_content: Justify,
 
     // Sizing
     pub width: Size,
@@ -188,12 +158,6 @@ impl Tw {
     }
     pub fn pr(mut self, v: f32) -> Self {
         self.padding.right = v;
-        self
-    }
-
-    // ── Gap ──────────────────────────────────────────────────────────────────
-    pub fn gap(mut self, v: f32) -> Self {
-        self.gap = v;
         self
     }
 
@@ -270,44 +234,6 @@ impl Tw {
     }
     pub fn tracking_wider(mut self) -> Self {
         self.letter_spacing = Some(1.0);
-        self
-    }
-
-    // ── Layout ───────────────────────────────────────────────────────────────
-    pub fn flex_row(mut self) -> Self {
-        self.direction = Direction::Row;
-        self
-    }
-    pub fn flex_col(mut self) -> Self {
-        self.direction = Direction::Column;
-        self
-    }
-    pub fn items_start(mut self) -> Self {
-        self.align_items = Align::Start;
-        self
-    }
-    pub fn items_center(mut self) -> Self {
-        self.align_items = Align::Center;
-        self
-    }
-    pub fn items_end(mut self) -> Self {
-        self.align_items = Align::End;
-        self
-    }
-    pub fn justify_start(mut self) -> Self {
-        self.justify_content = Justify::Start;
-        self
-    }
-    pub fn justify_center(mut self) -> Self {
-        self.justify_content = Justify::Center;
-        self
-    }
-    pub fn justify_end(mut self) -> Self {
-        self.justify_content = Justify::End;
-        self
-    }
-    pub fn justify_between(mut self) -> Self {
-        self.justify_content = Justify::Between;
         self
     }
 
@@ -463,10 +389,6 @@ impl Tw {
     /// Render content inside this styled container.
     /// Returns the outer Response.
     pub fn show(self, ui: &mut Ui, content: impl FnOnce(&mut Ui)) -> Response {
-        let gap = self.gap;
-        let direction = self.direction;
-        let align = self.align_items;
-        let justify = self.justify_content;
         let min_w = self.min_width;
         let min_h = self.min_height;
         let max_w = self.max_width;
@@ -506,49 +428,7 @@ impl Tw {
                 ui.set_max_height(h);
             }
 
-            // Apply gap
-            if gap > 0.0 {
-                ui.spacing_mut().item_spacing = match direction {
-                    Direction::Row => Vec2::new(gap, ui.spacing().item_spacing.y),
-                    Direction::Column => Vec2::new(ui.spacing().item_spacing.x, gap),
-                };
-            }
-
-            // Apply direction + alignment
-            match direction {
-                Direction::Row => {
-                    ui.horizontal(|ui| {
-                        match justify {
-                            Justify::Center => {
-                                // Center content: requires knowing content width, which egui
-                                // immediate mode doesn't provide before layout. Use manual spacers
-                                // or wrap in a centered panel for precise centering.
-                                let space = (ui.available_width() - 0.0) / 2.0;
-                                ui.add_space(space);
-                            }
-                            Justify::End => {
-                                ui.add_space(ui.available_width());
-                            }
-                            // Note: `Justify::Between` requires manual `ui.add_space(...)` or
-                            // `spacer!()` calls between items in immediate mode.
-                            Justify::Between => {}
-                            Justify::Start => {}
-                        }
-                        content(ui);
-                    });
-                }
-                Direction::Column => {
-                    ui.vertical(|ui| {
-                        match align {
-                            Align::Center => {
-                                ui.set_width(ui.available_width());
-                            }
-                            _ => {}
-                        }
-                        content(ui);
-                    });
-                }
-            }
+            content(ui);
         });
 
         resp.response

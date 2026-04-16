@@ -58,7 +58,10 @@ pub mod widgets;
 pub mod daw;
 
 // Re-export commonly used types at crate root
-pub use animation::{transition_color, transition_f32, Spring, Transition, Tween};
+pub use animation::{
+    transition_color, transition_f32, AnimatedColor, AnimatedF32, AnimatedState, AnimatedVec2,
+    Spring, Transition, Tween,
+};
 pub use blur::{
     blur_image, blurred_image_shape, soft_glow, soft_inner_shadow, soft_shadow, BlurQuality,
 };
@@ -72,16 +75,20 @@ pub use codegen::{
 };
 pub use devtools::{DevToolsPanel, Prop, PropRegistry, PropValue};
 pub use draw::{
-    blend_color, box_shadow, clipped_rounded_rect, dashed_path, dot_matrix, glow, gradient_rect,
-    icon, icon_loop, icon_play, icon_record, icon_stop, inner_shadow, linear_gradient_rect,
-    radial_gradient, radial_gradient_rect, scan_lines, transform_shape, vignette, DashPattern,
-    GradientDir, LayeredPainter, RadialGradientDir, RichStroke, ShadowOffset, ShapeBuilder,
+    blend_color, box_shadow, clip_to, clipped_rounded_rect, dashed_path, dot_matrix, glow,
+    gradient_rect, icon, icon_loop, icon_play, icon_record, icon_stop, inner_shadow,
+    linear_gradient_rect, radial_gradient, radial_gradient_rect, scan_lines, transform_shape,
+    vignette, with_opacity, zstack, zstack_layers, ClipShape, DashPattern, GradientDir,
+    LayeredPainter, RadialGradientDir, RichStroke, ShadowOffset, ShapeBuilder, StackAlign,
     StrokeCap, StrokeJoin, Transform2D,
 };
 pub use figma::design_tokens_from_json;
 pub use icons::icons as icon_constants;
 pub use icons::{Icon, IconButton, IconSize};
-pub use interaction::{denormalize, normalize, DragAxis, DragDelta, PanZoom};
+pub use interaction::{
+    denormalize, normalize, DragAxis, DragDelta, FocusScope, LongPressEvent, LongPressGesture,
+    PanZoom, SwipeDirection, SwipeEvent, SwipeGesture, TapEvent, TapGesture,
+};
 pub use layout::{
     aspect_ratio_fit, auto_layout, hrule, styled_frame, vrule, FlexAlign, FlexContainer,
     FlexJustify, FlexSize,
@@ -99,8 +106,8 @@ pub use svg::{
 };
 pub use swiftui::{GeometryProxy, Navigator, ScrollList, ViewModifier};
 pub use tailwind::{
-    Align, Direction, Edges, FontWeight, Justify, Size, Tw, TW_0, TW_1, TW_10, TW_12, TW_16, TW_2,
-    TW_20, TW_24, TW_3, TW_32, TW_4, TW_40, TW_48, TW_5, TW_6, TW_64, TW_8,
+    Edges, FontWeight, Size, Tw, TW_0, TW_1, TW_10, TW_12, TW_16, TW_2, TW_20, TW_24, TW_3, TW_32,
+    TW_4, TW_40, TW_48, TW_5, TW_6, TW_64, TW_8,
 };
 pub use theme::{border_rect, Border, Elevation, SemanticColors, Theme};
 pub use typography::{

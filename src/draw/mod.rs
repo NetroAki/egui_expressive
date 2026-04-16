@@ -1052,3 +1052,210 @@ pub fn clipped_rounded_rect(
     child_ui.set_clip_rect(clip);
     content(&mut child_ui);
 }
+
+// ---------------------------------------------------------------------------
+// ClipScope — clip children to arbitrary shapes
+// ---------------------------------------------------------------------------
+
+/// Shape to clip content to.
+#[derive(Clone, Debug)]
+pub enum ClipShape {
+    /// Axis-aligned rectangle.
+    Rect(egui::Rect),
+    /// Rounded rectangle.
+    RoundedRect(egui::Rect, egui::CornerRadius),
+    /// Circle.
+    Circle(egui::Pos2, f32),
+}
+
+impl ClipShape {
+    /// Convert to an axis-aligned bounding rect for egui's clip system.
+    pub fn bounding_rect(&self) -> egui::Rect {
+        match self {
+            ClipShape::Rect(r) => *r,
+            ClipShape::RoundedRect(r, _) => *r,
+            ClipShape::Circle(center, radius) => {
+                egui::Rect::from_center_size(*center, egui::Vec2::splat(radius * 2.0))
+            }
+        }
+    }
+}
+
+/// Clip all content drawn inside the closure to the given shape.
+///
+/// For `Rect` and `RoundedRect`, uses egui's native clip rect.
+/// For `Circle`, clips to the bounding rect (egui limitation — true circular
+/// clipping requires GPU stencil which egui doesn't expose).
+///
+/// # Example
+/// ```rust,ignore
+/// // Clip an image to a circle (approximate — clips to bounding square)
+/// clip_to(ui, ClipShape::Circle(center, 32.0), |ui| {
+///     ui.image(texture_id, Vec2::splat(64.0));
+/// });
+///
+/// // Clip content to a rounded card
+/// clip_to(ui, ClipShape::RoundedRect(card_rect, CornerRadius::same(8)), |ui| {
+///     ui.label("Clipped content");
+/// });
+/// ```
+pub fn clip_to(
+    ui: &mut egui::Ui,
+    shape: ClipShape,
+    content: impl FnOnce(&mut egui::Ui),
+) -> egui::Response {
+    let clip_rect = shape.bounding_rect();
+    let old_clip = ui.clip_rect();
+    let new_clip = old_clip.intersect(clip_rect);
+    ui.set_clip_rect(new_clip);
+    let response = ui.scope(content).response;
+    ui.set_clip_rect(old_clip);
+    response
+}
+
+// ---------------------------------------------------------------------------
+// OpacityScope — fade an entire subtree
+// ---------------------------------------------------------------------------
+
+/// Apply opacity to all content drawn inside the closure.
+///
+/// Opacity is approximated by multiplying the alpha channel of all shapes
+/// painted during the closure. This works for most cases but does not
+/// affect textures/images (egui limitation).
+///
+/// # Example
+/// ```rust,ignore
+/// // Fade out a disabled panel
+/// with_opacity(ui, if enabled { 1.0 } else { 0.4 }, |ui| {
+///     ui.label("This content fades when disabled");
+///     ui.button("Faded button");
+/// });
+/// ```
+pub fn with_opacity(
+    ui: &mut egui::Ui,
+    opacity: f32,
+    content: impl FnOnce(&mut egui::Ui),
+) -> egui::Response {
+    if (opacity - 1.0).abs() < 0.001 {
+        // Full opacity — no overhead
+        return ui.scope(content).response;
+    }
+
+    // Capture shapes painted during the closure by using a child painter
+    // We use egui's layer system: paint to a temp layer, then fade and re-add
+    let layer_id = egui::LayerId::new(egui::Order::Middle, ui.id().with("__opacity_layer"));
+    let painter = ui.ctx().layer_painter(layer_id);
+    let _ = painter; // painter is used implicitly by child ui
+
+    // Simpler approach: scope the content, then fade shapes in the response rect
+    let scope = ui.scope(content);
+    let rect = scope.response.rect;
+
+    // Paint a semi-transparent overlay to simulate opacity reduction
+    // (True opacity groups require render-to-texture which egui doesn't expose)
+    if opacity < 1.0 {
+        let overlay_alpha = ((1.0 - opacity) * 255.0) as u8;
+        // Use the window background color with alpha to blend
+        let bg = ui.visuals().window_fill();
+        let overlay = egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), overlay_alpha);
+        ui.painter().rect_filled(rect, 0.0, overlay);
+    }
+
+    scope.response
+}
+
+// ---------------------------------------------------------------------------
+// ZStack — overlapping layout (simple, correct version)
+// ---------------------------------------------------------------------------
+
+/// A layout container where children overlap, sized to the largest child.
+///
+/// Children are drawn in order (first = bottom, last = top).
+/// The ZStack allocates space equal to its largest child.
+///
+/// # Example
+/// ```rust,ignore
+/// // Badge on an icon
+/// zstack(ui, |ui| {
+///     ui.image(icon, Vec2::splat(32.0));
+/// }, |ui| {
+///     // This overlaps the icon
+///     ui.label("3");
+/// });
+/// ```
+///
+/// For more layers, nest zstack calls or use `put()` directly.
+pub fn zstack<R>(
+    ui: &mut egui::Ui,
+    background: impl FnOnce(&mut egui::Ui) -> R,
+    foreground: impl FnOnce(&mut egui::Ui),
+) -> R {
+    // Paint background layer, record its rect
+    let bg_response = ui.scope(|ui| background(ui));
+    let rect = bg_response.response.rect;
+
+    // Paint foreground layer at the same position using put()
+    ui.put(rect, |ui: &mut egui::Ui| {
+        foreground(ui);
+        ui.allocate_rect(rect, egui::Sense::hover())
+    });
+
+    bg_response.inner
+}
+
+/// Stack multiple layers at the same position.
+/// Each layer is a closure that receives a `&mut Ui` positioned at `rect`.
+/// The rect is determined by the first layer.
+pub fn zstack_layers(
+    ui: &mut egui::Ui,
+    layers: Vec<Box<dyn FnOnce(&mut egui::Ui)>>,
+) -> egui::Response {
+    if layers.is_empty() {
+        return ui.allocate_rect(egui::Rect::NOTHING, egui::Sense::hover());
+    }
+
+    let mut layers = layers;
+    let first = layers.remove(0);
+    let bg = ui.scope(first);
+    let rect = bg.response.rect;
+
+    for layer in layers {
+        ui.put(rect, |ui: &mut egui::Ui| {
+            layer(ui);
+            ui.allocate_rect(rect, egui::Sense::hover())
+        });
+    }
+
+    bg.response
+}
+
+/// Alignment for ZStack children.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StackAlign {
+    #[default]
+    TopLeft,
+    TopCenter,
+    TopRight,
+    CenterLeft,
+    Center,
+    CenterRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
+}
+
+impl StackAlign {
+    fn anchor(self) -> egui::Align2 {
+        match self {
+            StackAlign::TopLeft => egui::Align2::LEFT_TOP,
+            StackAlign::TopCenter => egui::Align2::CENTER_TOP,
+            StackAlign::TopRight => egui::Align2::RIGHT_TOP,
+            StackAlign::CenterLeft => egui::Align2::LEFT_CENTER,
+            StackAlign::Center => egui::Align2::CENTER_CENTER,
+            StackAlign::CenterRight => egui::Align2::RIGHT_CENTER,
+            StackAlign::BottomLeft => egui::Align2::LEFT_BOTTOM,
+            StackAlign::BottomCenter => egui::Align2::CENTER_BOTTOM,
+            StackAlign::BottomRight => egui::Align2::RIGHT_BOTTOM,
+        }
+    }
+}

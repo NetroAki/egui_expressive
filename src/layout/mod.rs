@@ -143,6 +143,8 @@ pub fn vrule(ui: &mut egui::Ui, color: Color32, thickness: f32) {
 ///
 /// Lays out children vertically with consistent spacing.
 ///
+/// For more control over justify/align, use `FlexContainer` directly.
+///
 /// # Parameters (all optional):
 /// - `gap: f32` — Item spacing (defaults to 0)
 /// - `padding: f32` — Uniform padding (or `[h, v]` for horizontal/vertical)
@@ -308,6 +310,8 @@ macro_rules! vstack_impl {
 /// Horizontal stack layout (Figma-style).
 ///
 /// Lays out children horizontally with consistent spacing.
+///
+/// For more control over justify/align, use `FlexContainer` directly.
 ///
 /// # Parameters (all optional):
 /// - `gap: f32` — Item spacing (defaults to 0)
@@ -664,6 +668,7 @@ pub enum FlexAlign {
     Center,
     End,
     Stretch,
+    Baseline,
 }
 
 /// Justification of children along the main axis.
@@ -673,6 +678,8 @@ pub enum FlexJustify {
     Center,
     End,
     SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
 }
 
 /// A flex container that maps Figma Auto Layout parameters to egui layout.
@@ -837,59 +844,55 @@ impl FlexContainer {
             // Apply gap
             ui.spacing_mut().item_spacing = egui::Vec2::splat(gap);
 
-            // Apply cross-axis alignment
+            // Apply cross-axis alignment and main-axis justification
             let layout = match direction {
-                egui::Direction::LeftToRight | egui::Direction::RightToLeft => match align {
-                    FlexAlign::Center => egui::Layout::left_to_right(egui::Align::Center),
-                    FlexAlign::End => egui::Layout::left_to_right(egui::Align::Max),
-                    _ => egui::Layout::left_to_right(egui::Align::Min),
-                },
-                _ => match align {
-                    FlexAlign::Center => egui::Layout::top_down(egui::Align::Center),
-                    FlexAlign::End => egui::Layout::top_down(egui::Align::Max),
-                    _ => egui::Layout::top_down(egui::Align::Min),
-                },
+                egui::Direction::LeftToRight | egui::Direction::RightToLeft => {
+                    let base = match align {
+                        FlexAlign::Center => egui::Layout::left_to_right(egui::Align::Center),
+                        FlexAlign::End => egui::Layout::left_to_right(egui::Align::Max),
+                        FlexAlign::Stretch => egui::Layout::left_to_right(egui::Align::Max),
+                        FlexAlign::Baseline => egui::Layout::left_to_right(egui::Align::Min),
+                        _ => egui::Layout::left_to_right(egui::Align::Min),
+                    };
+                    match justify {
+                        FlexJustify::Center => {
+                            egui::Layout::centered_and_justified(egui::Direction::LeftToRight)
+                        }
+                        FlexJustify::End => egui::Layout::right_to_left(egui::Align::Center),
+                        FlexJustify::SpaceBetween => base.with_main_justify(true),
+                        FlexJustify::SpaceAround | FlexJustify::SpaceEvenly => {
+                            // SpaceAround and SpaceEvenly require custom handling in immediate mode.
+                            // Use SpaceBetween as approximation since egui doesn't natively support these.
+                            base.with_main_justify(true)
+                        }
+                        _ => base, // Start
+                    }
+                }
+                _ => {
+                    // TopDown (Column)
+                    let base = match align {
+                        FlexAlign::Center => egui::Layout::top_down(egui::Align::Center),
+                        FlexAlign::End => egui::Layout::top_down(egui::Align::Max),
+                        FlexAlign::Stretch => egui::Layout::top_down(egui::Align::Max),
+                        FlexAlign::Baseline => egui::Layout::top_down(egui::Align::Min),
+                        _ => egui::Layout::top_down(egui::Align::Min),
+                    };
+                    match justify {
+                        FlexJustify::Center => {
+                            egui::Layout::centered_and_justified(egui::Direction::TopDown)
+                        }
+                        FlexJustify::End => egui::Layout::bottom_up(egui::Align::Center),
+                        FlexJustify::SpaceBetween => base.with_main_justify(true),
+                        FlexJustify::SpaceAround | FlexJustify::SpaceEvenly => {
+                            base.with_main_justify(true)
+                        }
+                        _ => base, // Start
+                    }
+                }
             };
 
             ui.with_layout(layout, |ui| {
-                if justify == FlexJustify::SpaceBetween {
-                    // For SpaceBetween, we use a special approach: render children,
-                    // then between each pair add spacers to push them apart.
-                    // Since egui is immediate mode, we approximate by using egui's native
-                    // main-axis justification with a custom layout approach.
-                    let available = if direction == egui::Direction::LeftToRight {
-                        ui.available_width()
-                    } else {
-                        ui.available_height()
-                    };
-
-                    // We'll use a two-pass approach: first render to measure, then render with spacers
-                    // However, egui's immediate mode makes this tricky. Instead, we use
-                    // ui.add_space strategically after each item except the last.
-                    //
-                    // Since we can't easily know which is the "last" item without custom tracking,
-                    // we use a workaround: render all children, then go back and insert spacers.
-                    // This is approximated by rendering children and adding spacers between them.
-
-                    // Simple approach: render content, but use egui's built-in SpaceBetween
-                    // if available via main_justify. Otherwise, we approximate.
-                    let available = available.max(0.0);
-                    let _ = available;
-
-                    // For a proper SpaceBetween, we'd need to know item sizes.
-                    // As an approximation, we render items and hope the layout hints work.
-                    add_contents(ui);
-                } else {
-                    if justify == FlexJustify::Center {
-                        let avail = if direction == egui::Direction::LeftToRight {
-                            ui.available_width()
-                        } else {
-                            ui.available_height()
-                        };
-                        let _ = avail;
-                    }
-                    add_contents(ui);
-                }
+                add_contents(ui);
             });
         });
 

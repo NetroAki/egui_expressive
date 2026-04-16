@@ -844,3 +844,88 @@ pub fn transition_color(
     let tween = Tween::new(id, t.duration, t.easing);
     tween.animate_color(ctx, target, default)
 }
+
+// ---------------------------------------------------------------------------
+// AnimatedState<T> — animate-on-change wrapper
+// ---------------------------------------------------------------------------
+
+/// A value that automatically animates toward a target using spring physics.
+///
+/// Store in egui memory via `StateSlot` or as part of your widget state.
+/// Call `set()` to change the target, `get()` every frame to read the current value.
+///
+/// # Example
+/// ```rust,ignore
+/// let mut anim = AnimatedF32::spring(ui.id().with("opacity"), 0.0);
+/// anim.set(if hovered { 1.0 } else { 0.0 });
+/// let opacity = anim.get(ui.ctx());
+/// ```
+pub struct AnimatedState<T: crate::style::Lerp + Clone + Copy + 'static + Send + Sync> {
+    id: egui::Id,
+    pub target: T,
+    stiffness: f32,
+    damping: f32,
+}
+
+impl<T: crate::style::Lerp + Clone + Copy + 'static + Send + Sync> AnimatedState<T> {
+    /// Create with spring physics. `initial` is both the starting and target value.
+    pub fn spring(id: egui::Id, initial: T) -> Self {
+        Self {
+            id,
+            target: initial,
+            stiffness: 200.0,
+            damping: 20.0,
+        }
+    }
+
+    /// Adjust spring parameters.
+    pub fn with_spring(mut self, stiffness: f32, damping: f32) -> Self {
+        self.stiffness = stiffness;
+        self.damping = damping;
+        self
+    }
+
+    /// Set the target. Animation starts on next `get()` call.
+    pub fn set(&mut self, target: T) {
+        self.target = target;
+    }
+
+    /// Get the current animated value. Must be called every frame.
+    /// Internally drives a spring from the stored `from` value toward `target`.
+    pub fn get(&self, ctx: &egui::Context) -> T {
+        // Retrieve stored "from" value (defaults to target = no animation)
+        let from: T = ctx
+            .data(|d| d.get_temp(self.id.with("__as_from")))
+            .unwrap_or(self.target);
+
+        // Animate t: 0.0 → 1.0 using spring
+        let spring = Spring::new(self.id.with("__as_spring"), self.stiffness, self.damping);
+        let t = spring.animate(ctx, 1.0, 0.0);
+
+        // When animation settles (t ≈ 1.0), update "from" to current target
+        if (t - 1.0).abs() < 0.001 {
+            ctx.data_mut(|d| d.insert_temp(self.id.with("__as_from"), self.target));
+        }
+
+        T::lerp(&from, &self.target, t)
+    }
+
+    /// Snap to target immediately, no animation.
+    pub fn snap(&self, ctx: &egui::Context) {
+        ctx.data_mut(|d| d.insert_temp(self.id.with("__as_from"), self.target));
+        // Reset spring
+        ctx.data_mut(|d| {
+            d.insert_temp::<f32>(self.id.with("__as_spring").with("__spring_pos"), 1.0)
+        });
+        ctx.data_mut(|d| {
+            d.insert_temp::<f32>(self.id.with("__as_spring").with("__spring_vel"), 0.0)
+        });
+    }
+}
+
+/// Animated f32 value.
+pub type AnimatedF32 = AnimatedState<f32>;
+/// Animated Color32 value.
+pub type AnimatedColor = AnimatedState<egui::Color32>;
+/// Animated Vec2 value.
+pub type AnimatedVec2 = AnimatedState<egui::Vec2>;
