@@ -2889,6 +2889,256 @@ impl egui::Widget for VerticalDrag<'_> {
 }
 
 // ---------------------------------------------------------------------------
+// DragNumber
+// ---------------------------------------------------------------------------
+
+/// A draggable numeric display. Click-drag horizontally to change value.
+/// Shift = fine control. Double-click to type. Right-click to reset.
+///
+/// # Example
+/// ```rust,ignore
+/// ui.add(DragNumber::new(&mut self.bpm, 60.0..=300.0)
+///     .label("BPM")
+///     .default_value(120.0)
+///     .speed(1.0)
+///     .decimals(1));
+/// ```
+pub struct DragNumber<'a> {
+    value: &'a mut f64,
+    range: RangeInclusive<f64>,
+    label: Option<String>,
+    default_value: Option<f64>,
+    speed: f64,
+    decimals: usize,
+    width: f32,
+    prefix: Option<String>,
+    suffix: Option<String>,
+}
+
+impl<'a> DragNumber<'a> {
+    pub fn new(value: &'a mut f64, range: RangeInclusive<f64>) -> Self {
+        Self {
+            value,
+            range,
+            label: None,
+            default_value: None,
+            speed: 1.0,
+            decimals: 0,
+            width: 64.0,
+            prefix: None,
+            suffix: None,
+        }
+    }
+
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    pub fn default_value(mut self, v: f64) -> Self {
+        self.default_value = Some(v);
+        self
+    }
+
+    pub fn speed(mut self, speed: f64) -> Self {
+        self.speed = speed;
+        self
+    }
+
+    pub fn decimals(mut self, d: usize) -> Self {
+        self.decimals = d;
+        self
+    }
+
+    pub fn width(mut self, w: f32) -> Self {
+        self.width = w;
+        self
+    }
+
+    pub fn prefix(mut self, p: impl Into<String>) -> Self {
+        self.prefix = Some(p.into());
+        self
+    }
+
+    pub fn suffix(mut self, s: impl Into<String>) -> Self {
+        self.suffix = Some(s.into());
+        self
+    }
+}
+
+impl<'a> egui::Widget for DragNumber<'a> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let height = 22.0_f32;
+        let label_height = if self.label.is_some() { 14.0_f32 } else { 0.0 };
+        let total_height = height + label_height;
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(self.width, total_height), Sense::click_and_drag());
+
+        let id = response.id;
+        let is_editing: bool = ui
+            .ctx()
+            .data(|d| d.get_temp(id.with("editing")).unwrap_or(false));
+
+        // --- Editing mode (text input) ---
+        if is_editing {
+            let edit_str: String = ui.ctx().data(|d| {
+                d.get_temp(id.with("edit_str"))
+                    .unwrap_or_else(|| format!("{:.prec$}", *self.value, prec = self.decimals))
+            });
+
+            let mut buf = edit_str.clone();
+            let text_rect = Rect::from_min_size(
+                rect.min + Vec2::new(0.0, label_height),
+                Vec2::new(self.width, height),
+            );
+            let te_resp = ui.put(
+                text_rect,
+                egui::TextEdit::singleline(&mut buf)
+                    .desired_width(self.width)
+                    .font(egui::TextStyle::Monospace),
+            );
+
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(id.with("edit_str"), buf.clone()));
+
+            if te_resp.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if let Ok(v) = buf.trim().parse::<f64>() {
+                    *self.value = v.clamp(*self.range.start(), *self.range.end());
+                }
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(id.with("editing"), false);
+                    d.remove::<String>(id.with("edit_str"));
+                });
+            } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(id.with("editing"), false);
+                    d.remove::<String>(id.with("edit_str"));
+                });
+            }
+
+            return response;
+        }
+
+        // --- Drag interaction ---
+        if response.double_clicked() {
+            let s = format!("{:.prec$}", *self.value, prec = self.decimals);
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(id.with("editing"), true);
+                d.insert_temp(id.with("edit_str"), s);
+            });
+        } else if response.secondary_clicked() {
+            if let Some(def) = self.default_value {
+                *self.value = def;
+            }
+        } else if response.dragged() {
+            let delta = response.drag_delta().x as f64;
+            let fine = ui.input(|i| i.modifiers.shift);
+            let multiplier = if fine { 0.1 } else { 1.0 };
+            *self.value = (*self.value + delta * self.speed * multiplier)
+                .clamp(*self.range.start(), *self.range.end());
+        }
+
+        // --- Paint ---
+        if ui.is_rect_visible(rect) {
+            let painter = ui.painter();
+            let visuals = ui.visuals();
+
+            let hovered = response.hovered();
+            let dragging = response.dragged();
+
+            let bg_color = if dragging {
+                Color32::from_gray(55)
+            } else if hovered {
+                Color32::from_gray(45)
+            } else {
+                Color32::from_gray(35)
+            };
+
+            let value_rect = Rect::from_min_size(
+                rect.min + Vec2::new(0.0, label_height),
+                Vec2::new(self.width, height),
+            );
+
+            // Background
+            painter.rect_filled(value_rect, egui::CornerRadius::same(3u8), bg_color);
+
+            // Subtle left accent line when hovered/dragging
+            if hovered || dragging {
+                painter.rect_filled(
+                    Rect::from_min_size(value_rect.min, Vec2::new(2.0, height)),
+                    egui::CornerRadius::ZERO,
+                    Color32::from_rgb(100, 160, 255),
+                );
+            }
+
+            // Value text
+            let display = {
+                let mut s = String::new();
+                if let Some(ref p) = self.prefix {
+                    s.push_str(p);
+                }
+                s.push_str(&format!("{:.prec$}", *self.value, prec = self.decimals));
+                if let Some(ref sfx) = self.suffix {
+                    s.push_str(sfx);
+                }
+                s
+            };
+
+            let text_color = if dragging {
+                Color32::WHITE
+            } else {
+                visuals.text_color()
+            };
+
+            painter.text(
+                value_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                &display,
+                egui::FontId::monospace(13.0),
+                text_color,
+            );
+
+            // Label above
+            if let Some(ref lbl) = self.label {
+                painter.text(
+                    Rect::from_min_size(rect.min, Vec2::new(self.width, label_height)).center(),
+                    egui::Align2::CENTER_CENTER,
+                    lbl.as_str(),
+                    egui::FontId::proportional(10.0),
+                    Color32::from_gray(140),
+                );
+            }
+
+            // Drag cursor hint arrows (◀ ▶) when hovered
+            if hovered && !dragging {
+                let arrow_color = Color32::from_gray(120);
+                let cy = value_rect.center().y;
+                let lx = value_rect.min.x + 5.0;
+                let rx = value_rect.max.x - 5.0;
+                // left arrow ◀
+                painter.text(
+                    Pos2::new(lx, cy),
+                    egui::Align2::LEFT_CENTER,
+                    "◀",
+                    egui::FontId::proportional(8.0),
+                    arrow_color,
+                );
+                // right arrow ▶
+                painter.text(
+                    Pos2::new(rx, cy),
+                    egui::Align2::RIGHT_CENTER,
+                    "▶",
+                    egui::FontId::proportional(8.0),
+                    arrow_color,
+                );
+            }
+        }
+
+        response
+    }
+}
+
+// ---------------------------------------------------------------------------
 // CollapsePanel
 // ---------------------------------------------------------------------------
 

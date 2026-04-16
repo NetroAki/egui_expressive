@@ -75,10 +75,10 @@ pub use tailwind::{
     TW_20, TW_24, TW_3, TW_32, TW_4, TW_40, TW_48, TW_5, TW_6, TW_64, TW_8,
 };
 pub use widgets::{
-    ChannelStrip, ClipKind, CollapsePanel, ContextMenuBuilder, DotState, DragReorder, Fader,
-    FloatingPanel, Knob, KnobSize, KnobStyle, Meter, Orientation, ResizableSplit, Ruler, SplitAxis,
-    StepGrid, TabBar, TimelineClip, ToggleDot, TransportButton, TransportKind, TreeNode, TreeView,
-    VerticalDrag, Waveform,
+    ChannelStrip, ClipKind, CollapsePanel, ContextMenuBuilder, DotState, DragNumber, DragReorder,
+    Fader, FloatingPanel, Knob, KnobSize, KnobStyle, Meter, Orientation, ResizableSplit, Ruler,
+    SplitAxis, StepGrid, TabBar, TimelineClip, ToggleDot, TransportButton, TransportKind, TreeNode,
+    TreeView, VerticalDrag, Waveform,
 };
 
 // M3 Material Design 3 foundation modules
