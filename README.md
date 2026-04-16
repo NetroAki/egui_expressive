@@ -1,78 +1,115 @@
 # egui_expressive
 
-An authoring-layer helper library on top of egui 0.31. If you've found yourself rewriting the same widgets, state machines, and easing curves across every egui project, this is for you.
+**A batteries-included extension crate for [egui](https://github.com/emilk/egui) 0.34** — design tokens, Material Design 3 widgets, animation primitives, blur effects, DAW-style controls, layout macros, and more.
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE-MIT)
+[![egui: 0.34](https://img.shields.io/badge/egui-0.34-orange.svg)](https://github.com/emilk/egui)
 
 ## Installation
 
 ```toml
 [dependencies]
-egui_expressive = "0.1"
+egui_expressive = { git = "https://github.com/NetroAki/egui_expressive" }
+egui = "0.34"
+
+[dev-dependencies]
+eframe = "0.34"
 ```
 
-## What's inside
+## Modules
 
-The crate is organized into focused modules. Not everything may work on your target (some parts need a GPU for blur), but the split makes it easy to import only what you need.
+| Module | Description |
+|--------|-------------|
+| `animation` | `Tween`, `Spring`, `Transition` — frame-rate-independent animation with 10+ easing curves |
+| `blur` | Soft shadows, glow, inner shadows, and CPU-side image blur approximations |
+| `debug` | Debug overlays, `debug_label`, `debug_interaction` (enabled by default via `debug` feature) |
+| `devtools` | Live-tweakable `Prop` system with `DevToolsPanel` inspector — no-ops in release builds |
+| `draw` | `ShapeBuilder`, `LayeredPainter`, gradients (linear + radial), box shadows, icons, scan-lines, vignette |
+| `figma` | Figma design-token import and `figma-export` CLI binary |
+| `interaction` | `DragDelta`, `DragAxis`, `PanZoom` — pointer and gesture helpers |
+| `layout` | `vstack!`/`hstack!`/`zstack!` macros, `auto_layout`, `styled_frame`, dividers |
+| `m3` | Full Material Design 3 component set — buttons, cards, navigation, dialogs, FABs, and more |
+| `state` | `StateSlot<T>`, `StateMachine<S>`, `InteractionState` |
+| `style` | `DesignTokens`, `SurfacePalette`, `AccentColors`, `TextStyles`, `VisualState<T>`, theming utilities |
+| `surface` | `LargeCanvas` and `ViewportCuller` for virtual canvases larger than 50k px |
+| `swiftui` | SwiftUI-inspired `ViewModifier`, `GeometryProxy`, `Navigator`, `ScrollList` |
+| `tailwind` | `Tw` style builder with Tailwind-like spacing, sizing, and layout DSL |
+| `widgets` | DAW controls (Knob, Fader, Meter, StepGrid, DragNumber), layout widgets (ResizableSplit, TabBar, TreeView, CollapsePanel, DragReorder), timeline (TimelineClip, Ruler, Waveform), and more |
 
-| Module | What it gives you |
-|--------|-------------------|
-| `draw` | LayeredPainter, ShapeBuilder, box shadows, gradients, icon helpers |
-| `style` | VisualState\<T\>, DesignTokens, SurfacePalette, AccentColors, Lerp, TextStyles |
-| `state` | StateSlot\<T\>, StateMachine\<S\>, InteractionState |
-| `interaction` | DragDelta, PanZoom, drag_to_value_delta |
-| `animation` | Easing (10+ variants), Tween, Spring, AnimSequence, Transition |
-| `surface` | LargeCanvas, ViewportCuller — for virtual canvases larger than 50k px |
-| `widgets` | Knob, Fader, Meter, StepGrid, ChannelStrip, TimelineClip, Ruler, Waveform, ResizableSplit, TabBar, TreeView, FloatingPanel, ContextMenuBuilder, ToggleDot, TransportButton |
-| `debug` | DebugOverlay, debug_label, debug_interaction |
-| `blur` | Gaussian soft shadows and software blur (CPU-side) |
-| `devtools` | Runtime visual property editor, no-ops in release builds |
-| `figma` | Figma Tokens JSON to Rust DesignTokens CLI exporter |
-| `layout` | vstack!, hstack!, zstack! macros |
-| `m3` | Full Material Design 3 — 21 components |
-| `tailwind` | Tw style builder with Tailwind utility methods and SwiftUI aliases |
-| `swiftui` | Navigator, ScrollList, GeometryProxy, ViewModifier |
+## Feature Flags
 
-## Example
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `debug` | ✅ | Enables `DebugOverlay`, `debug_label`, `debug_interaction`, and `DevToolsPanel` |
+
+## Quick Example
 
 ```rust
-use egui_expressive::{vstack, Knob, KnobStyle, DesignTokens};
+use egui_expressive::{Knob, KnobStyle, DragNumber, vstack};
 
-// Store gain somewhere in your app state.
-let mut gain: f64 = 0.75;
+struct MyApp {
+    gain: f64,
+    bpm: f64,
+}
 
-vstack!(ui, gap: 12.0, {
-    ui.add(
-        Knob::new(&mut gain, 0.0..=1.0)
-            .style(KnobStyle::Default)
-            .label("Gain"),
-    );
-    ui.label(format!("{:.2}", gain));
-});
+impl eframe::App for MyApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            vstack!(ui, gap: 12.0, {
+                ui.add(
+                    Knob::new(&mut self.gain, 0.0..=1.0)
+                        .style(KnobStyle::Default)
+                        .label("GAIN"),
+                );
+                ui.add(
+                    DragNumber::new(&mut self.bpm, 60.0..=300.0)
+                        .label("BPM")
+                        .default_value(120.0)
+                        .decimals(1),
+                );
+            });
+        });
+    }
+}
 ```
 
-## Figma Token Exporter
-
-```bash
-cargo run --bin figma-export -- tokens.json
-```
-
-Feed it the JSON export from the Figma Tokens plugin. It prints Rust code with your colors, spacing, and rounding values — pipe it wherever you want.
-
-## M3 Components
-
-The m3 module covers most of MD3. Here's a button:
+## Material Design 3
 
 ```rust
 use egui_expressive::{M3Button, M3Theme};
 
-// Apply the theme once at startup.
+// Apply theme once at startup
 M3Theme::dark().store(ctx);
 
-// Then use components anywhere.
+// Use components anywhere
 ui.add(M3Button::new("Save").tonal());
+ui.add(M3Button::new("Cancel").outlined());
 ```
 
-The components don't force you into the full MD3 system. Use one, use five, ignore the rest.
+The `m3` module covers buttons, cards, switches, checkboxes, chips, progress indicators, sliders, text fields, navigation bars/rails, top app bars, list items, dialogs, snackbars, FABs, and dropdown menus.
+
+## Figma Integration
+
+Export design tokens from Figma using the included plugin (`figma-plugin/`) or the CLI:
+
+```bash
+cargo run --bin figma-export -- tokens.json > src/design_tokens.rs
+```
+
+## Examples
+
+```bash
+cargo run --example daw_strip       # DAW channel strip: Knob + Fader + Meter + StepGrid
+cargo run --example step_sequencer  # BPM-driven step sequencer
+cargo run --example timeline        # Large timeline canvas with viewport culling
+```
+
+## Documentation
+
+📖 **[Wiki](../../wiki)** — full guides for every module:
+
+[Getting Started](../../wiki/Getting-Started) · [Animation](../../wiki/Animation) · [Blur Effects](../../wiki/Blur-Effects) · [Drawing & Shapes](../../wiki/Drawing-and-Shapes) · [Interaction](../../wiki/Interaction) · [Layout Macros](../../wiki/Layout-Macros) · [Material Design 3](../../wiki/Material-Design-3) · [State Management](../../wiki/State-Management) · [Style & Theming](../../wiki/Style-and-Theming) · [SwiftUI Patterns](../../wiki/SwiftUI-Patterns) · [Large Surfaces](../../wiki/Large-Surfaces) · [Widgets](../../wiki/Widgets) · [Debug & DevTools](../../wiki/Debug-and-DevTools) · [Figma Integration](../../wiki/Figma-Integration) · [Cookbook](../../wiki/Cookbook)
 
 ## License
 
-Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your option. Both licenses permit commercial use.
+MIT
