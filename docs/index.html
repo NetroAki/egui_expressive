@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>egui_expressive Documentation</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     <style>
         :root {
             /* Material Design 3 Dark Theme Tokens */
@@ -173,6 +174,15 @@
         .nav-item .icon {
             margin-right: 12px;
             font-size: 20px;
+        }
+
+        .material-symbols-outlined {
+          font-variation-settings: 'FILL' 0, 'wght' 300, 'OPSZ' 20;
+          font-size: 18px;
+          vertical-align: middle;
+          line-height: 1;
+          color: inherit;
+          opacity: 0.85;
         }
 
         .nav-label {
@@ -391,19 +401,19 @@
 
     <nav class="navigation-drawer" id="drawer">
         <ul class="nav-list">
-            <li><a href="#overview" class="nav-item active"><span class="icon">📖</span> Overview</a></li>
-            <li><a href="#getting-started" class="nav-item"><span class="icon">📦</span> Getting Started</a></li>
-            <li><a href="#principles" class="nav-item"><span class="icon">🏗️</span> Principles</a></li>
+            <li><a href="#overview" class="nav-item active"><span class="icon"><span class="material-symbols-outlined">menu_book</span></span> Overview</a></li>
+            <li><a href="#getting-started" class="nav-item"><span class="icon"><span class="material-symbols-outlined">package_2</span></span> Getting Started</a></li>
+            <li><a href="#principles" class="nav-item"><span class="icon"><span class="material-symbols-outlined">architecture</span></span> Principles</a></li>
             <li><hr class="divider"></li>
             <li class="nav-label">Modules</li>
-            <li><a href="#module-draw" class="nav-item"><span class="icon">🎨</span> draw</a></li>
-            <li><a href="#module-style" class="nav-item"><span class="icon">🎨</span> style</a></li>
-            <li><a href="#module-state" class="nav-item"><span class="icon">⚙️</span> state</a></li>
-            <li><a href="#module-interaction" class="nav-item"><span class="icon">🖱️</span> interaction</a></li>
-            <li><a href="#module-animation" class="nav-item"><span class="icon">🎬</span> animation</a></li>
-            <li><a href="#module-surface" class="nav-item"><span class="icon">🗺️</span> surface</a></li>
-            <li><a href="#module-widgets" class="nav-item"><span class="icon">🎛️</span> widgets</a></li>
-            <li><a href="#module-debug" class="nav-item"><span class="icon">🐛</span> debug</a></li>
+            <li><a href="#module-draw" class="nav-item"><span class="icon"><span class="material-symbols-outlined">brush</span></span> draw</a></li>
+            <li><a href="#module-style" class="nav-item"><span class="icon"><span class="material-symbols-outlined">palette</span></span> style</a></li>
+            <li><a href="#module-state" class="nav-item"><span class="icon"><span class="material-symbols-outlined">settings</span></span> state</a></li>
+            <li><a href="#module-interaction" class="nav-item"><span class="icon"><span class="material-symbols-outlined">mouse</span></span> interaction</a></li>
+            <li><a href="#module-animation" class="nav-item"><span class="icon"><span class="material-symbols-outlined">animation</span></span> animation</a></li>
+            <li><a href="#module-surface" class="nav-item"><span class="icon"><span class="material-symbols-outlined">map</span></span> surface</a></li>
+            <li><a href="#module-widgets" class="nav-item"><span class="icon"><span class="material-symbols-outlined">tune</span></span> widgets</a></li>
+            <li><a href="#module-debug" class="nav-item"><span class="icon"><span class="material-symbols-outlined">bug_report</span></span> debug</a></li>
         </ul>
     </nav>
 
@@ -424,7 +434,7 @@
             </section>
 
             <section id="getting-started" class="section">
-                <h2>📦 Getting Started</h2>
+                <h2><span class="material-symbols-outlined">package_2</span> Getting Started</h2>
                 <p>Add the following to your <code>Cargo.toml</code>:</p>
                 <div class="code-container">
                     <button class="copy-btn" aria-label="Copy code">
@@ -440,7 +450,7 @@
             </section>
 
             <section id="principles" class="section">
-                <h2>🏗️ Design Principles</h2>
+                <h2><span class="material-symbols-outlined">architecture</span> Design Principles</h2>
                 <div class="principles-grid">
                     <div class="principle-card">
                         <h4>1. egui-is-the-floor</h4>
@@ -469,7 +479,7 @@
                 <h2>Modules</h2>
                 
                 <div class="card">
-                    <h3><span class="icon">🎨</span> draw</h3>
+                    <h3><span class="icon"><span class="material-symbols-outlined">brush</span></span> draw</h3>
                     <p>Layered Painter Helpers</p>
                     
                     <h4>Key Types</h4>
@@ -512,7 +522,7 @@
 
             <section id="module-style" class="section">
                 <div class="card">
-                    <h3><span class="icon">🎨</span> style</h3>
+                    <h3><span class="icon"><span class="material-symbols-outlined">palette</span></span> style</h3>
                     <p>Visual State System</p>
                     
                     <h4>Key Types</h4>
@@ -549,7 +559,7 @@
 
             <section id="module-state" class="section">
                 <div class="card">
-                    <h3><span class="icon">⚙️</span> state</h3>
+                    <h3><span class="icon"><span class="material-symbols-outlined">settings</span></span> state</h3>
                     <p>State Machines</p>
                     
                     <h4>Key Types</h4>
@@ -579,7 +589,7 @@
 
             <section id="module-interaction" class="section">
                 <div class="card">
-                    <h3><span class="icon">🖱️</span> interaction</h3>
+                    <h3><span class="icon"><span class="material-symbols-outlined">mouse</span></span> interaction</h3>
                     <p>Drag & Gesture Helpers</p>
                     
                     <h4>Key Types</h4>
@@ -609,7 +619,7 @@
 
             <section id="module-animation" class="section">
                 <div class="card">
-                    <h3><span class="icon">🎬</span> animation</h3>
+                    <h3><span class="icon"><span class="material-symbols-outlined">animation</span></span> animation</h3>
                     <p>Easing & Spring Physics</p>
                     
                     <h4>Key Types</h4>
@@ -635,7 +645,7 @@
 
             <section id="module-surface" class="section">
                 <div class="card">
-                    <h3><span class="icon">🗺️</span> surface</h3>
+                    <h3><span class="icon"><span class="material-symbols-outlined">map</span></span> surface</h3>
                     <p>Large Canvas & Viewport Culling</p>
                     
                     <h4>Key Types</h4>
@@ -673,7 +683,7 @@ LargeCanvas::<span class="fn">new</span>(id, egui::<span class="fn">vec2</span>(
 
             <section id="module-widgets" class="section">
                 <div class="card">
-                    <h3><span class="icon">🎛️</span> widgets</h3>
+                    <h3><span class="icon"><span class="material-symbols-outlined">tune</span></span> widgets</h3>
                     <p>Reusable Controls</p>
                     
                     <h4>Key Types</h4>
@@ -710,7 +720,7 @@ ui.<span class="fn">add</span>(StepGrid::<span class="fn">new</span>(<span class
 
             <section id="module-debug" class="section">
                 <div class="card">
-                    <h3><span class="icon">🐛</span> debug</h3>
+                    <h3><span class="icon"><span class="material-symbols-outlined">bug_report</span></span> debug</h3>
                     <p>Visual Debugging</p>
                     
                     <h4>Key Types</h4>
