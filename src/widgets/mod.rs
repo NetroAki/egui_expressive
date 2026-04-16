@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 
-//! Reusable DAW-class controls: Knob, Fader, Meter, StepGrid.
+//! Reusable controls: Knob, Fader, Meter, StepGrid, and more.
+//! DAW-specific widgets are also accessible via the `daw` feature module.
 
+use crate::interaction::DragAxis;
 use egui::{
     emath::Vec2 as EMathVec2,
     epaint::{PathShape, PathStroke},
@@ -58,6 +60,109 @@ impl KnobSize {
             KnobSize::Md => 48.0,
             KnobSize::Lg => 64.0,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ContinuousControl — drag-to-value primitive
+// ---------------------------------------------------------------------------
+
+/// The core interaction primitive for any continuous-value control.
+/// Handles drag, normalization, shift-for-fine, and double-click-reset.
+/// Use this to build knobs, faders, sliders, or any custom control.
+///
+/// # Example
+/// ```rust,ignore
+/// let mut ctrl = ContinuousControl::new(&mut value, 0.0..=1.0);
+/// let response = ui.allocate_rect(rect, Sense::drag());
+/// let t = ctrl.handle(ui, &response); // returns normalized 0.0..=1.0
+/// ```
+pub struct ContinuousControl<'a> {
+    value: &'a mut f64,
+    range: RangeInclusive<f64>,
+    /// Pixels of drag to traverse the full range. Default: 200.0
+    pub sensitivity: f32,
+    /// Multiplier applied when Shift is held. Default: 0.1
+    pub fine_multiplier: f32,
+    /// Value to reset to on double-click. None = no reset.
+    pub default_value: Option<f64>,
+    /// Which axis drives the value. Default: Y (drag up = increase).
+    pub axis: DragAxis,
+}
+
+impl<'a> ContinuousControl<'a> {
+    pub fn new(value: &'a mut f64, range: RangeInclusive<f64>) -> Self {
+        Self {
+            value,
+            range,
+            sensitivity: 200.0,
+            fine_multiplier: 0.1,
+            default_value: None,
+            axis: DragAxis::Y,
+        }
+    }
+
+    pub fn sensitivity(mut self, s: f32) -> Self {
+        self.sensitivity = s;
+        self
+    }
+    pub fn fine_multiplier(mut self, m: f32) -> Self {
+        self.fine_multiplier = m;
+        self
+    }
+    pub fn default_value(mut self, v: f64) -> Self {
+        self.default_value = Some(v);
+        self
+    }
+    pub fn axis(mut self, a: DragAxis) -> Self {
+        self.axis = a;
+        self
+    }
+
+    /// Process interaction for the given response. Call after `ui.allocate_rect()`.
+    /// Returns the normalized value (0.0..=1.0).
+    pub fn handle(&mut self, ui: &Ui, response: &Response) -> f32 {
+        let min = *self.range.start();
+        let max = *self.range.end();
+        let range_span = (max - min) as f32;
+
+        if response.dragged() {
+            let raw_delta = match self.axis {
+                DragAxis::Y => -response.drag_delta().y, // up = increase
+                DragAxis::X => response.drag_delta().x,
+                DragAxis::Free => {
+                    let d = response.drag_delta();
+                    if d.x.abs() > d.y.abs() {
+                        d.x
+                    } else {
+                        -d.y
+                    }
+                }
+            };
+            let multiplier = if ui.input(|i| i.modifiers.shift) {
+                self.fine_multiplier
+            } else {
+                1.0
+            };
+            let speed = range_span / self.sensitivity;
+            let delta = (raw_delta as f64) * speed as f64 * multiplier as f64;
+            *self.value = (*self.value + delta).clamp(min, max);
+        }
+
+        if response.double_clicked() {
+            if let Some(default) = self.default_value {
+                *self.value = default;
+            }
+        }
+
+        self.normalized()
+    }
+
+    /// Returns the current value normalized to 0.0..=1.0.
+    pub fn normalized(&self) -> f32 {
+        let min = *self.range.start();
+        let max = *self.range.end();
+        ((*self.value - min) / (max - min)).clamp(0.0, 1.0) as f32
     }
 }
 
@@ -131,29 +236,11 @@ impl<'a> egui::Widget for Knob<'a> {
             Sense::click_and_drag(),
         );
 
-        // Handle drag
-        if response.dragged() {
-            let range_span = (*self.range.end() - *self.range.start()) as f32;
-            let speed = range_span / 200.0;
-            let delta = -response.drag_delta().y; // invert: drag up = increase
-            let shift_multiplier = if ui.input(|i| i.modifiers.shift) {
-                0.1
-            } else {
-                1.0
-            };
-            let delta_value = (delta as f64) * speed as f64 * shift_multiplier;
-
-            let min = *self.range.start();
-            let max = *self.range.end();
-            *self.value = (*self.value + delta_value).clamp(min, max);
+        let mut ctrl = ContinuousControl::new(self.value, self.range.clone()).axis(DragAxis::Y);
+        if let Some(dv) = self.default_value {
+            ctrl = ctrl.default_value(dv);
         }
-
-        // Handle double-click reset
-        if response.double_clicked() {
-            if let Some(default) = self.default_value {
-                *self.value = default;
-            }
-        }
+        let t = ctrl.handle(ui, &response);
 
         // Draw
         let rect = response.rect;
@@ -166,20 +253,19 @@ impl<'a> egui::Widget for Knob<'a> {
         let min_angle = 225f32.to_radians();
         let sweep = 270f32.to_radians();
 
-        // Normalized value [0, 1]
-        let min = *self.range.start();
-        let max = *self.range.end();
-        let t = ((*self.value - min) / (max - min)).clamp(0.0, 1.0) as f32;
-
-        // Colors
-        let track_color = Color32::from_rgb(70, 70, 90);
-        let value_color = Color32::from_rgb(80, 140, 255);
+        // Colors from visuals
+        let visuals = ui.visuals();
+        let track_color = visuals.widgets.inactive.bg_stroke.color;
+        let value_color = visuals.selection.stroke.color;
+        let bg_color = visuals.widgets.inactive.bg_fill;
+        let indicator_color = visuals.widgets.active.fg_stroke.color;
+        let label_color = visuals.text_color();
 
         // Paint based on style
         match self.knob_style {
             KnobStyle::Default => {
                 // Background circle
-                painter.circle_filled(center, radius, Color32::from_rgb(40, 40, 50));
+                painter.circle_filled(center, radius, bg_color);
 
                 let value_angle = min_angle + t * sweep;
 
@@ -220,7 +306,7 @@ impl<'a> egui::Widget for Knob<'a> {
                 let line_end = center + EMathVec2::angled(value_angle) * indicator_outer;
                 painter.add(Shape::LineSegment {
                     points: [line_start, line_end],
-                    stroke: Stroke::new(2.5, Color32::from_rgb(200, 220, 255)),
+                    stroke: Stroke::new(2.5, indicator_color),
                 });
             }
             KnobStyle::Flat => {
@@ -242,7 +328,7 @@ impl<'a> egui::Widget for Knob<'a> {
                 egui::Align2::CENTER_CENTER,
                 label,
                 egui::FontId::proportional(10.0),
-                Color32::from_rgb(180, 180, 200),
+                label_color,
             );
         }
 
@@ -424,6 +510,13 @@ impl<'a> egui::Widget for Fader<'a> {
         let painter = ui.painter();
         let hovered = response.hovered();
 
+        // Get visuals for theming
+        let visuals = ui.visuals();
+        let track_bg = visuals.widgets.inactive.bg_fill;
+        let thumb_normal = visuals.widgets.inactive.bg_fill.gamma_multiply(1.3);
+        let thumb_hovered = visuals.widgets.hovered.bg_fill;
+        let label_color = visuals.text_color();
+
         let min = *self.range.start();
         let max = *self.range.end();
         let t = ((*self.value - min) / (max - min)).clamp(0.0, 1.0) as f32;
@@ -454,7 +547,7 @@ impl<'a> egui::Widget for Fader<'a> {
         };
 
         // Draw track
-        painter.rect_filled(track_rect, 2.0, Color32::from_rgb(30, 30, 40));
+        painter.rect_filled(track_rect, 2.0, track_bg);
 
         // Draw integrated VU meter in track
         if let Some(level) = self.meter_value {
@@ -507,11 +600,7 @@ impl<'a> egui::Widget for Fader<'a> {
                     Pos2::new(rect.min.x + 2.0, thumb_y),
                     Vec2::new(thumb_width, thumb_height),
                 );
-                let thumb_color = if hovered {
-                    Color32::from_rgb(80, 140, 255)
-                } else {
-                    Color32::from_rgb(60, 100, 200)
-                };
+                let thumb_color = if hovered { thumb_hovered } else { thumb_normal };
                 painter.rect_filled(thumb_rect, 2.0, thumb_color);
             }
             Orientation::Horizontal => {
@@ -521,37 +610,17 @@ impl<'a> egui::Widget for Fader<'a> {
                     Pos2::new(thumb_x, rect.min.y + 2.0),
                     Vec2::new(thumb_width, thumb_height),
                 );
-                let thumb_color = if hovered {
-                    Color32::from_rgb(80, 140, 255)
-                } else {
-                    Color32::from_rgb(60, 100, 200)
-                };
+                let thumb_color = if hovered { thumb_hovered } else { thumb_normal };
                 painter.rect_filled(thumb_rect, 2.0, thumb_color);
             }
         }
 
-        // Handle drag
-        if response.dragged() {
-            let range_span = (max - min) as f32;
-            let speed = range_span / 200.0;
-            let delta = if self.orientation == Orientation::Vertical {
-                -response.drag_delta().y
-            } else {
-                response.drag_delta().x
-            };
-            let shift_multiplier = if ui.input(|i| i.modifiers.shift) {
-                0.1
-            } else {
-                1.0
-            };
-            let delta_value = (delta as f64) * speed as f64 * shift_multiplier;
-            *self.value = (*self.value + delta_value).clamp(min, max);
-        }
-
-        // Handle double-click reset
-        if response.double_clicked() {
-            *self.value = min;
-        }
+        let axis = match self.orientation {
+            Orientation::Vertical => DragAxis::Y,
+            Orientation::Horizontal => DragAxis::X,
+        };
+        let mut ctrl = ContinuousControl::new(self.value, self.range.clone()).axis(axis);
+        let _t = ctrl.handle(ui, &response);
 
         // Label
         if let Some(label) = &self.label {
@@ -564,7 +633,7 @@ impl<'a> egui::Widget for Fader<'a> {
                 egui::Align2::CENTER_CENTER,
                 label,
                 egui::FontId::proportional(10.0),
-                Color32::from_rgb(180, 180, 200),
+                label_color,
             );
         }
 
@@ -617,7 +686,7 @@ fn draw_meter_in_track(
             let seg_color = if seg < active {
                 meter_level_color(t_seg)
             } else {
-                egui::Color32::from_rgb(40, 40, 47)
+                egui::Color32::from_gray(40)
             };
             painter.rect_filled(seg_rect, egui::CornerRadius::ZERO, seg_color);
         }
@@ -714,9 +783,9 @@ impl<'a> egui::Widget for ToggleDot<'a> {
         let center = rect.center();
         let color = self.state.color();
         let border = if response.hovered() {
-            egui::Color32::from_rgb(130, 130, 142)
+            ui.visuals().widgets.hovered.bg_stroke.color
         } else {
-            egui::Color32::from_rgb(75, 75, 85)
+            ui.visuals().widgets.inactive.bg_stroke.color
         };
         painter.circle_filled(center, self.size * 0.5, color);
         painter.circle_stroke(center, self.size * 0.5, egui::Stroke::new(1.0, border));
@@ -773,10 +842,11 @@ impl<'a> egui::Widget for TransportButton<'a> {
         let r = self.size * 0.5;
 
         // Background
+        let visuals = ui.visuals();
         let bg = if *self.active {
-            egui::Color32::from_rgb(55, 55, 63)
+            visuals.selection.bg_fill
         } else if response.hovered() {
-            egui::Color32::from_rgb(40, 40, 47)
+            visuals.widgets.hovered.bg_fill
         } else {
             egui::Color32::TRANSPARENT
         };
@@ -784,9 +854,9 @@ impl<'a> egui::Widget for TransportButton<'a> {
 
         // Icon
         let icon_color = if *self.active {
-            egui::Color32::from_rgb(120, 200, 255)
+            visuals.widgets.active.fg_stroke.color
         } else {
-            egui::Color32::from_rgb(160, 160, 170)
+            visuals.widgets.inactive.fg_stroke.color
         };
 
         match self.kind {
@@ -918,7 +988,7 @@ impl egui::Widget for Meter {
         let painter = ui.painter();
 
         // Background
-        painter.rect_filled(rect, 1.0, Color32::from_rgb(20, 20, 28));
+        painter.rect_filled(rect, 1.0, ui.visuals().extreme_bg_color);
 
         let t = self.value.clamp(0.0, 1.0);
 
@@ -1079,6 +1149,7 @@ impl<'a> egui::Widget for StepGrid<'a> {
         );
         let rect = response.rect;
         let painter = ui.painter();
+        let visuals = ui.visuals();
 
         // Ensure steps is correctly sized
         while self.steps.len() < self.rows {
@@ -1128,7 +1199,7 @@ impl<'a> egui::Widget for StepGrid<'a> {
                         Color32::from_rgb(80, 140, 255)
                     }
                 } else {
-                    Color32::from_rgb(35, 35, 45)
+                    visuals.widgets.inactive.bg_fill
                 };
 
                 painter.rect_filled(inner_rect, 2.0, color);
@@ -1263,7 +1334,7 @@ impl ContextMenuBuilder {
 
     /// Render the menu into the given `Ui` (call inside `response.context_menu(|ui| { ... })`).
     pub fn show(self, ui: &mut egui::Ui) {
-        let hint_color = egui::Color32::from_rgb(75, 75, 85);
+        let hint_color = ui.visuals().widgets.noninteractive.bg_stroke.color;
 
         for item in self.items {
             match item {
@@ -1384,10 +1455,16 @@ impl<'a> FloatingPanel<'a> {
         ctx: &egui::Context,
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> Option<egui::InnerResponse<Option<R>>> {
+        // Build a Frame from current style, then override fill and stroke
+        let frame = egui::Frame::window(&ctx.style())
+            .fill(egui::Color32::from_rgb(22, 22, 27))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 40, 47)));
+
         let mut window = egui::Window::new(&self.title)
             .id(self.id)
             .resizable(self.resizable)
-            .collapsible(false);
+            .collapsible(false)
+            .frame(frame);
 
         if let Some(pos) = self.default_pos {
             window = window.default_pos(pos);
@@ -1400,13 +1477,6 @@ impl<'a> FloatingPanel<'a> {
         if let Some(open_ref) = self.open {
             window = window.open(open_ref);
         }
-
-        // Apply design-token styling
-        ctx.style_mut(|style| {
-            style.visuals.window_fill = egui::Color32::from_rgb(22, 22, 27);
-            style.visuals.window_stroke =
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 40, 47));
-        });
 
         window.show(ctx, add_contents)
     }
@@ -1468,11 +1538,12 @@ impl<'a> TabBar<'a> {
         );
 
         let painter = ui.painter();
-        let bg = egui::Color32::from_rgb(22, 22, 27);
-        let active_bg = egui::Color32::from_rgb(40, 40, 47);
-        let active_line = egui::Color32::from_rgb(120, 200, 255);
-        let text_active = egui::Color32::from_rgb(220, 220, 225);
-        let text_inactive = egui::Color32::from_rgb(100, 100, 112);
+        let visuals = ui.visuals();
+        let bg = visuals.widgets.inactive.bg_fill;
+        let active_bg = bg;
+        let active_line = visuals.selection.stroke.color;
+        let text_active = visuals.strong_text_color();
+        let text_inactive = visuals.text_color();
 
         // Background
         painter.rect_filled(rect, egui::CornerRadius::ZERO, bg);

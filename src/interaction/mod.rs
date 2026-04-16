@@ -200,3 +200,21 @@ pub fn drag_to_value_delta(
 pub fn key_pressed(ctx: &Context, key: egui::Key, modifiers: Modifiers) -> bool {
     ctx.input(|i| i.key_pressed(key) && i.modifiers == modifiers)
 }
+
+// ---------------------------------------------------------------------------
+// Value utilities
+// ---------------------------------------------------------------------------
+
+/// Normalize a value from `range` to 0.0..=1.0.
+pub fn normalize(value: f64, range: &std::ops::RangeInclusive<f64>) -> f32 {
+    let min = *range.start();
+    let max = *range.end();
+    ((value - min) / (max - min)).clamp(0.0, 1.0) as f32
+}
+
+/// Denormalize a 0.0..=1.0 value back to `range`.
+pub fn denormalize(t: f32, range: &std::ops::RangeInclusive<f64>) -> f64 {
+    let min = *range.start();
+    let max = *range.end();
+    min + (t as f64) * (max - min)
+}

@@ -11,6 +11,7 @@ categories = ["gui"]
 [features]
 default = ["debug"]
 debug = []
+daw = []
 
 [dependencies]
 egui = "0.34"

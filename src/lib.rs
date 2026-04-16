@@ -15,9 +15,10 @@
 //! - [`interaction`]— Drag, pan/zoom, and gesture helpers
 //! - [`animation`]  — Easing curves and spring physics
 //! - [`surface`]    — Large canvas viewport culling (50k+ px)
-//! - [`widgets`]    — Reusable DAW-class controls (Knob, Fader, Meter, StepGrid)
+//! - [`widgets`]    — Reusable controls (Knob, Fader, Meter, StepGrid, and more)
 //! - [`debug`]      — Visual debugging overlays
 //! - [`devtools`]   — Runtime visual property editor
+//! - `daw`          — DAW-specific widgets (Fader, Meter, ChannelStrip, StepGrid, Waveform, etc.)
 //!
 //! ## Quick Start
 //!
@@ -53,6 +54,9 @@ pub mod surface;
 pub mod tailwind;
 pub mod widgets;
 
+#[cfg(feature = "daw")]
+pub mod daw;
+
 // Re-export commonly used types at crate root
 pub use animation::{transition_color, transition_f32, Spring, Transition, Tween};
 pub use blur::{
@@ -77,7 +81,7 @@ pub use draw::{
 pub use figma::design_tokens_from_json;
 pub use icons::icons as icon_constants;
 pub use icons::{Icon, IconButton, IconSize};
-pub use interaction::{DragAxis, DragDelta, PanZoom};
+pub use interaction::{denormalize, normalize, DragAxis, DragDelta, PanZoom};
 pub use layout::{
     aspect_ratio_fit, auto_layout, hrule, styled_frame, vrule, FlexAlign, FlexContainer,
     FlexJustify, FlexSize,
@@ -103,10 +107,10 @@ pub use typography::{
     render_text, TextDecoration, TextOverflow, TextTransform, TypeLabel, TypeScale, TypeSpec,
 };
 pub use widgets::{
-    ChannelStrip, ClipKind, CollapsePanel, ContextMenuBuilder, DotState, DragNumber, DragReorder,
-    Fader, FloatingPanel, Knob, KnobSize, KnobStyle, Meter, Orientation, ResizableSplit, Ruler,
-    SplitAxis, StepGrid, TabBar, TimelineClip, ToggleDot, TransportButton, TransportKind, TreeNode,
-    TreeView, VerticalDrag, Waveform,
+    ChannelStrip, ClipKind, CollapsePanel, ContextMenuBuilder, ContinuousControl, DotState,
+    DragNumber, DragReorder, Fader, FloatingPanel, Knob, KnobSize, KnobStyle, Meter, Orientation,
+    ResizableSplit, Ruler, SplitAxis, StepGrid, TabBar, TimelineClip, ToggleDot, TransportButton,
+    TransportKind, TreeNode, TreeView, VerticalDrag, Waveform,
 };
 
 // M3 Material Design 3 foundation modules
