@@ -1,12 +1,32 @@
 # egui_expressive Illustrator Exporter
 
-A UXP plugin for Adobe Illustrator 2021+ that exports artboards as self-contained Rust code using `egui_expressive`.
-
 ## Installation
 
-1. Open Illustrator
-2. Go to **Plugins → Development → Load Plugin**
-3. Select this folder (containing `manifest.json`)
+### Windows (Easy)
+1. Download or clone this repository
+2. Navigate to the `illustrator-plugin/` folder
+3. Double-click `install.bat`
+4. Restart Adobe Illustrator
+5. Go to **Plugins → Plugin Manager** and enable **egui_expressive Export**
+
+### Windows (Installer .exe)
+Build the installer using NSIS:
+1. Install [NSIS](https://nsis.sourceforge.io/)
+2. Run `installer/build_installer.bat`
+3. Run the generated `egui_expressive_plugin_installer.exe`
+
+### macOS
+1. Open Terminal in the `illustrator-plugin/` folder
+2. Run: `chmod +x install.sh && ./install.sh`
+3. Restart Adobe Illustrator
+4. Go to **Plugins → Plugin Manager** and enable **egui_expressive Export**
+
+### Manual Installation
+Copy `manifest.json`, `plugin.js`, and `index.html` to:
+- **Windows**: `%APPDATA%\Adobe\UXP\PluginsStorage\ILST\28\develop\egui_expressive_export\`
+- **macOS**: `~/Library/Application Support/Adobe/UXP/PluginsStorage/ILST/28/develop/egui_expressive_export/`
+
+Replace `28` with your Illustrator version number (28=2024, 27=2023, 26=2022).
 
 ## Usage
 
