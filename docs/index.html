@@ -766,25 +766,36 @@ dbg.<span class="fn">response</span>(ctx, <span class="op">&amp;</span>response,
             });
         });
 
-        // Intersection Observer for Active Nav State
-        const sections = document.querySelectorAll('.section');
+        // Scroll Spy — Active Nav State
+        const sections = Array.from(document.querySelectorAll('.section'));
         const navItems = document.querySelectorAll('.nav-item');
 
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    const id = entry.target.getAttribute('id');
-                    navItems.forEach(item => {
-                        item.classList.remove('active');
-                        if (item.getAttribute('href') === `#${id}`) {
-                            item.classList.add('active');
-                        }
-                    });
-                }
-            });
-        }, { rootMargin: '-20% 0px -80% 0px' });
+        function updateActiveNav() {
+            const scrollY = window.scrollY;
+            const viewportMid = scrollY + window.innerHeight * 0.35;
 
-        sections.forEach(section => observer.observe(section));
+            let activeSection = sections[0];
+            for (const section of sections) {
+                if (section.offsetTop <= viewportMid) {
+                    activeSection = section;
+                } else {
+                    break;
+                }
+            }
+
+            // At the very bottom of the page, activate the last section
+            if (scrollY + window.innerHeight >= document.body.scrollHeight - 4) {
+                activeSection = sections[sections.length - 1];
+            }
+
+            const activeId = activeSection ? activeSection.getAttribute('id') : null;
+            navItems.forEach(item => {
+                item.classList.toggle('active', item.getAttribute('href') === `#${activeId}`);
+            });
+        }
+
+        window.addEventListener('scroll', updateActiveNav, { passive: true });
+        updateActiveNav();
 
         // Copy to Clipboard Logic
         document.querySelectorAll('.copy-btn').forEach(btn => {
