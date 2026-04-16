@@ -389,6 +389,8 @@ pub enum GradientDir {
     BottomToTop,
     LeftToRight,
     RightToLeft,
+    /// Gradient at an arbitrary angle (degrees, CSS convention: 0° = left to right, 90° = top to bottom).
+    Angle(f32),
 }
 
 /// Build a linear gradient rect as an `egui::Shape::Mesh`.
@@ -405,6 +407,9 @@ pub fn linear_gradient_rect(
     }
 
     let mut mesh = Mesh::default();
+
+    // Compute diagonal length for angle-based gradients
+    let diag_len = (rect.width().powi(2) + rect.height().powi(2)).sqrt();
 
     // We build a quad strip along the gradient axis.
     // For each stop, we add 2 vertices (one on each side of the rect).
@@ -428,6 +433,34 @@ pub fn linear_gradient_rect(
                 egui::Pos2::new(rect.max.x - rect.width() * t, rect.min.y),
                 egui::Pos2::new(rect.max.x - rect.width() * t, rect.max.y),
             ),
+            GradientDir::Angle(deg) => {
+                // CSS convention: 0° = left to right, 90° = top to bottom
+                let rad = deg.to_radians();
+                let (sin_t, cos_t) = rad.sin_cos();
+
+                // Start point at center minus half diagonal in the opposite direction
+                let dx = cos_t * diag_len * 0.5;
+                let dy = sin_t * diag_len * 0.5;
+                let center = rect.center();
+                let start = egui::Pos2::new(center.x - dx, center.y - dy);
+                let end = egui::Pos2::new(center.x + dx, center.y + dy);
+
+                // Interpolate along the line
+                let curr = egui::Pos2::new(
+                    start.x + (end.x - start.x) * t,
+                    start.y + (end.y - start.y) * t,
+                );
+
+                // Perpendicular direction for the strip width
+                let perp_dx = -sin_t;
+                let perp_dy = cos_t;
+                let half_w = diag_len * 0.5;
+
+                (
+                    egui::Pos2::new(curr.x - perp_dx * half_w, curr.y - perp_dy * half_w),
+                    egui::Pos2::new(curr.x + perp_dx * half_w, curr.y + perp_dy * half_w),
+                )
+            }
         };
         let uv = egui::epaint::WHITE_UV;
         mesh.vertices.push(Vertex { pos: p0, uv, color });
@@ -453,6 +486,57 @@ pub fn linear_gradient_rect(
 /// Convenience: two-stop gradient from `top` to `bottom` color.
 pub fn gradient_rect(rect: egui::Rect, top: egui::Color32, bottom: egui::Color32) -> egui::Shape {
     linear_gradient_rect(rect, &[(0.0, top), (1.0, bottom)], GradientDir::TopToBottom)
+}
+
+/// Blend two colors using the specified blend mode.
+pub fn blend_color(
+    fg: egui::Color32,
+    bg: egui::Color32,
+    mode: crate::codegen::BlendMode,
+) -> egui::Color32 {
+    // Convert to linear RGBA (0-1 range)
+    let fg = (
+        fg.r() as f32 / 255.0,
+        fg.g() as f32 / 255.0,
+        fg.b() as f32 / 255.0,
+        fg.a() as f32 / 255.0,
+    );
+    let bg = (
+        bg.r() as f32 / 255.0,
+        bg.g() as f32 / 255.0,
+        bg.b() as f32 / 255.0,
+        bg.a() as f32 / 255.0,
+    );
+
+    let (r, g, b) = match mode {
+        crate::codegen::BlendMode::Normal => (fg.0, fg.1, fg.2),
+        crate::codegen::BlendMode::Multiply => (bg.0 * fg.0, bg.1 * fg.1, bg.2 * fg.2),
+        crate::codegen::BlendMode::Screen => (
+            1.0 - (1.0 - bg.0) * (1.0 - fg.0),
+            1.0 - (1.0 - bg.1) * (1.0 - fg.1),
+            1.0 - (1.0 - bg.2) * (1.0 - fg.2),
+        ),
+        crate::codegen::BlendMode::Overlay => {
+            let blend = |bg: f32, fg: f32| {
+                if bg < 0.5 {
+                    2.0 * bg * fg
+                } else {
+                    1.0 - 2.0 * (1.0 - bg) * (1.0 - fg)
+                }
+            };
+            (blend(bg.0, fg.0), blend(bg.1, fg.1), blend(bg.2, fg.2))
+        }
+        crate::codegen::BlendMode::Darken => (bg.0.min(fg.0), bg.1.min(fg.1), bg.2.min(fg.2)),
+        crate::codegen::BlendMode::Lighten => (bg.0.max(fg.0), bg.1.max(fg.1), bg.2.max(fg.2)),
+    };
+
+    // Convert back to u8
+    let r = (r.clamp(0.0, 1.0) * 255.0) as u8;
+    let g = (g.clamp(0.0, 1.0) * 255.0) as u8;
+    let b = (b.clamp(0.0, 1.0) * 255.0) as u8;
+    let a = ((fg.3 * fg.3 + bg.3 * (1.0 - fg.3)).sqrt().clamp(0.0, 1.0) * 255.0) as u8;
+
+    egui::Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 
 // ─── Icon Rendering ───────────────────────────────────────────────────────────
@@ -646,4 +730,325 @@ pub fn vignette(rect: egui::Rect, color: egui::Color32, strength: f32) -> egui::
     let alpha = (strength * 200.0).clamp(0.0, 255.0) as u8;
     let edge_color = egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
     radial_gradient_rect(rect, egui::Color32::TRANSPARENT, edge_color, 48)
+}
+
+// ─── Rich Stroke & Dashed Paths ───────────────────────────────────────────────
+
+/// Stroke cap style.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StrokeCap {
+    Butt,
+    Round,
+    Square,
+}
+
+/// Stroke join style.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StrokeJoin {
+    Miter,
+    Round,
+    Bevel,
+}
+
+/// Dash pattern for dashed strokes.
+#[derive(Clone, Debug)]
+pub struct DashPattern {
+    pub dashes: Vec<f32>,
+    pub offset: f32,
+}
+
+/// Rich stroke with support for dashes, caps, and joins.
+#[derive(Clone, Debug)]
+pub struct RichStroke {
+    pub width: f32,
+    pub color: egui::Color32,
+    pub dash: Option<DashPattern>,
+    pub cap: StrokeCap,
+    pub join: StrokeJoin,
+}
+
+impl RichStroke {
+    /// Create a solid (non-dashed) stroke.
+    pub fn solid(width: f32, color: egui::Color32) -> Self {
+        Self {
+            width,
+            color,
+            dash: None,
+            cap: StrokeCap::Butt,
+            join: StrokeJoin::Miter,
+        }
+    }
+
+    /// Create a dashed stroke with equal dash and gap lengths.
+    pub fn dashed(width: f32, color: egui::Color32, dash: f32, gap: f32) -> Self {
+        Self {
+            width,
+            color,
+            dash: Some(DashPattern {
+                dashes: vec![dash, gap],
+                offset: 0.0,
+            }),
+            cap: StrokeCap::Butt,
+            join: StrokeJoin::Miter,
+        }
+    }
+}
+
+/// Render a path with a rich stroke (supports dashes).
+pub fn dashed_path(painter: &egui::Painter, points: &[Pos2], stroke: &RichStroke) {
+    if points.len() < 2 {
+        return;
+    }
+    match &stroke.dash {
+        None => {
+            // Solid stroke — use egui's native line
+            for i in 0..points.len() - 1 {
+                painter.line_segment(
+                    [points[i], points[i + 1]],
+                    Stroke::new(stroke.width, stroke.color),
+                );
+            }
+        }
+        Some(pattern) => {
+            // Dashed stroke — walk the path, emit segments
+            let total_len: f32 = points.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+            if total_len <= 0.0 {
+                return;
+            }
+            let cycle_len: f32 = pattern.dashes.iter().sum();
+            if cycle_len <= 0.0 {
+                return;
+            }
+
+            let mut dist = pattern.offset % cycle_len;
+            let mut phase = 0usize;
+            let mut drawing = true;
+
+            // Advance to correct phase based on initial dist
+            let mut d = dist;
+            while d >= pattern.dashes[phase] {
+                d -= pattern.dashes[phase];
+                phase = (phase + 1) % pattern.dashes.len();
+                drawing = !drawing;
+            }
+            dist = d;
+
+            let mut seg_start: Option<Pos2> = None;
+            let mut current_pos = points[0];
+
+            for i in 0..points.len() - 1 {
+                let seg_vec = points[i + 1] - points[i];
+                let seg_len = seg_vec.length();
+                if seg_len <= 0.0 {
+                    continue;
+                }
+                let seg_dir = seg_vec / seg_len;
+
+                let mut walked = 0.0f32;
+                while walked < seg_len {
+                    let remaining_in_phase = pattern.dashes[phase] - dist;
+                    let step = remaining_in_phase.min(seg_len - walked);
+                    let next_pos = points[i] + seg_dir * (walked + step);
+
+                    if drawing {
+                        if seg_start.is_none() {
+                            seg_start = Some(current_pos);
+                        }
+                    } else {
+                        if let Some(start) = seg_start.take() {
+                            painter.line_segment(
+                                [start, current_pos],
+                                Stroke::new(stroke.width, stroke.color),
+                            );
+                        }
+                    }
+
+                    current_pos = next_pos;
+                    walked += step;
+                    dist += step;
+
+                    if dist >= pattern.dashes[phase] {
+                        if drawing {
+                            if let Some(start) = seg_start.take() {
+                                painter.line_segment(
+                                    [start, current_pos],
+                                    Stroke::new(stroke.width, stroke.color),
+                                );
+                            }
+                        }
+                        dist = 0.0;
+                        phase = (phase + 1) % pattern.dashes.len();
+                        drawing = !drawing;
+                    }
+                }
+            }
+            // Emit any remaining dash
+            if drawing {
+                if let Some(start) = seg_start {
+                    painter.line_segment(
+                        [start, current_pos],
+                        Stroke::new(stroke.width, stroke.color),
+                    );
+                }
+            }
+        }
+    }
+}
+
+// ─── 2D Transform ─────────────────────────────────────────────────────────────
+
+/// 2D affine transform (SVG matrix convention: [a, b, c, d, e, f]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Transform2D {
+    pub a: f32,
+    pub b: f32,
+    pub c: f32,
+    pub d: f32,
+    pub e: f32,
+    pub f: f32,
+}
+
+impl Transform2D {
+    /// Identity transform.
+    pub fn identity() -> Self {
+        Self {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: 0.0,
+            f: 0.0,
+        }
+    }
+
+    /// Create a translation transform.
+    pub fn translate(x: f32, y: f32) -> Self {
+        Self {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: x,
+            f: y,
+        }
+    }
+
+    /// Create a rotation transform (angle in degrees).
+    pub fn rotate(angle_deg: f32) -> Self {
+        let r = angle_deg.to_radians();
+        let (s, c) = r.sin_cos();
+        Self {
+            a: c,
+            b: s,
+            c: -s,
+            d: c,
+            e: 0.0,
+            f: 0.0,
+        }
+    }
+
+    /// Create a rotation around a center point (angle in degrees).
+    pub fn rotate_around(angle_deg: f32, center: Pos2) -> Self {
+        Self::translate(center.x, center.y)
+            .then(Self::rotate(angle_deg))
+            .then(Self::translate(-center.x, -center.y))
+    }
+
+    /// Create a scale transform.
+    pub fn scale(sx: f32, sy: f32) -> Self {
+        Self {
+            a: sx,
+            b: 0.0,
+            c: 0.0,
+            d: sy,
+            e: 0.0,
+            f: 0.0,
+        }
+    }
+
+    /// Compose two transforms (first apply self, then other).
+    pub fn then(self, other: Self) -> Self {
+        Self {
+            a: self.a * other.a + self.b * other.c,
+            b: self.a * other.b + self.b * other.d,
+            c: self.c * other.a + self.d * other.c,
+            d: self.c * other.b + self.d * other.d,
+            e: self.e * other.a + self.f * other.c + other.e,
+            f: self.e * other.b + self.f * other.d + other.f,
+        }
+    }
+
+    /// Apply transform to a point.
+    pub fn apply(&self, p: Pos2) -> Pos2 {
+        Pos2::new(
+            self.a * p.x + self.c * p.y + self.e,
+            self.b * p.x + self.d * p.y + self.f,
+        )
+    }
+
+    /// Apply transform to a shape.
+    pub fn apply_to_shape(&self, shape: Shape) -> Shape {
+        transform_shape(shape, self)
+    }
+}
+
+/// Apply a 2D affine transform to all points in a shape.
+pub fn transform_shape(shape: Shape, t: &Transform2D) -> Shape {
+    match shape {
+        Shape::Vec(shapes) => {
+            Shape::Vec(shapes.into_iter().map(|s| transform_shape(s, t)).collect())
+        }
+        Shape::Path(mut p) => {
+            p.points = p.points.into_iter().map(|pt| t.apply(pt)).collect();
+            Shape::Path(p)
+        }
+        Shape::Circle(mut c) => {
+            c.center = t.apply(c.center);
+            Shape::Circle(c)
+        }
+        Shape::Rect(mut r) => {
+            // Transform all 4 corners, take bounding box
+            let corners = [
+                t.apply(r.rect.min),
+                t.apply(Pos2::new(r.rect.max.x, r.rect.min.y)),
+                t.apply(r.rect.max),
+                t.apply(Pos2::new(r.rect.min.x, r.rect.max.y)),
+            ];
+            let min_x = corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+            let min_y = corners.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+            let max_x = corners
+                .iter()
+                .map(|p| p.x)
+                .fold(f32::NEG_INFINITY, f32::max);
+            let max_y = corners
+                .iter()
+                .map(|p| p.y)
+                .fold(f32::NEG_INFINITY, f32::max);
+            r.rect = Rect::from_min_max(Pos2::new(min_x, min_y), Pos2::new(max_x, max_y));
+            Shape::Rect(r)
+        }
+        Shape::LineSegment {
+            points: [a, b],
+            stroke,
+        } => Shape::LineSegment {
+            points: [t.apply(a), t.apply(b)],
+            stroke,
+        },
+        other => other,
+    }
+}
+
+// ─── Clipped Rounded Rect ─────────────────────────────────────────────────────
+
+/// Render content clipped to a rounded rectangle.
+pub fn clipped_rounded_rect(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    rounding: f32,
+    content: impl FnOnce(&mut egui::Ui),
+) {
+    let clip = ui.painter().clip_rect().intersect(rect);
+    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    child_ui.set_clip_rect(clip);
+    content(&mut child_ui);
 }

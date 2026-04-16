@@ -31,12 +31,17 @@
 
 pub mod animation;
 pub mod blur;
+pub mod codegen;
 pub mod debug;
 pub mod devtools;
 pub mod draw;
 pub mod figma;
+pub mod icons;
 pub mod m3;
+pub mod svg;
 pub mod swiftui;
+pub mod theme;
+pub mod typography;
 
 // Re-export FigmaExportError for ergonomic error handling
 pub use figma::FigmaExportError;
@@ -53,15 +58,28 @@ pub use animation::{transition_color, transition_f32, Spring, Transition, Tween}
 pub use blur::{
     blur_image, blurred_image_shape, soft_glow, soft_inner_shadow, soft_shadow, BlurQuality,
 };
+pub use codegen::{
+    diff_sidecars, generate_rust, infer_layout, parse_json_sidecar, parse_naming,
+    parse_svg_elements, svg_to_rust_scaffold, ArtboardInfo, BlendMode, EffectDef, EffectType,
+    ElementType, EmitMode, GradientDef, GradientStop, GradientType, InferenceOptions,
+    LayoutElement, LayoutNode, NamingHint, PanelSide, SidecarChange, TextAlign,
+};
 pub use devtools::{DevToolsPanel, Prop, PropRegistry, PropValue};
 pub use draw::{
-    box_shadow, dot_matrix, glow, gradient_rect, icon, icon_loop, icon_play, icon_record,
-    icon_stop, inner_shadow, linear_gradient_rect, radial_gradient, radial_gradient_rect,
-    scan_lines, vignette, GradientDir, LayeredPainter, RadialGradientDir, ShadowOffset,
-    ShapeBuilder,
+    blend_color, box_shadow, clipped_rounded_rect, dashed_path, dot_matrix, glow, gradient_rect,
+    icon, icon_loop, icon_play, icon_record, icon_stop, inner_shadow, linear_gradient_rect,
+    radial_gradient, radial_gradient_rect, scan_lines, transform_shape, vignette, DashPattern,
+    GradientDir, LayeredPainter, RadialGradientDir, RichStroke, ShadowOffset, ShapeBuilder,
+    StrokeCap, StrokeJoin, Transform2D,
 };
+pub use figma::design_tokens_from_json;
+pub use icons::icons as icon_constants;
+pub use icons::{Icon, IconButton, IconSize};
 pub use interaction::{DragAxis, DragDelta, PanZoom};
-pub use layout::{auto_layout, hrule, styled_frame, vrule};
+pub use layout::{
+    aspect_ratio_fit, auto_layout, hrule, styled_frame, vrule, FlexAlign, FlexContainer,
+    FlexJustify, FlexSize,
+};
 pub use state::{InteractionState, StateMachine, StateSlot};
 pub use style::{
     apply_default_scrollbar_style, apply_scrollbar_style, fade_shapes, styled_text, with_alpha,
@@ -69,10 +87,18 @@ pub use style::{
     VisualVariant, WidgetTheme,
 };
 pub use surface::{LargeCanvas, ViewportCuller};
+pub use svg::{
+    ase_to_colors, parse_ase, parse_svg_color, svg_path_to_points, svg_path_to_shape,
+    svg_to_shapes, AseError,
+};
 pub use swiftui::{GeometryProxy, Navigator, ScrollList, ViewModifier};
 pub use tailwind::{
     Align, Direction, Edges, FontWeight, Justify, Size, Tw, TW_0, TW_1, TW_10, TW_12, TW_16, TW_2,
     TW_20, TW_24, TW_3, TW_32, TW_4, TW_40, TW_48, TW_5, TW_6, TW_64, TW_8,
+};
+pub use theme::{border_rect, Border, Elevation, SemanticColors, Theme};
+pub use typography::{
+    render_text, TextDecoration, TextOverflow, TextTransform, TypeLabel, TypeScale, TypeSpec,
 };
 pub use widgets::{
     ChannelStrip, ClipKind, CollapsePanel, ContextMenuBuilder, DotState, DragNumber, DragReorder,

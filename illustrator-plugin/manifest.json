@@ -1,0 +1,32 @@
+{
+  "id": "com.egui-expressive.illustrator-exporter",
+  "name": "egui_expressive Exporter",
+  "version": "1.0.0",
+  "manifestVersion": 5,
+  "host": [
+    {
+      "app": "AI",
+      "minVersion": "26.0",
+      "maxVersion": "99.9"
+    }
+  ],
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "mainPanel",
+      "label": {
+        "default": "egui_expressive"
+      },
+      "minimumSize": { "width": 300, "height": 400 },
+      "maximumSize": { "width": 600, "height": 900 },
+      "preferredDockedSize": { "width": 320, "height": 500 }
+    }
+  ],
+  "requiredPermissions": {
+    "localFileSystem": "fullAccess",
+    "clipboard": "readAndWrite",
+    "network": {
+      "domains": []
+    }
+  }
+}

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>egui_expressive</title>
+<style>
+  /* M3 dark theme */
+  :root {
+    --bg: #1c1b1f;
+    --surface: #2b2930;
+    --surface-high: #36343b;
+    --primary: #d0bcff;
+    --on-primary: #381e72;
+    --secondary: #ccc2dc;
+    --text: #e6e1e5;
+    --text-secondary: #cac4d0;
+    --outline: #49454f;
+    --error: #f2b8b5;
+    --success: #a8d5a2;
+    --code-bg: #13111a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; font-size: 13px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Header */
+  .header { padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--outline); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .header-title { font-size: 14px; font-weight: 600; color: var(--primary); }
+  .version-badge { font-size: 10px; background: var(--on-primary); color: var(--primary); padding: 2px 6px; border-radius: 10px; }
+
+  /* Scrollable content */
+  .content { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+  /* Section */
+  .section { background: var(--surface); border-radius: 8px; overflow: hidden; }
+  .section-header { padding: 10px 12px; font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--outline); }
+
+  /* Artboard list */
+  .artboard-list { max-height: 160px; overflow-y: auto; }
+  .artboard-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; transition: background 0.1s; }
+  .artboard-item:hover { background: var(--surface-high); }
+  .artboard-item input[type="checkbox"] { accent-color: var(--primary); width: 14px; height: 14px; cursor: pointer; }
+  .artboard-name { flex: 1; font-size: 12px; }
+  .artboard-size { font-size: 10px; color: var(--text-secondary); }
+  .empty-state { padding: 20px; text-align: center; color: var(--text-secondary); font-size: 12px; }
+
+  /* Options */
+  .option-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; }
+  .option-label { font-size: 12px; color: var(--text); }
+  .option-desc { font-size: 10px; color: var(--text-secondary); margin-top: 1px; }
+
+  /* Toggle switch */
+  .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider { position: absolute; inset: 0; background: var(--outline); border-radius: 10px; cursor: pointer; transition: background 0.2s; }
+  .toggle-slider::before { content: ""; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: var(--text-secondary); border-radius: 50%; transition: transform 0.2s, background 0.2s; }
+  .toggle input:checked + .toggle-slider { background: var(--primary); }
+  .toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: var(--on-primary); }
+
+  /* Buttons */
+  .btn-primary { width: 100%; padding: 10px; background: var(--primary); color: var(--on-primary); border: none; border-radius: 20px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-secondary { padding: 6px 12px; background: transparent; color: var(--primary); border: 1px solid var(--primary); border-radius: 16px; font-size: 12px; cursor: pointer; transition: background 0.15s; }
+  .btn-secondary:hover { background: rgba(208,188,255,0.08); }
+
+  /* Code output */
+  .code-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--outline); }
+  .code-filename { font-size: 11px; color: var(--text-secondary); font-family: monospace; }
+  .code-block { background: var(--code-bg); padding: 12px; font-family: 'Fira Code', 'Cascadia Code', monospace; font-size: 11px; line-height: 1.5; color: #c9d1d9; overflow-x: auto; max-height: 200px; overflow-y: auto; white-space: pre; }
+  .code-block .kw { color: #ff7b72; }
+  .code-block .fn { color: #d2a8ff; }
+  .code-block .str { color: #a5d6ff; }
+  .code-block .comment { color: #8b949e; }
+  .code-block .num { color: #79c0ff; }
+
+  /* File tabs */
+  .file-tabs { display: flex; gap: 4px; padding: 8px 12px 0; overflow-x: auto; }
+  .file-tab { padding: 4px 10px; border-radius: 6px 6px 0 0; font-size: 11px; cursor: pointer; background: var(--surface-high); color: var(--text-secondary); border: 1px solid var(--outline); border-bottom: none; white-space: nowrap; }
+  .file-tab.active { background: var(--code-bg); color: var(--text); border-color: var(--outline); }
+
+  /* Status bar */
+  .status-bar { padding: 6px 12px; background: var(--surface); border-top: 1px solid var(--outline); font-size: 10px; color: var(--text-secondary); flex-shrink: 0; display: flex; align-items: center; gap: 6px; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-secondary); }
+  .status-dot.ready { background: var(--success); }
+  .status-dot.error { background: var(--error); }
+
+  /* Select all row */
+  .select-all-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid var(--outline); }
+  .select-all-row span { font-size: 11px; color: var(--text-secondary); }
+
+  /* Export actions */
+  .export-actions { display: flex; gap: 8px; padding: 12px; }
+  .export-actions .btn-primary { flex: 1; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="header-title">egui_expressive</span>
+  <span class="version-badge">v1.0</span>
+</div>
+
+<div class="content">
+
+  <!-- Artboards -->
+  <div class="section">
+    <div class="section-header">Artboards</div>
+    <div class="select-all-row">
+      <span id="artboard-count">Loading...</span>
+      <button class="btn-secondary" id="select-all-btn" onclick="toggleSelectAll()">Select all</button>
+    </div>
+    <div class="artboard-list" id="artboard-list">
+      <div class="empty-state">Open a document to see artboards</div>
+    </div>
+  </div>
+
+  <!-- Options -->
+  <div class="section">
+    <div class="section-header">Options</div>
+    <div class="option-row">
+      <div>
+        <div class="option-label">Use naming conventions</div>
+        <div class="option-desc">row-*, col-*, btn-*, card-* → layout hints</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="opt-naming" checked><span class="toggle-slider"></span></label>
+    </div>
+    <div class="option-row">
+      <div>
+        <div class="option-label">Infer gaps</div>
+        <div class="option-desc">Detect spacing between elements</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="opt-gaps" checked><span class="toggle-slider"></span></label>
+    </div>
+    <div class="option-row">
+      <div>
+        <div class="option-label">Include JSON sidecar</div>
+        <div class="option-desc">Export element data alongside .rs files</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="opt-sidecar"><span class="toggle-slider"></span></label>
+    </div>
+  </div>
+
+  <!-- Output -->
+  <div class="section" id="output-section" style="display:none">
+    <div class="code-header">
+      <span class="code-filename" id="output-filename">output.rs</span>
+      <button class="btn-secondary" onclick="copyCode()">Copy</button>
+    </div>
+    <div class="file-tabs" id="file-tabs"></div>
+    <div class="code-block" id="code-output"></div>
+  </div>
+
+</div>
+
+<!-- Export button -->
+<div class="export-actions">
+  <button class="btn-primary" id="export-btn" onclick="doExport()" disabled>Export selected artboards</button>
+</div>
+
+<!-- Status bar -->
+<div class="status-bar">
+  <div class="status-dot" id="status-dot"></div>
+  <span id="status-text">Waiting for document...</span>
+</div>
+
+<script>
+  let artboards = [];
+  let exportResults = [];
+  let activeTab = 0;
+  let allSelected = false;
+
+  function setStatus(msg, type) {
+    document.getElementById("status-text").textContent = msg;
+    const dot = document.getElementById("status-dot");
+    dot.className = "status-dot" + (type ? " " + type : "");
+  }
+
+  function toggleSelectAll() {
+    allSelected = !allSelected;
+    document.querySelectorAll(".artboard-checkbox").forEach(cb => cb.checked = allSelected);
+    document.getElementById("select-all-btn").textContent = allSelected ? "Deselect all" : "Select all";
+    updateExportButton();
+  }
+
+  function updateExportButton() {
+    const checked = document.querySelectorAll(".artboard-checkbox:checked").length;
+    const btn = document.getElementById("export-btn");
+    btn.disabled = checked === 0;
+    btn.textContent = checked > 0 ? `Export ${checked} artboard${checked > 1 ? "s" : ""}` : "Export selected artboards";
+  }
+
+  function renderArtboards(boards) {
+    artboards = boards;
+    const list = document.getElementById("artboard-list");
+    const count = document.getElementById("artboard-count");
+
+    if (boards.length === 0) {
+      list.innerHTML = '<div class="empty-state">No artboards found</div>';
+      count.textContent = "0 artboards";
+      return;
+    }
+
+    count.textContent = `${boards.length} artboard${boards.length > 1 ? "s" : ""}`;
+    list.innerHTML = boards.map((ab, i) => `
+      <div class="artboard-item" onclick="toggleArtboard(${i})">
+        <input type="checkbox" class="artboard-checkbox" id="ab-${i}" onchange="updateExportButton()" onclick="event.stopPropagation()">
+        <span class="artboard-name">${ab.name}</span>
+        <span class="artboard-size">${Math.round(ab.width)}×${Math.round(ab.height)}</span>
+      </div>
+    `).join("");
+  }
+
+  function toggleArtboard(i) {
+    const cb = document.getElementById(`ab-${i}`);
+    cb.checked = !cb.checked;
+    updateExportButton();
+  }
+
+  function doExport() {
+    const selectedIndices = [];
+    document.querySelectorAll(".artboard-checkbox").forEach((cb, i) => {
+      if (cb.checked) selectedIndices.push(i);
+    });
+
+    const options = {
+      useNaming: document.getElementById("opt-naming").checked,
+      inferGaps: document.getElementById("opt-gaps").checked,
+      includeSidecar: document.getElementById("opt-sidecar").checked,
+    };
+
+    setStatus("Exporting...");
+    document.getElementById("export-btn").disabled = true;
+
+    window.postMessage({ type: "EXPORT", payload: { selectedIndices, options } });
+  }
+
+  function renderResults(results) {
+    exportResults = results;
+    activeTab = 0;
+
+    const section = document.getElementById("output-section");
+    section.style.display = "block";
+
+    renderTabs();
+    renderActiveTab();
+
+    setStatus(`Exported ${results.length} file${results.length > 1 ? "s" : ""}`, "ready");
+    document.getElementById("export-btn").disabled = false;
+    updateExportButton();
+  }
+
+  function renderTabs() {
+    const tabs = document.getElementById("file-tabs");
+    tabs.innerHTML = exportResults.map((r, i) => `
+      <div class="file-tab ${i === activeTab ? "active" : ""}" onclick="switchTab(${i})">${r.filename}</div>
+    `).join("");
+  }
+
+  function switchTab(i) {
+    activeTab = i;
+    renderTabs();
+    renderActiveTab();
+  }
+
+  function renderActiveTab() {
+    const result = exportResults[activeTab];
+    if (!result) return;
+    document.getElementById("output-filename").textContent = result.filename;
+    document.getElementById("code-output").textContent = result.code;
+  }
+
+  function copyCode() {
+    const result = exportResults[activeTab];
+    if (!result) return;
+    navigator.clipboard.writeText(result.code).then(() => {
+      setStatus("Copied to clipboard!", "ready");
+      setTimeout(() => setStatus("Ready", "ready"), 2000);
+    });
+  }
+
+  // Message handler
+  window.addEventListener("message", (event) => {
+    const { type } = event.data;
+
+    if (type === "READY") {
+      setStatus("Plugin ready", "ready");
+      window.postMessage({ type: "GET_ARTBOARDS" });
+    }
+
+    if (type === "ARTBOARDS_RESULT") {
+      renderArtboards(event.data.boards);
+      setStatus(`Found ${event.data.boards.length} artboard${event.data.boards.length !== 1 ? "s" : ""}`, "ready");
+    }
+
+    if (type === "EXPORT_RESULT") {
+      renderResults(event.data.results);
+    }
+
+    if (type === "ERROR") {
+      setStatus("Error: " + event.data.message, "error");
+      document.getElementById("export-btn").disabled = false;
+      updateExportButton();
+    }
+  });
+
+  // Request artboards on load
+  setTimeout(() => window.postMessage({ type: "GET_ARTBOARDS" }), 500);
+</script>
+</body>
+</html>
