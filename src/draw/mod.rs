@@ -516,3 +516,134 @@ pub fn icon_loop(painter: &egui::Painter, center: egui::Pos2, size: f32, color: 
     let stroke = egui::Stroke::new(size * 0.1, color);
     painter.circle_stroke(center, r, stroke);
 }
+
+// ─── Radial Gradient ─────────────────────────────────────────────────────────
+
+/// Direction for radial gradient — center-out or outside-in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RadialGradientDir {
+    /// Color at center, fades to edge color.
+    CenterOut,
+    /// Color at edge, fades to center color.
+    EdgeIn,
+}
+
+/// Render a radial gradient as a `Shape::Mesh`.
+///
+/// Approximates a radial gradient using a triangle fan from the center.
+/// `segments` controls smoothness (32 is good, 64 is high quality).
+pub fn radial_gradient(
+    center: egui::Pos2,
+    radius: f32,
+    inner_color: egui::Color32,
+    outer_color: egui::Color32,
+    segments: u32,
+) -> egui::Shape {
+    use egui::{epaint::Mesh, Pos2, Vec2};
+    let mut mesh = Mesh::default();
+
+    // Center vertex
+    mesh.colored_vertex(center, inner_color);
+
+    // Ring vertices
+    let n = segments.max(8);
+    for i in 0..=n {
+        let angle = (i as f32 / n as f32) * std::f32::consts::TAU;
+        let pos = center + Vec2::new(angle.cos(), angle.sin()) * radius;
+        mesh.colored_vertex(pos, outer_color);
+    }
+
+    // Triangles: center (0) + consecutive ring pairs
+    for i in 0..n {
+        mesh.add_triangle(0, i + 1, i + 2);
+    }
+
+    egui::Shape::Mesh(std::sync::Arc::new(mesh))
+}
+
+/// Radial gradient clipped to a rectangle (elliptical).
+pub fn radial_gradient_rect(
+    rect: egui::Rect,
+    inner_color: egui::Color32,
+    outer_color: egui::Color32,
+    segments: u32,
+) -> egui::Shape {
+    let center = rect.center();
+    let rx = rect.width() * 0.5;
+    let ry = rect.height() * 0.5;
+    use egui::epaint::Mesh;
+    let mut mesh = Mesh::default();
+
+    mesh.colored_vertex(center, inner_color);
+
+    let n = segments.max(8);
+    for i in 0..=n {
+        let angle = (i as f32 / n as f32) * std::f32::consts::TAU;
+        let pos = center + egui::Vec2::new(angle.cos() * rx, angle.sin() * ry);
+        mesh.colored_vertex(pos, outer_color);
+    }
+
+    for i in 0..n {
+        mesh.add_triangle(0, i + 1, i + 2);
+    }
+
+    egui::Shape::Mesh(std::sync::Arc::new(mesh))
+}
+
+// ─── Scan Lines & Overlays ───────────────────────────────────────────────────
+
+/// Render a CRT-style scan line overlay over a rect.
+///
+/// Draws alternating semi-transparent horizontal lines.
+/// `line_height` is the height of each scan line pair (default 2.0).
+/// `alpha` controls darkness (0.0 = invisible, 1.0 = fully black lines).
+pub fn scan_lines(rect: egui::Rect, line_height: f32, alpha: f32) -> Vec<egui::Shape> {
+    let color = egui::Color32::from_black_alpha((alpha * 80.0).clamp(0.0, 255.0) as u8);
+    let lh = line_height.max(1.0);
+    let mut shapes = Vec::new();
+    let mut y = rect.min.y;
+    while y < rect.max.y {
+        let line_rect = egui::Rect::from_min_max(
+            egui::Pos2::new(rect.min.x, y),
+            egui::Pos2::new(rect.max.x, (y + lh * 0.5).min(rect.max.y)),
+        );
+        shapes.push(egui::Shape::rect_filled(line_rect, 0.0, color));
+        y += lh;
+    }
+    shapes
+}
+
+/// Render a dot-matrix / halftone overlay over a rect.
+///
+/// Draws a grid of small semi-transparent dots.
+pub fn dot_matrix(
+    rect: egui::Rect,
+    dot_spacing: f32,
+    dot_radius: f32,
+    color: egui::Color32,
+) -> Vec<egui::Shape> {
+    let spacing = dot_spacing.max(2.0);
+    let mut shapes = Vec::new();
+    let mut y = rect.min.y + spacing * 0.5;
+    while y < rect.max.y {
+        let mut x = rect.min.x + spacing * 0.5;
+        while x < rect.max.x {
+            shapes.push(egui::Shape::circle_filled(
+                egui::Pos2::new(x, y),
+                dot_radius,
+                color,
+            ));
+            x += spacing;
+        }
+        y += spacing;
+    }
+    shapes
+}
+
+/// Render a vignette effect (dark edges, bright center) over a rect.
+pub fn vignette(rect: egui::Rect, color: egui::Color32, strength: f32) -> egui::Shape {
+    // Approximate with a radial gradient from transparent center to colored edge
+    let alpha = (strength * 200.0).clamp(0.0, 255.0) as u8;
+    let edge_color = egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
+    radial_gradient_rect(rect, egui::Color32::TRANSPARENT, edge_color, 48)
+}

@@ -256,6 +256,7 @@ pub fn blur_image(image: &ColorImage, radius: u32) -> ColorImage {
     ColorImage {
         size: [width as _, height as _],
         pixels: output,
+        source_size: egui::Vec2::new(width as f32, height as f32),
     }
 }
 

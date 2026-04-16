@@ -210,7 +210,7 @@ impl Widget for M3TextField<'_> {
         );
 
         let mut text_edit = egui::TextEdit::singleline(self.value)
-            .frame(false)
+            .frame(egui::Frame::NONE)
             .desired_width(text_rect.width())
             .text_color(c.on_surface);
 

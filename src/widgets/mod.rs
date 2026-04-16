@@ -2424,8 +2424,7 @@ impl<'a> ChannelStrip<'a> {
         // Index badge
         if let Some(idx) = self.index {
             let badge_text = format!("{}", idx);
-            let text_size =
-                ui.fonts(|f| f.glyph_width(&egui::FontId::proportional(10.0), '0') * 2.0);
+            let text_size = 14.0_f32; // approximate badge width
             let badge_rect = egui::Rect::from_min_size(
                 egui::Pos2::new(fader_rect.min.x, fader_rect.max.y + 4.0),
                 egui::Vec2::new(text_size + 6.0, 14.0),
@@ -2593,5 +2592,485 @@ impl<'a> Waveform<'a> {
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
         self.paint(ui.painter(), rect);
         response
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DragReorder
+// ---------------------------------------------------------------------------
+
+/// State for a drag-reorder list.
+#[derive(Clone, Debug, Default)]
+struct DragReorderState {
+    dragging: Option<usize>,
+    drag_offset: f32,
+    hover_index: Option<usize>,
+}
+
+/// A drag-to-reorder list widget.
+///
+/// Renders a list of items with drag handles. Users can drag items to reorder them.
+/// The `items` slice is reordered in-place when a drag completes.
+///
+/// # Example
+/// ```rust,ignore
+/// DragReorder::new(ui.id().with("tracks"), &mut self.tracks)
+///     .item_height(32.0)
+///     .show(ui, |ui, item, _dragging| {
+///         ui.label(&item.name);
+///     });
+/// ```
+pub struct DragReorder<'a, T> {
+    id: egui::Id,
+    items: &'a mut Vec<T>,
+    item_height: f32,
+}
+
+impl<'a, T: Clone> DragReorder<'a, T> {
+    pub fn new(id: impl std::hash::Hash, items: &'a mut Vec<T>) -> Self {
+        Self {
+            id: egui::Id::new(id),
+            items,
+            item_height: 32.0,
+        }
+    }
+
+    pub fn item_height(mut self, h: f32) -> Self {
+        self.item_height = h;
+        self
+    }
+
+    /// Show the reorderable list.
+    ///
+    /// `render_item` receives `(ui, item, is_dragging)`.
+    pub fn show(self, ui: &mut egui::Ui, mut render_item: impl FnMut(&mut egui::Ui, &T, bool)) {
+        let n = self.items.len();
+        let total_height = n as f32 * self.item_height;
+        let (outer_rect, _) = ui.allocate_exact_size(
+            egui::Vec2::new(ui.available_width(), total_height),
+            egui::Sense::hover(),
+        );
+
+        let mut state: DragReorderState = ui
+            .ctx()
+            .memory(|m| m.data.get_temp(self.id))
+            .unwrap_or_default();
+
+        let mut new_order: Option<(usize, usize)> = None;
+
+        for i in 0..n {
+            let item_rect = egui::Rect::from_min_size(
+                egui::Pos2::new(
+                    outer_rect.min.x,
+                    outer_rect.min.y + i as f32 * self.item_height,
+                ),
+                egui::Vec2::new(outer_rect.width(), self.item_height - 1.0),
+            );
+
+            // Drag handle (left 20px)
+            let handle_rect =
+                egui::Rect::from_min_size(item_rect.min, egui::Vec2::new(20.0, self.item_height));
+            let handle_resp = ui.interact(
+                handle_rect,
+                self.id.with(("handle", i)),
+                egui::Sense::drag(),
+            );
+
+            if handle_resp.drag_started() {
+                state.dragging = Some(i);
+                state.drag_offset = 0.0;
+            }
+
+            if handle_resp.dragged() {
+                if state.dragging == Some(i) {
+                    state.drag_offset += handle_resp.drag_delta().y;
+                    // Compute target index
+                    let target_f = i as f32 + state.drag_offset / self.item_height;
+                    let target = (target_f.round() as isize).clamp(0, n as isize - 1) as usize;
+                    state.hover_index = Some(target);
+                }
+            }
+
+            if handle_resp.drag_stopped() {
+                if let (Some(from), Some(to)) = (state.dragging, state.hover_index) {
+                    if from != to {
+                        new_order = Some((from, to));
+                    }
+                }
+                state.dragging = None;
+                state.drag_offset = 0.0;
+                state.hover_index = None;
+            }
+
+            let is_dragging = state.dragging == Some(i);
+
+            // Draw item background
+            let bg = if is_dragging {
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 15)
+            } else if handle_resp.hovered() {
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 8)
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            if bg != egui::Color32::TRANSPARENT {
+                ui.painter().rect_filled(item_rect, 4.0, bg);
+            }
+
+            // Draw drag handle dots
+            let dot_color = egui::Color32::from_gray(80);
+            for row in 0..3 {
+                for col in 0..2 {
+                    let dot_pos = egui::Pos2::new(
+                        handle_rect.center().x - 3.0 + col as f32 * 6.0,
+                        handle_rect.center().y - 4.0 + row as f32 * 4.0,
+                    );
+                    ui.painter().circle_filled(dot_pos, 1.5, dot_color);
+                }
+            }
+
+            // Drop indicator line
+            if let Some(target) = state.hover_index {
+                if target == i && state.dragging != Some(i) {
+                    let line_y = item_rect.min.y;
+                    ui.painter().line_segment(
+                        [
+                            egui::Pos2::new(outer_rect.min.x, line_y),
+                            egui::Pos2::new(outer_rect.max.x, line_y),
+                        ],
+                        egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 180, 255)),
+                    );
+                }
+            }
+
+            // Render item content (offset 20px for handle)
+            let content_rect = egui::Rect::from_min_max(
+                egui::Pos2::new(item_rect.min.x + 20.0, item_rect.min.y),
+                item_rect.max,
+            );
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(content_rect));
+            render_item(&mut child, &self.items[i], is_dragging);
+        }
+
+        // Apply reorder
+        if let Some((from, to)) = new_order {
+            let item = self.items.remove(from);
+            self.items.insert(to, item);
+        }
+
+        ui.ctx().memory_mut(|m| m.data.insert_temp(self.id, state));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VerticalDrag
+// ---------------------------------------------------------------------------
+
+/// A vertical drag widget for continuous value editing.
+///
+/// Renders a thin vertical bar that the user drags up/down to change a value.
+/// Similar to a fader but minimal — just the drag zone, no visual track.
+///
+/// # Example
+/// ```rust,ignore
+/// ui.add(VerticalDrag::new(&mut self.value, 0.0..=1.0).height(80.0).label("VOL"));
+/// ```
+pub struct VerticalDrag<'a> {
+    value: &'a mut f64,
+    range: std::ops::RangeInclusive<f64>,
+    height: f32,
+    width: f32,
+    label: Option<String>,
+    default_value: Option<f64>,
+    sensitivity: f64,
+}
+
+impl<'a> VerticalDrag<'a> {
+    pub fn new(value: &'a mut f64, range: std::ops::RangeInclusive<f64>) -> Self {
+        Self {
+            value,
+            range,
+            height: 80.0,
+            width: 16.0,
+            label: None,
+            default_value: None,
+            sensitivity: 1.0,
+        }
+    }
+
+    pub fn height(mut self, h: f32) -> Self {
+        self.height = h;
+        self
+    }
+    pub fn width(mut self, w: f32) -> Self {
+        self.width = w;
+        self
+    }
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+    pub fn default_value(mut self, v: f64) -> Self {
+        self.default_value = Some(v);
+        self
+    }
+    pub fn sensitivity(mut self, s: f64) -> Self {
+        self.sensitivity = s;
+        self
+    }
+}
+
+impl egui::Widget for VerticalDrag<'_> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let desired = egui::Vec2::new(self.width, self.height);
+        let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click_and_drag());
+
+        if response.dragged() {
+            let range_size = *self.range.end() - *self.range.start();
+            let pixels_per_unit = self.height as f64 / range_size;
+            let fine = ui.input(|i| i.modifiers.shift);
+            let factor = if fine { 0.1 } else { 1.0 };
+            let delta =
+                -response.drag_delta().y as f64 / pixels_per_unit * factor * self.sensitivity;
+            *self.value = (*self.value + delta).clamp(*self.range.start(), *self.range.end());
+        }
+
+        if response.double_clicked() {
+            if let Some(def) = self.default_value {
+                *self.value = def;
+            }
+        }
+
+        if ui.is_rect_visible(rect) {
+            let t = ((*self.value - *self.range.start())
+                / (*self.range.end() - *self.range.start())) as f32;
+            let t = t.clamp(0.0, 1.0);
+
+            // Track
+            let track_color = egui::Color32::from_gray(35);
+            ui.painter().rect_filled(rect, 3.0, track_color);
+
+            // Fill
+            let fill_height = t * rect.height();
+            let fill_rect = egui::Rect::from_min_max(
+                egui::Pos2::new(rect.min.x, rect.max.y - fill_height),
+                rect.max,
+            );
+            let fill_color = if response.hovered() || response.dragged() {
+                egui::Color32::from_rgb(100, 160, 255)
+            } else {
+                egui::Color32::from_rgb(70, 120, 200)
+            };
+            ui.painter().rect_filled(fill_rect, 3.0, fill_color);
+
+            // Notch at current value
+            let notch_y = rect.max.y - fill_height;
+            ui.painter().line_segment(
+                [
+                    egui::Pos2::new(rect.min.x, notch_y),
+                    egui::Pos2::new(rect.max.x, notch_y),
+                ],
+                egui::Stroke::new(2.0, egui::Color32::WHITE),
+            );
+
+            // Label
+            if let Some(label) = &self.label {
+                ui.painter().text(
+                    egui::Pos2::new(rect.center().x, rect.max.y + 4.0),
+                    egui::Align2::CENTER_TOP,
+                    label,
+                    egui::FontId::proportional(9.0),
+                    egui::Color32::from_gray(140),
+                );
+            }
+        }
+
+        response
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CollapsePanel
+// ---------------------------------------------------------------------------
+
+/// State for CollapsePanel animation.
+#[derive(Clone, Debug)]
+struct CollapsePanelState {
+    open: bool,
+    anim_t: f32, // 0.0 = fully closed, 1.0 = fully open
+}
+
+impl Default for CollapsePanelState {
+    fn default() -> Self {
+        Self {
+            open: true,
+            anim_t: 1.0,
+        }
+    }
+}
+
+/// A collapsible panel with smooth easing animation.
+///
+/// The panel animates open/close using an ease-in-out curve.
+///
+/// # Example
+/// ```rust,ignore
+/// CollapsePanel::new(ui.id().with("settings"), "Settings")
+///     .default_open(true)
+///     .show(ui, |ui| {
+///         ui.label("Panel content");
+///     });
+/// ```
+pub struct CollapsePanel<'a> {
+    id: egui::Id,
+    title: &'a str,
+    default_open: bool,
+    header_height: f32,
+    animation_duration: f32,
+}
+
+impl<'a> CollapsePanel<'a> {
+    pub fn new(id: impl std::hash::Hash, title: &'a str) -> Self {
+        Self {
+            id: egui::Id::new(id),
+            title,
+            default_open: true,
+            header_height: 32.0,
+            animation_duration: 0.2,
+        }
+    }
+
+    pub fn default_open(mut self, open: bool) -> Self {
+        self.default_open = open;
+        self
+    }
+    pub fn header_height(mut self, h: f32) -> Self {
+        self.header_height = h;
+        self
+    }
+    pub fn animation_duration(mut self, secs: f32) -> Self {
+        self.animation_duration = secs;
+        self
+    }
+
+    /// Show the collapsible panel.
+    ///
+    /// Returns `true` if the panel is currently open (or animating open).
+    pub fn show(self, ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) -> bool {
+        let ctx = ui.ctx().clone();
+
+        let mut state: CollapsePanelState = ctx
+            .memory(|m| m.data.get_temp(self.id))
+            .unwrap_or_else(|| CollapsePanelState {
+                open: self.default_open,
+                anim_t: if self.default_open { 1.0 } else { 0.0 },
+            });
+
+        // Advance animation
+        let dt = ctx.input(|i| i.stable_dt).min(0.1);
+        let speed = 1.0 / self.animation_duration.max(0.05);
+        if state.open {
+            state.anim_t = (state.anim_t + dt * speed).min(1.0);
+        } else {
+            state.anim_t = (state.anim_t - dt * speed).max(0.0);
+        }
+
+        // Ease-in-out curve
+        let t = state.anim_t;
+        let eased = t * t * (3.0 - 2.0 * t); // smoothstep
+
+        if state.anim_t > 0.0 && state.anim_t < 1.0 {
+            ctx.request_repaint();
+        }
+
+        // Header
+        let header_rect = ui
+            .allocate_space(egui::Vec2::new(ui.available_width(), self.header_height))
+            .1;
+        let header_resp = ui.interact(header_rect, self.id.with("header"), egui::Sense::click());
+
+        if header_resp.clicked() {
+            state.open = !state.open;
+        }
+
+        if ui.is_rect_visible(header_rect) {
+            // Background
+            let bg = if header_resp.hovered() {
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+            } else {
+                egui::Color32::from_gray(28)
+            };
+            ui.painter().rect_filled(header_rect, 4.0, bg);
+
+            // Arrow (rotates with animation)
+            let arrow_angle = eased * std::f32::consts::FRAC_PI_2; // 0 = right, π/2 = down
+            let arrow_center = egui::Pos2::new(header_rect.min.x + 16.0, header_rect.center().y);
+            let arrow_size = 5.0_f32;
+            // Draw a simple triangle arrow
+            let cos_a = arrow_angle.cos();
+            let sin_a = arrow_angle.sin();
+            let pts = [
+                egui::Pos2::new(
+                    arrow_center.x + cos_a * arrow_size - sin_a * 0.0,
+                    arrow_center.y + sin_a * arrow_size + cos_a * 0.0,
+                ),
+                egui::Pos2::new(
+                    arrow_center.x + cos_a * (-arrow_size * 0.5) - sin_a * (-arrow_size * 0.8),
+                    arrow_center.y + sin_a * (-arrow_size * 0.5) + cos_a * (-arrow_size * 0.8),
+                ),
+                egui::Pos2::new(
+                    arrow_center.x + cos_a * (-arrow_size * 0.5) - sin_a * (arrow_size * 0.8),
+                    arrow_center.y + sin_a * (-arrow_size * 0.5) + cos_a * (arrow_size * 0.8),
+                ),
+            ];
+            let arrow_color = egui::Color32::from_gray(160);
+            ui.painter().add(egui::Shape::convex_polygon(
+                pts.to_vec(),
+                arrow_color,
+                egui::Stroke::NONE,
+            ));
+
+            // Title
+            ui.painter().text(
+                egui::Pos2::new(header_rect.min.x + 32.0, header_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                self.title,
+                egui::FontId::proportional(13.0),
+                egui::Color32::from_gray(220),
+            );
+        }
+
+        // Content (clipped to animated height)
+        let is_visible = eased > 0.001;
+        if is_visible {
+            // Measure content height by rendering into a hidden UI first
+            // For simplicity, use a clip rect that scales with eased
+            let available_width = ui.available_width();
+            // Allocate a region and clip it
+            let content_start = ui.cursor().min;
+
+            // Use a child UI with clipping
+            let max_content_height = 2000.0; // generous max
+            let clip_height = eased * max_content_height;
+
+            let child_rect = egui::Rect::from_min_size(
+                content_start,
+                egui::Vec2::new(available_width, clip_height),
+            );
+
+            let mut child_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(child_rect)
+                    .layout(*ui.layout()),
+            );
+            add_contents(&mut child_ui);
+            let content_height = child_ui.min_rect().height();
+
+            // Advance the parent cursor by the actual (eased) height
+            let actual_height = (eased * content_height).min(clip_height);
+            ui.allocate_space(egui::Vec2::new(available_width, actual_height));
+        }
+
+        ctx.memory_mut(|m| m.data.insert_temp(self.id, state));
+        is_visible
     }
 }

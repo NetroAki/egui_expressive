@@ -133,7 +133,7 @@ impl PanZoom {
         }
 
         // Zoom via scroll
-        let scroll_delta = ctx.input(|i| i.raw_scroll_delta);
+        let scroll_delta = ctx.input(|i| i.smooth_scroll_delta);
         let zoom_delta = ctx.input(|i| i.zoom_delta());
 
         let mut scale_factor = 1.0;
