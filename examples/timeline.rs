@@ -57,7 +57,8 @@ impl Default for TimelineApp {
 }
 
 impl eframe::App for TimelineApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         self.frame_count += 1;
 
         // Advance playhead
@@ -72,7 +73,7 @@ impl eframe::App for TimelineApp {
         let track_height = 60.0;
         let total_height = self.tracks.len() as f32 * track_height;
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        {
             ui.heading("Timeline");
             ui.horizontal(|ui| {
                 ui.label(format!("BPM: {:.0}", self.bpm));
@@ -213,7 +214,7 @@ impl eframe::App for TimelineApp {
                         egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 60, 60)),
                     );
                 });
-        });
+        }
 
         ctx.request_repaint();
     }

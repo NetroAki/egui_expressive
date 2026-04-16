@@ -50,7 +50,8 @@ impl Default for SeqApp {
 }
 
 impl eframe::App for SeqApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         self.frame_count += 1;
 
         // Advance playhead based on BPM
@@ -63,48 +64,58 @@ impl eframe::App for SeqApp {
             self.playhead = (self.playhead + 1) % 16;
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Step Sequencer");
+        ui.heading("Step Sequencer");
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.add(
+                Knob::new(&mut self.bpm, 60.0..=200.0)
+                    .size(56.0)
+                    .label("BPM")
+                    .default_value(120.0),
+            );
+            ui.add(
+                Knob::new(&mut self.swing, 0.0..=0.5)
+                    .size(40.0)
+                    .label("SWING")
+                    .default_value(0.0),
+            );
+
             ui.separator();
 
-            ui.horizontal(|ui| {
-                ui.add(Knob::new(&mut self.bpm, 60.0..=200.0).size(56.0).label("BPM").default_value(120.0));
-                ui.add(Knob::new(&mut self.swing, 0.0..=0.5).size(40.0).label("SWING").default_value(0.0));
-
-                ui.separator();
-
-                ui.vertical(|ui| {
-                    ui.label(format!("BPM: {:.0}", self.bpm));
-                    ui.label(format!("Swing: {:.0}%", self.swing * 100.0));
-                    ui.label(format!("Playhead: {}", self.playhead + 1));
-                });
+            ui.vertical(|ui| {
+                ui.label(format!("BPM: {:.0}", self.bpm));
+                ui.label(format!("Swing: {:.0}%", self.swing * 100.0));
+                ui.label(format!("Playhead: {}", self.playhead + 1));
             });
+        });
 
-            ui.separator();
+        ui.separator();
 
-            // Row labels
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.add(egui::Label::new("KICK").wrap());
-                    ui.add(egui::Label::new("HIHAT").wrap());
-                    ui.add(egui::Label::new("SNARE").wrap());
-                    ui.add(egui::Label::new("TOM").wrap());
-                });
-                ui.add(StepGrid::new(&mut self.steps, 4, 16)
+        // Row labels
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.add(egui::Label::new("KICK").wrap());
+                ui.add(egui::Label::new("HIHAT").wrap());
+                ui.add(egui::Label::new("SNARE").wrap());
+                ui.add(egui::Label::new("TOM").wrap());
+            });
+            ui.add(
+                StepGrid::new(&mut self.steps, 4, 16)
                     .cell_size(egui::vec2(32.0, 32.0))
                     .active_col(self.playhead)
                     .row_colors(vec![
                         egui::Color32::from_rgb(220, 80, 80),   // kick — red
-                        egui::Color32::from_rgb(80, 200, 120), // hihat — green
-                        egui::Color32::from_rgb(220, 180, 60), // snare — yellow
+                        egui::Color32::from_rgb(80, 200, 120),  // hihat — green
+                        egui::Color32::from_rgb(220, 180, 60),  // snare — yellow
                         egui::Color32::from_rgb(100, 140, 255), // tom — blue
-                    ]));
-            });
-
-            ui.separator();
-
-            ui.label("Instructions: Click to toggle steps. Shift+drag for fine control. Double-click to reset BPM.");
+                    ]),
+            );
         });
+
+        ui.separator();
+
+        ui.label("Instructions: Click to toggle steps. Shift+drag for fine control. Double-click to reset BPM.");
 
         ctx.request_repaint();
     }

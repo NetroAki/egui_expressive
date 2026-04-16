@@ -30,7 +30,8 @@ impl Default for DawApp {
 }
 
 impl eframe::App for DawApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         // Simulate VU meter movement
         self.frame_count += 1;
         self.vu_level = 0.3 + 0.4 * (self.frame_count as f32 * 0.05).sin().abs();
@@ -44,7 +45,7 @@ impl eframe::App for DawApp {
             self.playhead = (self.playhead + 1) % 16;
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        {
             ui.heading("DAW Control Strip");
             ui.separator();
             ui.horizontal(|ui| {
@@ -120,7 +121,7 @@ impl eframe::App for DawApp {
                 ui.label(format!("Volume: {:.0}%", self.volume * 100.0));
                 ui.label(format!("VU: {:.0}%", self.vu_level * 100.0));
             });
-        });
+        }
 
         ctx.request_repaint();
     }
