@@ -437,7 +437,7 @@
                             // Also load the single artboard alongside tiles
                             window.__adobe_cep__.evalScript('getArtboardsJSON()', function(result2) {
                                 if (result2 && result2 !== 'EvalScript error.' && result2 !== 'undefined') {
-                                    try { renderArtboardList(JSON.parse(result2)); } catch(e) {}
+                                    try { loadArtboards(JSON.parse(result2)); } catch(e) {}
                                 }
                             });
                         }
