@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Visual state system: hover / press / select / focus / disabled variants.
 
 use egui::{Color32, Context, CornerRadius, Id, Response, Stroke, Visuals};
@@ -125,10 +123,10 @@ impl Lerp for Color32 {
         let a = a.to_tuple();
         let b = b.to_tuple();
         Color32::from_rgba_unmultiplied(
-            ((a.0 as f32 + (b.0 as f32 - a.0 as f32) * t).round() as u8).min(255),
-            ((a.1 as f32 + (b.1 as f32 - a.1 as f32) * t).round() as u8).min(255),
-            ((a.2 as f32 + (b.2 as f32 - a.2 as f32) * t).round() as u8).min(255),
-            ((a.3 as f32 + (b.3 as f32 - a.3 as f32) * t).round() as u8).min(255),
+            (a.0 as f32 + (b.0 as f32 - a.0 as f32) * t).round() as u8,
+            (a.1 as f32 + (b.1 as f32 - a.1 as f32) * t).round() as u8,
+            (a.2 as f32 + (b.2 as f32 - a.2 as f32) * t).round() as u8,
+            (a.3 as f32 + (b.3 as f32 - a.3 as f32) * t).round() as u8,
         )
     }
 }
@@ -289,9 +287,9 @@ impl WidgetTheme {
     /// Resolve all theme fields for the given interaction state.
     #[inline]
     pub fn resolve(&self, r: &Response, selected: bool) -> ResolvedTheme {
-        let bg = self.bg.resolve(r, selected, false).clone();
-        let fg = self.fg.resolve(r, selected, false).clone();
-        let border = self.border.resolve(r, selected, false).clone();
+        let bg = *self.bg.resolve(r, selected, false);
+        let fg = *self.fg.resolve(r, selected, false);
+        let border = *self.border.resolve(r, selected, false);
         let expansion = *self.expansion.resolve(r, selected, false);
 
         let rect = r.rect.expand(expansion);
@@ -496,17 +494,13 @@ impl DesignTokens {
 
     /// Store tokens in egui context for global access.
     pub fn store(&self, ctx: &egui::Context) {
-        ctx.memory_mut(|mem| {
-            mem.data
-                .insert_temp(egui::Id::new("__expressive_tokens"), self.clone())
-        });
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("__expressive_tokens"), self.clone()));
     }
 
     /// Retrieve tokens from egui context. Returns dark defaults if not set.
     pub fn load(ctx: &egui::Context) -> Self {
-        ctx.memory(|mem| {
-            mem.data
-                .get_temp(egui::Id::new("__expressive_tokens"))
+        ctx.data(|d| {
+            d.get_temp(egui::Id::new("__expressive_tokens"))
                 .unwrap_or_else(Self::dark)
         })
     }
@@ -647,27 +641,23 @@ pub fn styled_text(
 /// Apply custom scrollbar styling to egui's Visuals.
 /// Call this before rendering to match the mockup's thin dark scrollbars.
 ///
-/// Note: `width` must be set separately via `ctx.style_mut(|s| s.spacing.scroll.bar_width = width)`.
-/// The `width` parameter is documented here but cannot be applied to `Visuals` directly.
 pub fn apply_scrollbar_style(
     visuals: &mut egui::Visuals,
     track_color: egui::Color32,
     thumb_color: egui::Color32,
-    width: f32,
 ) {
     visuals.extreme_bg_color = track_color;
     // thumb color is applied via the inactive widget bg
     visuals.widgets.inactive.bg_fill = thumb_color;
     visuals.widgets.hovered.bg_fill = thumb_color.linear_multiply(1.2);
     // Note: scroll bar width is in Style::spacing, not Visuals.
-    // Document this limitation in a comment.
-    let _ = width; // width must be set via ctx.style_mut(|s| s.spacing.scroll.bar_width = width)
+    // Width must be set via ctx.style_mut(|s| s.spacing.scroll.bar_width = width)
 }
 
 /// Apply the mockup's default thin scrollbar style to the egui context.
 /// Call once at app startup or per-frame before rendering.
 pub fn apply_default_scrollbar_style(ctx: &egui::Context) {
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         style.spacing.scroll.bar_width = 4.0;
         style.spacing.scroll.bar_inner_margin = 1.0;
         style.spacing.scroll.bar_outer_margin = 0.0;

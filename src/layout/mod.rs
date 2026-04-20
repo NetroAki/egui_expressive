@@ -39,19 +39,17 @@ use egui::{Color32, Frame, Margin, Stroke, Vec2};
 /// # Arguments
 /// * `ui` - The Ui to configure
 /// * `gap` - Item spacing in pixels
-/// * `_padding` - Inner padding (reserved for future use, currently unused)
 ///
 /// # Example
 ///
 /// ```rust,no_run
 /// # use egui_expressive::auto_layout;
 /// fn example(ui: &mut egui::Ui) {
-///     auto_layout(ui, 8.0, 12.0);
+///     auto_layout(ui, 8.0, 0.0);
 /// }
 /// ```
 pub fn auto_layout(ui: &mut egui::Ui, gap: f32, _padding: f32) {
     ui.spacing_mut().item_spacing = Vec2::splat(gap);
-    let _ = _padding; // Reserved for future use
 }
 
 /// Create a Frame with design-token-friendly parameters.

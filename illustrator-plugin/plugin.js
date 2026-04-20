@@ -2,6 +2,7 @@
 "use strict";
 
 const BLEND_MODES = { NORMAL: "normal", MULTIPLY: "multiply", SCREEN: "screen", OVERLAY: "overlay", DARKEN: "darken", LIGHTEN: "lighten", COLORDODGE: "color_dodge", COLORBURN: "color_burn", HARDLIGHT: "hard_light", SOFTLIGHT: "soft_light", DIFFERENCE: "difference", EXCLUSION: "exclusion", HUE: "hue", SATURATION: "saturation", COLOR: "color", LUMINOSITY: "luminosity" };
+const BLEND_MODES_BY_NUM = { 0: "normal", 1: "multiply", 2: "screen", 3: "overlay", 4: "darken", 5: "lighten", 6: "color_dodge", 7: "color_burn", 8: "hard_light", 9: "soft_light", 10: "difference", 11: "exclusion", 12: "hue", 13: "saturation", 14: "color", 15: "luminosity" };
 
 // ─── Artboard Discovery ───────────────────────────────────────────────────────
 async function getArtboards() {
@@ -119,8 +120,43 @@ function extractRecursive(item, artboardRect, elements, depth) {
     strokeCap: null, strokeJoin: null, strokeDash: null, strokeMiterLimit: null,
     effects: [], textDecoration: null, textTransform: null, textRuns: null,
     textAlign: null, letterSpacing: null, lineHeight: null, clipMask: false,
-    symbolName: null, isCompoundPath: false, isGradientMesh: false, isChart: false, notes: []
+    symbolName: null, isCompoundPath: false, isGradientMesh: false, isChart: false, notes: [],
+    pathPoints: null, pathClosed: false, imagePath: null
   };
+
+  // Path geometry extraction
+  try {
+    if ((item.typename === "PathItem" || item.typename === "CompoundPathItem") && item.pathPoints) {
+      const pts = [];
+      for (let pi = 0; pi < item.pathPoints.length; pi++) {
+        const pp = item.pathPoints[pi];
+        try {
+          pts.push({
+            anchor: [pp.anchor[0] - artboardRect[0], artboardRect[1] - pp.anchor[1]],
+            leftDir: [pp.leftDirection[0] - artboardRect[0], artboardRect[1] - pp.leftDirection[1]],
+            rightDir: [pp.rightDirection[0] - artboardRect[0], artboardRect[1] - pp.rightDirection[1]],
+            kind: pp.pointType === PointType.SMOOTH ? "smooth" : "corner"
+          });
+        } catch(ppe) {}
+      }
+      if (pts.length > 0) {
+        el.pathPoints = pts;
+        el.pathClosed = item.closed || false;
+      }
+    }
+  } catch(e) {}
+
+  // Image/placed file extraction
+  try {
+    if (item.typename === "PlacedItem" && item.file) {
+      el.imagePath = item.file.fsName || item.file.name || null;
+    }
+  } catch(e) {}
+  try {
+    if (item.typename === "RasterItem") {
+      el.imagePath = `raster_${Math.round(el.w)}x${Math.round(el.h)}`;
+    }
+  } catch(e) {}
 
   try { el.opacity = item.opacity !== undefined ? item.opacity / 100 : 1; } catch (e) {}
   try { el.rotation = item.rotation !== undefined ? item.rotation : 0; } catch (e) {}
@@ -133,7 +169,29 @@ function extractRecursive(item, artboardRect, elements, depth) {
   try { if (item.strokeMiterLimit !== undefined) el.strokeMiterLimit = item.strokeMiterLimit; } catch (e) {}
 
   // Blend mode
-  try { if (item.blendingMode !== undefined) el.blendMode = BLEND_MODES[item.blendingMode] || String(item.blendingMode); } catch (e) {}
+  try {
+    if (item.blendingMode !== undefined) {
+      const BLEND_MODE_MAP = {
+        "BlendModes.NORMAL": "normal",
+        "BlendModes.MULTIPLY": "multiply", 
+        "BlendModes.SCREEN": "screen",
+        "BlendModes.OVERLAY": "overlay",
+        "BlendModes.DARKEN": "darken",
+        "BlendModes.LIGHTEN": "lighten",
+        "BlendModes.COLORDODGE": "color_dodge",
+        "BlendModes.COLORBURN": "color_burn",
+        "BlendModes.HARDLIGHT": "hard_light",
+        "BlendModes.SOFTLIGHT": "soft_light",
+        "BlendModes.DIFFERENCE": "difference",
+        "BlendModes.EXCLUSION": "exclusion",
+        "BlendModes.HUE": "hue",
+        "BlendModes.SATURATIONBLEND": "saturation",
+        "BlendModes.COLORBLEND": "color",
+        "BlendModes.LUMINOSITY": "luminosity",
+      };
+      el.blendMode = BLEND_MODE_MAP[String(item.blendingMode)] || "normal";
+    }
+  } catch (e) {}
 
   el.gradient = getGradient(item);
 
@@ -150,7 +208,7 @@ function extractRecursive(item, artboardRect, elements, depth) {
 
   try { if (item.clipping || item.clipped) { el.clipMask = true; el.notes.push("clipping mask"); } } catch (e) {}
   try { if (item.typename === "CompoundPathItem") { el.isCompoundPath = true; el.notes.push("compound path"); } } catch (e) {}
-  try { if (item.typename === "SymbolItem"?.symbol) { el.symbolName = item.symbol.name; el.notes.push(`symbol: ${item.symbol.name}`); } } catch (e) {}
+
 
   // SymbolItem — explicit handling with full metadata
   try {
@@ -386,19 +444,19 @@ function generateModFile(results) {
   return c;
 }
 
-function generateComponentsFile(comps) {
+function generateComponentsFile(comps, colorMap) {
   let c = `// Auto-generated reusable components.\n\nuse egui::{Color32, RichText, Ui};\nuse super::tokens;\n\n`;
   for (const comp of comps) {
     const f = comp.elements[0], fn = comp.suggestedName.replace(/-/g, "_");
     if (f.type === "shape" && f.cornerRadius > 0) {
-      const col = f.fill ? `tokens::${getColorName(f.fill)}` : "tokens::PRIMARY";
-      c += `pub fn ${fn}(ui: &mut Ui, label: &str) -> egui::Response {\n    let btn = egui::Button::new(RichText::new(label).size(${f.textStyle?.size || 14}.0).color(tokens::ON_PRIMARY)).fill(${col}).corner_radius(${f.cornerRadius}u8);\n    ui.add(btn)\n}\n\n`;
+      const col = f.fill ? `tokens::${getColorName(f.fill, colorMap)}` : "tokens::PRIMARY";
+      c += `pub fn ${fn}(ui: &mut Ui, label: &str) -> egui::Response {\n    let btn = egui::Button::new(RichText::new(label).size(${f.textStyle?.size || 14}.0).color(tokens::ON_PRIMARY)).fill(${col}).corner_radius(${Math.min(255, Math.round(f.cornerRadius || 0))}u8);\n    ui.add(btn)\n}\n\n`;
     } else if (f.type === "text") {
-      const col = f.fill ? `tokens::${getColorName(f.fill)}` : "tokens::ON_SURFACE";
+      const col = f.fill ? `tokens::${getColorName(f.fill, colorMap)}` : "tokens::ON_SURFACE";
       c += `pub fn ${fn}(ui: &mut Ui, text: &str) {\n    ui.label(RichText::new(text).size(${f.textStyle?.size || 14}.0).color(${col}));\n}\n\n`;
     } else {
-      const col = f.fill ? `tokens::${getColorName(f.fill)}` : "tokens::SURFACE";
-      c += `pub fn ${fn}(ui: &mut Ui, rect: egui::Rect) {\n    ui.painter().rect_filled(rect, ${f.cornerRadius || 0}u8, ${col});\n}\n\n`;
+      const col = f.fill ? `tokens::${getColorName(f.fill, colorMap)}` : "tokens::SURFACE";
+      c += `pub fn ${fn}(ui: &mut Ui, rect: egui::Rect) {\n    ui.painter().rect_filled(rect, ${Math.min(255, Math.round(f.cornerRadius || 0))}u8, ${col});\n}\n\n`;
     }
   }
   return c;
@@ -433,7 +491,7 @@ function generateElementCode(el, indent, colorMap, comps) {
   const hasShadow = el.effects?.some(e => e.type === "dropShadow");
   const hasBlur = el.effects?.some(e => e.type === "gaussianBlur");
   const hasFeather = el.effects?.some(e => e.type === "feather");
-  if (hasShadow) c += `${pad}// soft_shadow(&painter, rect, blur, color);\n`;
+  // Shadow is now emitted inline in the shape/path branch
   if (hasBlur) { const bl = el.effects.find(e => e.type === "gaussianBlur"); c += `${pad}// Gaussian blur (${bl?.radius || 0}px)\n`; }
   if (hasFeather) { const ft = el.effects.find(e => e.type === "feather"); c += `${pad}// Feather (${ft?.radius || 0}px)\n`; }
   if (el.blendMode && el.blendMode !== "normal") c += `${pad}// blend_mode: ${el.blendMode}\n`;
@@ -445,36 +503,69 @@ function generateElementCode(el, indent, colorMap, comps) {
     const sz = el.textStyle?.size || 14, wt = el.textStyle?.weight || 400;
     const td = el.textDecoration === "underline" ? ".underline()" : el.textDecoration === "strikethrough" ? ".strikethrough()" : "";
     const txt = el.text.replace(/"/g, '\\"').replace(/\n/g, "\\n");
-    return `${pad}TypeSpec { size: ${sz}.0, color: tokens::${cn}, weight: ${wt} }${td}\n${pad}    .render(ui, "${txt}");\n`;
+    return `${pad}ui.label(egui::RichText::new("${txt}").size(${sz}.0).color(tokens::${cn})${wt !== 400 ? `.strong()` : ""}${td});\n`;
   }
 
   if (el.type === "shape" || el.type === "path") {
     const cn = el.fill ? (colorMap.get(`${el.fill.r},${el.fill.g},${el.fill.b}`) || "SURFACE") : "SURFACE";
     const fc = el.opacity < 1.0 ? `with_alpha(tokens::${cn}, ${el.opacity})` : `tokens::${cn}`;
-    const cr = el.cornerRadius || 0, rot = el.rotation || 0;
+    const cr = Math.min(255, Math.round(el.cornerRadius || 0)), rot = el.rotation || 0;
 
-    if (el.type === "group" && el.children?.length > 0) {
-      const isRow = isHorizontal(el.children);
-      c += `${pad}let rect = egui::Rect::from_min_size(origin + egui::vec2(${Math.round(el.x)}.0, ${Math.round(el.y)}.0), egui::vec2(${Math.round(el.w)}.0, ${Math.round(el.h)}.0));\n`;
-      c += `${pad}// ${isRow ? "Row" : "Column"} group: ${el.id}\n`;
-      c += `${pad}ui.push_id(${indent}, |ui| {\n`;
-      for (const ch of el.children) c += generateElementCode(ch, indent + 1, colorMap, comps);
-      c += `${pad}});\n`;
-    } else {
-      c += `${pad}let rect = egui::Rect::from_min_size(origin + egui::vec2(${Math.round(el.x)}.0, ${Math.round(el.y)}.0), egui::vec2(${Math.round(el.w)}.0, ${Math.round(el.h)}.0));\n`;
-      if (el.gradient) {
-        const g = el.gradient;
-        if (g.type === "linear") c += `${pad}// Linear gradient (angle: ${g.angle})\n${pad}// linear_gradient_rect(rect, &stops, GradientDir::Angle(${g.angle}));\n`;
-        else c += `${pad}// Radial gradient\n${pad}// radial_gradient_rect(rect, center, radius, &stops);\n`;
+    c += `${pad}let rect = egui::Rect::from_min_size(origin + egui::vec2(${Math.round(el.x)}.0, ${Math.round(el.y)}.0), egui::vec2(${Math.round(el.w)}.0, ${Math.round(el.h)}.0));\n`;
+    if (el.gradient) {
+      const g = el.gradient;
+      if (g.type === "linear") {
+        const stopsStr = (g.stops || []).map(s => `(${s.position.toFixed(3)}, egui::Color32::from_rgb(${s.color.r}, ${s.color.g}, ${s.color.b}))`).join(", ");
+        c += `${pad}painter.add(egui_expressive::linear_gradient_rect(rect, &[${stopsStr}], egui_expressive::GradientDir::Angle(${(g.angle || 0).toFixed(1)})));\n`;
+      } else if (g.type === "radial") {
+        const stops = g.stops || [];
+        const innerStop = stops[0] || { color: { r: 255, g: 255, b: 255 } };
+        const outerStop = stops[stops.length - 1] || { color: { r: 0, g: 0, b: 0 } };
+        const innerColor = `egui::Color32::from_rgb(${innerStop.color.r}, ${innerStop.color.g}, ${innerStop.color.b})`;
+        const outerColor = `egui::Color32::from_rgb(${outerStop.color.r}, ${outerStop.color.g}, ${outerStop.color.b})`;
+        c += `${pad}painter.add(egui_expressive::radial_gradient_rect(rect, ${innerColor}, ${outerColor}, 32));\n`;
+      } else {
+        // pattern or unknown gradient type
+        c += `${pad}// gradient type "${g.type}" — approximate with solid fill\n`;
+        if (el.fill) c += `${pad}painter.rect_filled(rect, ${cr}u8, ${fc});\n`;
       }
-      if (rot !== 0) c += `${pad}// rotation: ${rot}°\n${pad}// transform_shape(shape, &Transform2D::rotate(${rot}));\n`;
-      if (el.stroke) { const scn = colorMap.get(`${el.stroke.r},${el.stroke.g},${el.stroke.b}`) || "SURFACE"; c += `${pad}painter.rect_stroke(rect, ${cr}u8, egui::Stroke::new(${el.stroke.width}.0, tokens::${scn}));\n`; }
-      if (el.fill) c += `${pad}painter.rect_filled(rect, ${cr}u8, ${fc});\n`;
+    } else if (el.fill) {
+      if (rot !== 0) {
+        c += `${pad}let _rot = egui_expressive::Transform2D::rotate_around(${rot.toFixed(4)}, rect.center());\n`;
+        c += `${pad}let _rot_pts = vec![_rot.apply(rect.min), _rot.apply(egui::pos2(rect.max.x, rect.min.y)), _rot.apply(rect.max), _rot.apply(egui::pos2(rect.min.x, rect.max.y))];\n`;
+        c += `${pad}// Use _rot_pts with egui::Shape::convex_polygon for true rotation\n`;
+      }
+      c += `${pad}painter.rect_filled(rect, ${cr}u8, ${fc});\n`;
+    }
+    if (el.stroke) {
+      const scn = colorMap.get(`${el.stroke.r},${el.stroke.g},${el.stroke.b}`) || "SURFACE";
+      c += `${pad}painter.rect_stroke(rect, ${cr}u8, egui::Stroke::new(${el.stroke.width}.0, tokens::${scn}), egui::StrokeKind::Outside);\n`;
+    }
+    // Drop shadow
+    const shadowFx = el.effects?.find(e => e.type === "dropShadow");
+    if (shadowFx) {
+      c += `${pad}for s in egui_expressive::box_shadow(rect, egui::Color32::from_rgba_unmultiplied(${shadowFx.color?.r||0}, ${shadowFx.color?.g||0}, ${shadowFx.color?.b||0}, ${Math.round((shadowFx.color?.a||0.5)*255)}), ${(shadowFx.blur||0).toFixed(1)}, 0.0, egui_expressive::ShadowOffset::new(${(shadowFx.x||0).toFixed(1)}, ${(shadowFx.y||0).toFixed(1)})) { painter.add(s); }\n`;
     }
     return c;
   }
 
-  if (el.type === "image") return `${pad}// TODO: ui.image(egui::include_image!("assets/${el.id}.png"));\n`;
+  if (el.type === "image") {
+    const imgPath = el.imagePath ? el.imagePath : `assets/${el.id}.png`;
+    const isLinked = el.imagePath && !el.imagePath.startsWith("raster_");
+    c += `${pad}{\n`;
+    c += `${pad}    let rect = egui::Rect::from_min_size(origin + egui::vec2(${Math.round(el.x)}.0, ${Math.round(el.y)}.0), egui::vec2(${Math.round(el.w)}.0, ${Math.round(el.h)}.0));\n`;
+    if (isLinked) {
+      c += `${pad}    // Linked image: "${imgPath}"\n`;
+      c += `${pad}    // ui.painter().image(texture_id, rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);\n`;
+      c += `${pad}    painter.rect_filled(rect, 0u8, egui::Color32::from_rgba_premultiplied(80, 80, 80, 180)); // placeholder\n`;
+    } else {
+      c += `${pad}    // Embedded raster image (${Math.round(el.w)}×${Math.round(el.h)}px)\n`;
+      c += `${pad}    painter.rect_filled(rect, 0u8, egui::Color32::from_rgba_premultiplied(80, 80, 80, 180)); // placeholder\n`;
+    }
+    c += `${pad}    painter.rect_stroke(rect, 0u8, egui::Stroke::new(1.0, egui::Color32::from_gray(120)), egui::StrokeKind::Outside);\n`;
+    c += `${pad}}\n`;
+    return c;
+  }
 
   if (el.type === "group" && el.children?.length > 0) {
     const isRow = isHorizontal(el.children), gap = 8, lf = isRow ? "hstack" : "vstack", ax = isRow ? "x" : "y";
@@ -496,12 +587,28 @@ function isHorizontal(children) {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-function toSnakeName(n) { return (n || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""); }
-function toStructName(n) { return toSnakeName(n).split("_").map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(""); }
+function toSnakeName(n) {
+  const RUST_KEYWORDS = new Set(["as","break","const","continue","crate","else","enum","extern","false","fn","for","if","impl","in","let","loop","match","mod","move","mut","pub","ref","return","self","static","struct","super","trait","true","type","unsafe","use","where","while","async","await","dyn"]);
+  let s = (n || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "field";
+  if (/^[0-9]/.test(s)) s = "f_" + s;
+  if (RUST_KEYWORDS.has(s)) s = s + "_";
+  return s;
+}
+function toStructName(n) {
+  let s = toSnakeName(n).split("_").filter(Boolean).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join("") || "Component";
+  if (/^[0-9]/.test(s)) s = "S" + s;
+  return s;
+}
 function toPascalCase(s) { return s.split(/[_\- ]+/).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(""); }
 function toActionName(t) { return (t || "Action").trim().replace(/[^a-zA-Z0-9]+/g, "_").split("_").map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(""); }
-function sanitize(n) { return (n || "field").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_|_$/g, "").slice(0, 32); }
-function getColorName(fill) { return fill ? "SURFACE" : "SURFACE"; }
+function sanitize(n) {
+  const RUST_KEYWORDS = new Set(["as","break","const","continue","crate","else","enum","extern","false","fn","for","if","impl","in","let","loop","match","mod","move","mut","pub","ref","return","self","static","struct","super","trait","true","type","unsafe","use","where","while","async","await","dyn"]);
+  let s = (n || "field").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || "field";
+  if (/^[0-9]/.test(s)) s = "f_" + s;
+  if (RUST_KEYWORDS.has(s)) s = s + "_";
+  return s;
+}
+function getColorName(fill, colorMap) { return fill ? (colorMap.get(`${fill.r},${fill.g},${fill.b}`) || "SURFACE") : "SURFACE"; }
 
 // ─── JSON Sidecar ────────────────────────────────────────────────────────────
 function generateSidecar(ab, els, colorMap) {
@@ -521,6 +628,8 @@ function generateSidecar(ab, els, colorMap) {
       isGradientMesh: el.isGradientMesh || undefined, isChart: el.isChart || undefined,
       thirdPartyEffects: el.thirdPartyEffects && el.thirdPartyEffects.length > 0 ? el.thirdPartyEffects : undefined,
       isOpaque: el.isOpaque || undefined, notes: el.notes.length > 0 ? el.notes : undefined,
+      pathPoints: el.pathPoints || undefined, pathClosed: el.pathClosed || undefined,
+      imagePath: el.imagePath || undefined,
     })),
   }, null, 2);
 }
@@ -659,7 +768,7 @@ async function exportArtboards(selectedIndices, options) {
   files["mod.rs"] = generateModFile(results);
   files["tokens.rs"] = generateTokensFile(constants);
   files["state.rs"] = generateStateFile(results);
-  files["components.rs"] = generateComponentsFile(comps);
+  files["components.rs"] = generateComponentsFile(comps, colorMap);
 
   for (const r of results) {
     const sn = toSnakeName(r.artboard.name), st = toStructName(r.artboard.name);

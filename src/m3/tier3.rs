@@ -59,7 +59,7 @@ impl<'a> M3Dialog<'a> {
         let mut confirmed = false;
 
         // Scrim overlay
-        let screen = ctx.screen_rect();
+        let screen = ctx.viewport_rect();
         let painter = ctx.layer_painter(egui::LayerId::new(
             egui::Order::Foreground,
             Id::new("m3_dialog_scrim"),
@@ -204,7 +204,7 @@ impl<'a> M3Snackbar<'a> {
         let c = &theme.colors;
         let mut action_clicked = false;
 
-        let screen = ctx.screen_rect();
+        let screen = ctx.viewport_rect();
         let snack_w = (screen.width() - 32.0).min(600.0);
         let snack_h = 48.0_f32;
         let snack_rect = Rect::from_min_size(

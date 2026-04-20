@@ -93,7 +93,6 @@ impl eframe::App for TimelineApp {
                     let painter = ui.painter();
 
                     // Draw grid and clips
-                    let track_height = track_height;
                     let visible_rows = culler.visible_rows(track_height, self.tracks.len());
                     let visible_cols = culler.visible_cols(beat_width, self.beats);
 

@@ -41,10 +41,10 @@ impl From<f32> for Edges {
 impl From<Edges> for Margin {
     fn from(e: Edges) -> Self {
         Margin {
-            top: e.top.clamp(-128.0, 127.0) as i8,
-            right: e.right.clamp(-128.0, 127.0) as i8,
-            bottom: e.bottom.clamp(-128.0, 127.0) as i8,
-            left: e.left.clamp(-128.0, 127.0) as i8,
+            top: e.top.clamp(-128.0, 127.0).round() as i8,
+            right: e.right.clamp(-128.0, 127.0).round() as i8,
+            bottom: e.bottom.clamp(-128.0, 127.0).round() as i8,
+            left: e.left.clamp(-128.0, 127.0).round() as i8,
         }
     }
 }

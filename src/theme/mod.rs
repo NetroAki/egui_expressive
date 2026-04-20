@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use egui::{Color32, Context, CornerRadius, Id, Painter, Rect, Stroke, Vec2};
 
 /// Runtime semantic colors following Material Design 3 principles.
@@ -139,7 +137,7 @@ impl Elevation {
 
     /// Paint shadow and filled rect on painter.
     pub fn apply(self, painter: &Painter, rect: Rect, rounding: f32, fill: Color32) {
-        let (blur_radius, _spread, offset_y, alpha) = self.shadow_params();
+        let (_blur_radius, _spread, offset_y, alpha) = self.shadow_params();
         let rounding_u8 = rounding.min(255.0) as u8;
 
         if alpha == 0 {

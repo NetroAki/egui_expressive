@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+#[allow(unused_imports)]
 use egui::{color_picker, CollapsingHeader, Ui};
 
 /// A named editable property
@@ -277,6 +278,7 @@ impl PropRegistry {
     }
 
     /// Show the property editor UI for a single property, returning the modified prop if changed
+    #[allow(dead_code)]
     fn edit_prop_ui(ui: &mut Ui, prop: &mut Prop) {
         match &mut prop.value {
             PropValue::Color(c) => {
@@ -299,6 +301,7 @@ impl PropRegistry {
     }
 
     /// Collect all groups in insertion order
+    #[allow(dead_code)]
     fn groups(&self) -> Vec<String> {
         let mut seen = std::collections::HashSet::new();
         let mut groups = Vec::new();
@@ -313,6 +316,7 @@ impl PropRegistry {
     }
 
     /// Get keys of props belonging to a group, in insertion order
+    #[allow(dead_code)]
     fn keys_in_group(&self, group: &str) -> Vec<String> {
         self.order
             .iter()
@@ -329,8 +333,8 @@ impl PropRegistry {
 
 /// Convert "GroupName" + "property_name" to "GROUP_NAME_PROPERTY_NAME"
 fn to_screaming_snake(group: &str, name: &str) -> String {
-    let group_upper = group.to_uppercase().replace(' ', "_").replace('/', "_");
-    let name_upper = name.to_uppercase().replace(' ', "_").replace('/', "_");
+    let group_upper = group.to_uppercase().replace([' ', '/'], "_");
+    let name_upper = name.to_uppercase().replace([' ', '/'], "_");
     if group_upper.is_empty() {
         name_upper
     } else {

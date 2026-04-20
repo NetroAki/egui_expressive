@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Animation helpers: easing curves, tweens, spring physics, and animation sequences.
 //!
 //! ## Quick Start
@@ -145,10 +143,10 @@ fn ease_in_out_back(t: f32) -> f32 {
 // ---------------------------------------------------------------------------
 
 // Multi-segment bounce using n1=7.5625, d1=2.75
+// BOUNCE_D1_2 and BOUNCE_D1_3 are part of the original formula but the
+// implementation only uses the first 4 segments with d1=2.75 as divisor.
 const BOUNCE_N1: f32 = 7.5625;
 const BOUNCE_D1_1: f32 = 2.75;
-const BOUNCE_D1_2: f32 = BOUNCE_D1_1 * 2.0;
-const BOUNCE_D1_3: f32 = BOUNCE_D1_1 * 2.5;
 
 fn ease_out_bounce(t: f32) -> f32 {
     if t < 1.0 / BOUNCE_D1_1 {
@@ -274,6 +272,8 @@ struct SeqMem {
     current: f32,
     /// Whether the sequence is actively playing.
     playing: bool,
+    /// Initial value at the start of the sequence (for step 0 start).
+    initial: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +339,21 @@ impl Tween {
             last_target: target,
         });
 
+        if self.duration <= 1e-6 {
+            // Zero duration: snap to target immediately
+            ctx.memory_mut(|m| {
+                m.data.insert_temp(
+                    mem_id,
+                    TweenMem {
+                        from: target,
+                        start_dt_acc: 0.0,
+                        last_target: target,
+                    },
+                )
+            });
+            return target;
+        }
+
         let dt = ctx.input(|i| i.unstable_dt);
 
         // Detect target change and reset animation
@@ -385,10 +400,26 @@ impl Tween {
         let to = color_to_f32(target);
 
         // Animate each channel
-        let r = self.animate_f32(ctx, to[0], from[0]);
-        let g = self.animate_f32(ctx, to[1], from[1]);
-        let b = self.animate_f32(ctx, to[2], from[2]);
-        let a = self.animate_f32(ctx, to[3], from[3]);
+        let r = Tween {
+            id: self.id.with("__tc_r"),
+            ..*self
+        }
+        .animate_f32(ctx, to[0], from[0]);
+        let g = Tween {
+            id: self.id.with("__tc_g"),
+            ..*self
+        }
+        .animate_f32(ctx, to[1], from[1]);
+        let b = Tween {
+            id: self.id.with("__tc_b"),
+            ..*self
+        }
+        .animate_f32(ctx, to[2], from[2]);
+        let a = Tween {
+            id: self.id.with("__tc_a"),
+            ..*self
+        }
+        .animate_f32(ctx, to[3], from[3]);
 
         // Recompose
         Color32::from_rgba_unmultiplied(
@@ -400,7 +431,7 @@ impl Tween {
     }
 }
 
-/// Convert Color32 to array of f32 channels (0-255 → 0-1).
+/// Convert Color32 to array of f32 channels (returns 0-255 range as f32).
 #[inline]
 fn color_to_f32(c: Color32) -> [f32; 4] {
     let [r, g, b, a] = c.to_array();
@@ -457,6 +488,21 @@ impl Spring {
             damping,
             mass: 1.0,
         }
+    }
+
+    /// Reset the spring to a target value immediately (for use by snap()).
+    fn reset_to(&self, ctx: &Context, target: f32) {
+        let mem_id = self.id.with("__spring_mem");
+        ctx.memory_mut(|m| {
+            m.data.insert_temp(
+                mem_id,
+                SpringMem {
+                    position: target,
+                    velocity: 0.0,
+                    last_target: target,
+                },
+            )
+        });
     }
 
     /// Animate a value toward the target using spring physics.
@@ -585,6 +631,7 @@ impl AnimSequence {
             step_progress: 0.0,
             current: 0.0,
             playing: true,
+            initial: 0.0,
         });
 
         // Nothing to animate if no steps
@@ -611,7 +658,8 @@ impl AnimSequence {
 
         // Handle step completion
         if mem.step_progress >= 1.0 {
-            mem.step_progress = 0.0;
+            // Convert overshoot to time so it maps correctly to the next step's duration
+            let overshoot_time = (mem.step_progress - 1.0) * current_step.duration;
 
             // Snap to current step's target
             if mem.step_idx < self.steps.len() {
@@ -621,19 +669,26 @@ impl AnimSequence {
             // Advance to next step
             if mem.step_idx + 1 < self.steps.len() {
                 mem.step_idx += 1;
+                let next_duration = self.steps[mem.step_idx].duration.max(1e-6);
+                mem.step_progress = (overshoot_time / next_duration).min(1.0);
             } else {
                 // Sequence complete, stop playing
                 mem.playing = false;
+                mem.step_progress = 0.0;
+                // Snap to final target on completion
+                if let Some(last_step) = self.steps.last() {
+                    mem.current = last_step.target;
+                }
             }
         }
 
-        // Compute output for current step
-        if mem.step_idx < self.steps.len() {
+        // Compute output for current step (only while playing)
+        if mem.playing && mem.step_idx < self.steps.len() {
             let step = &self.steps[mem.step_idx];
 
-            // Determine start value (previous step's target or initial current)
+            // Determine start value (previous step's target or initial value at sequence start)
             let start_value = if mem.step_idx == 0 {
-                mem.current
+                mem.initial
             } else {
                 self.steps[mem.step_idx - 1].target
             };
@@ -669,6 +724,7 @@ impl AnimSequence {
             step_progress: 0.0,
             current: 0.0,
             playing: false,
+            initial: 0.0,
         };
 
         ctx.memory_mut(|m| m.data.insert_temp(mem_id, mem));
@@ -681,7 +737,7 @@ impl AnimSequence {
     pub fn play(&self, ctx: &Context) {
         let mem_id = self.id.with("__seq_mem");
 
-        // Load current state to preserve current value
+        // Load current state to preserve current value as the animation start
         let current: f32 = ctx
             .memory(|m| m.data.get_temp::<SeqMem>(mem_id))
             .map(|m| m.current)
@@ -692,6 +748,7 @@ impl AnimSequence {
             step_progress: 0.0,
             current,
             playing: true,
+            initial: current, // capture current value as step 0 start
         };
 
         ctx.memory_mut(|m| m.data.insert_temp(mem_id, mem));
@@ -776,7 +833,7 @@ mod tests {
         let f = color_to_f32(c);
         // All components should be valid u8 values cast to f32
         for component in f {
-            assert!(component >= 0.0 && component <= 255.0);
+            assert!((0.0..=255.0).contains(&component));
         }
     }
 }
@@ -860,14 +917,14 @@ pub fn transition_color(
 /// anim.set(if hovered { 1.0 } else { 0.0 });
 /// let opacity = anim.get(ui.ctx());
 /// ```
-pub struct AnimatedState<T: crate::style::Lerp + Clone + Copy + 'static + Send + Sync> {
+pub struct AnimatedState<T: crate::style::Lerp + Clone + Copy + PartialEq + 'static + Send + Sync> {
     id: egui::Id,
     pub target: T,
     stiffness: f32,
     damping: f32,
 }
 
-impl<T: crate::style::Lerp + Clone + Copy + 'static + Send + Sync> AnimatedState<T> {
+impl<T: crate::style::Lerp + Clone + Copy + PartialEq + 'static + Send + Sync> AnimatedState<T> {
     /// Create with spring physics. `initial` is both the starting and target value.
     pub fn spring(id: egui::Id, initial: T) -> Self {
         Self {
@@ -893,33 +950,59 @@ impl<T: crate::style::Lerp + Clone + Copy + 'static + Send + Sync> AnimatedState
     /// Get the current animated value. Must be called every frame.
     /// Internally drives a spring from the stored `from` value toward `target`.
     pub fn get(&self, ctx: &egui::Context) -> T {
-        // Retrieve stored "from" value (defaults to target = no animation)
-        let from: T = ctx
-            .data(|d| d.get_temp(self.id.with("__as_from")))
-            .unwrap_or(self.target);
+        let from_id = self.id.with("__as_from");
+        let last_target_id = self.id.with("__as_last_target");
+        let spring_id = self.id.with("__as_spring");
 
-        // Animate t: 0.0 → 1.0 using spring
-        let spring = Spring::new(self.id.with("__as_spring"), self.stiffness, self.damping);
-        let t = spring.animate(ctx, 1.0, 0.0);
+        // Check if target changed since last get() by comparing stored last_target
+        let last_target: Option<T> = ctx.data(|d| d.get_temp(last_target_id));
+        let target_changed = last_target != Some(self.target);
 
-        // When animation settles (t ≈ 1.0), update "from" to current target
-        if (t - 1.0).abs() < 0.001 {
-            ctx.data_mut(|d| d.insert_temp(self.id.with("__as_from"), self.target));
+        if target_changed {
+            // Capture current visible value WITHOUT advancing the spring further.
+            // Read the stored spring position directly to avoid a one-frame overshoot toward the old target.
+            let from: T = ctx.data(|d| d.get_temp(from_id)).unwrap_or(self.target);
+            let spring = Spring::new(spring_id, self.stiffness, self.damping);
+            // Read current spring t from stored state (don't call animate which would advance it)
+            let stored_t: f32 = ctx.data(|d| {
+                d.get_temp::<crate::animation::SpringMem>(spring_id.with("__spring_mem"))
+                    .map(|m| m.position)
+                    .unwrap_or(0.0)
+            });
+            let prev_target = last_target.unwrap_or(self.target);
+            let current = T::lerp(&from, &prev_target, stored_t.clamp(0.0, 1.0));
+            // Store new from = current visible value, update last_target
+            ctx.data_mut(|d| {
+                d.insert_temp(from_id, current);
+                d.insert_temp(last_target_id, self.target);
+            });
+            // Reset spring to 0
+            spring.reset_to(ctx, 0.0);
+            ctx.request_repaint();
+            return current;
         }
 
-        T::lerp(&from, &self.target, t)
+        // Normal animation
+        let from: T = ctx.data(|d| d.get_temp(from_id)).unwrap_or(self.target);
+        let spring = Spring::new(spring_id, self.stiffness, self.damping);
+        let t = spring.animate(ctx, 1.0, 0.0);
+
+        // When animation settles, update from to current target
+        if t >= 1.0 {
+            ctx.data_mut(|d| d.insert_temp(from_id, self.target));
+        }
+
+        T::lerp(&from, &self.target, t.clamp(0.0, 1.0))
     }
 
     /// Snap to target immediately, no animation.
     pub fn snap(&self, ctx: &egui::Context) {
-        ctx.data_mut(|d| d.insert_temp(self.id.with("__as_from"), self.target));
-        // Reset spring
         ctx.data_mut(|d| {
-            d.insert_temp::<f32>(self.id.with("__as_spring").with("__spring_pos"), 1.0)
+            d.insert_temp(self.id.with("__as_from"), self.target);
+            d.insert_temp(self.id.with("__as_last_target"), self.target);
         });
-        ctx.data_mut(|d| {
-            d.insert_temp::<f32>(self.id.with("__as_spring").with("__spring_vel"), 0.0)
-        });
+        let spring = Spring::new(self.id.with("__as_spring"), self.stiffness, self.damping);
+        spring.reset_to(ctx, 1.0);
     }
 }
 

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Reusable controls: Knob, Fader, Meter, StepGrid, and more.
 //! DAW-specific widgets are also accessible via the `daw` feature module.
 
@@ -310,13 +308,13 @@ impl<'a> egui::Widget for Knob<'a> {
                 });
             }
             KnobStyle::Flat => {
-                paint_knob_flat(&painter, center, radius, t, track_color, value_color);
+                paint_knob_flat(painter, center, radius, t, track_color, value_color);
             }
             KnobStyle::Ring => {
-                paint_knob_ring(&painter, center, radius, t, track_color, value_color);
+                paint_knob_ring(painter, center, radius, t, track_color, value_color);
             }
             KnobStyle::Notched => {
-                paint_knob_notched(&painter, center, radius, t, track_color, value_color, 13);
+                paint_knob_notched(painter, center, radius, t, track_color, value_color, 13);
             }
         }
 
@@ -411,23 +409,27 @@ fn paint_knob_notched(
     let total_sweep = PI * 1.5;
     let active_angle = start_angle + normalized * total_sweep;
 
-    for i in 0..ticks {
-        let t = i as f32 / (ticks - 1) as f32;
-        let angle = start_angle + t * total_sweep;
-        let color = if angle <= active_angle {
-            value_color
-        } else {
-            track_color
-        };
-        let inner = egui::Pos2::new(
-            center.x + angle.cos() * radius * 0.65,
-            center.y + angle.sin() * radius * 0.65,
-        );
-        let outer = egui::Pos2::new(
-            center.x + angle.cos() * radius * 0.9,
-            center.y + angle.sin() * radius * 0.9,
-        );
-        painter.line_segment([inner, outer], egui::Stroke::new(2.0, color));
+    if ticks < 2 {
+        // Skip tick painting for 0 or 1 ticks
+    } else {
+        for i in 0..ticks {
+            let t = i as f32 / (ticks - 1) as f32;
+            let angle = start_angle + t * total_sweep;
+            let color = if angle <= active_angle {
+                value_color
+            } else {
+                track_color
+            };
+            let inner = egui::Pos2::new(
+                center.x + angle.cos() * radius * 0.65,
+                center.y + angle.sin() * radius * 0.65,
+            );
+            let outer = egui::Pos2::new(
+                center.x + angle.cos() * radius * 0.9,
+                center.y + angle.sin() * radius * 0.9,
+            );
+            painter.line_segment([inner, outer], egui::Stroke::new(2.0, color));
+        }
     }
     // Center dot
     painter.circle_filled(center, radius * 0.15, value_color);
@@ -517,21 +519,11 @@ impl<'a> egui::Widget for Fader<'a> {
         let thumb_hovered = visuals.widgets.hovered.bg_fill;
         let label_color = visuals.text_color();
 
-        let min = *self.range.start();
-        let max = *self.range.end();
-        let t = ((*self.value - min) / (max - min)).clamp(0.0, 1.0) as f32;
-
         // Track dimensions
         let track_width = 6.0;
-        let thumb_width = if self.orientation == Orientation::Vertical {
-            self.size.x - 4.0
-        } else {
-            self.size.y - 4.0
-        };
-        let thumb_height = if self.orientation == Orientation::Vertical {
-            track_width + 4.0
-        } else {
-            self.size.x - 4.0
+        let (thumb_width, thumb_height) = match self.orientation {
+            Orientation::Vertical => (self.size.x - 4.0, track_width + 4.0),
+            Orientation::Horizontal => (track_width + 4.0, self.size.y - 4.0),
         };
 
         // Calculate track_rect based on orientation
@@ -551,9 +543,8 @@ impl<'a> egui::Widget for Fader<'a> {
 
         // Draw integrated VU meter in track
         if let Some(level) = self.meter_value {
-            if self.meter_value_r.is_some() {
+            if let Some(level_r) = self.meter_value_r {
                 // Stereo: render two side-by-side meters
-                let level_r = self.meter_value_r.unwrap();
                 let left_track = Rect::from_min_max(
                     track_rect.min,
                     Pos2::new(track_rect.center().x, track_rect.max.y),
@@ -591,11 +582,25 @@ impl<'a> egui::Widget for Fader<'a> {
             }
         }
 
+        let axis = match self.orientation {
+            Orientation::Vertical => DragAxis::Y,
+            Orientation::Horizontal => DragAxis::X,
+        };
+        let track_len = match self.orientation {
+            Orientation::Vertical => rect.height() - 8.0 - thumb_height,
+            Orientation::Horizontal => rect.width() - 8.0 - thumb_width,
+        };
+        let mut ctrl = ContinuousControl::new(self.value, self.range.clone())
+            .axis(axis)
+            .sensitivity(track_len.max(1.0));
+        let t = ctrl.handle(ui, &response);
+
         // Draw thumb
         match self.orientation {
             Orientation::Vertical => {
-                // Thumb position (from bottom)
-                let thumb_y = rect.max.y - 4.0 - t * (rect.height() - 8.0 - thumb_height);
+                // Thumb position (from bottom) — subtract thumb_height so top edge is within rect
+                let thumb_y =
+                    rect.max.y - 4.0 - thumb_height - t * (rect.height() - 8.0 - thumb_height);
                 let thumb_rect = Rect::from_min_size(
                     Pos2::new(rect.min.x + 2.0, thumb_y),
                     Vec2::new(thumb_width, thumb_height),
@@ -614,13 +619,6 @@ impl<'a> egui::Widget for Fader<'a> {
                 painter.rect_filled(thumb_rect, 2.0, thumb_color);
             }
         }
-
-        let axis = match self.orientation {
-            Orientation::Vertical => DragAxis::Y,
-            Orientation::Horizontal => DragAxis::X,
-        };
-        let mut ctrl = ContinuousControl::new(self.value, self.range.clone()).axis(axis);
-        let _t = ctrl.handle(ui, &response);
 
         // Label
         if let Some(label) = &self.label {
@@ -713,7 +711,7 @@ fn draw_meter_in_track(
 // ToggleDot
 // ---------------------------------------------------------------------------
 
-/// The 4 visual states of a mute/solo dot.
+/// The 5 visual states of a mute/solo dot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum DotState {
     /// Normal active state (green/lit).
@@ -754,16 +752,11 @@ impl DotState {
 pub struct ToggleDot<'a> {
     state: &'a mut DotState,
     size: f32,
-    id: egui::Id,
 }
 
 impl<'a> ToggleDot<'a> {
-    pub fn new(id: impl std::hash::Hash, state: &'a mut DotState) -> Self {
-        Self {
-            state,
-            size: 8.0,
-            id: egui::Id::new(id),
-        }
+    pub fn new(state: &'a mut DotState) -> Self {
+        Self { state, size: 8.0 }
     }
 
     pub fn size(mut self, s: f32) -> Self {
@@ -1020,8 +1013,7 @@ impl egui::Widget for Meter {
                     let seg_height = (rect.height() - (seg_count - 1.0) * seg_gap) / seg_count;
                     let filled_segs = (t * seg_count).floor() as i32;
                     for i in 0..self.segments as i32 {
-                        let seg_idx = self.segments as i32 - 1 - i; // bottom to top
-                        if seg_idx < filled_segs {
+                        if i < filled_segs {
                             let y_top =
                                 rect.max.y - (i as f32) * (seg_height + seg_gap) - seg_height;
                             let seg_rect = Rect::from_min_size(
@@ -1362,7 +1354,7 @@ impl ContextMenuBuilder {
                             }
                             if resp.clicked() {
                                 (callback)();
-                                ui.close_menu();
+                                ui.close();
                             }
                         });
                     });
@@ -1377,7 +1369,7 @@ impl ContextMenuBuilder {
                         let full_label = format!("{}{}", check_str, label);
                         if ui.selectable_label(checked, &full_label).clicked() {
                             (callback)(!checked);
-                            ui.close_menu();
+                            ui.close();
                         }
                     });
                 }
@@ -1456,7 +1448,7 @@ impl<'a> FloatingPanel<'a> {
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> Option<egui::InnerResponse<Option<R>>> {
         // Build a Frame from current style, then override fill and stroke
-        let frame = egui::Frame::window(&ctx.style())
+        let frame = egui::Frame::window(&ctx.global_style())
             .fill(egui::Color32::from_rgb(22, 22, 27))
             .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 40, 47)));
 
@@ -1838,7 +1830,7 @@ impl ResizableSplit {
         // Load or initialize fraction from memory - get ctx in a sub-scope
         let fraction: f32 = {
             let ctx = ui.ctx();
-            ctx.memory(|m| m.data.get_temp(frac_id))
+            ctx.data(|d| d.get_temp(frac_id))
                 .unwrap_or(self.initial_fraction)
         };
 
@@ -1902,19 +1894,19 @@ impl ResizableSplit {
         painter.rect_filled(divider_rect, 0.0, div_color);
 
         // Render left/top pane
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(left_rect), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect), |ui| {
             left_or_top(ui);
         });
 
         // Render right/bottom pane
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(right_rect), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(right_rect), |ui| {
             right_or_bottom(ui);
         });
 
         // Now update memory with new fraction (after all ui operations are done)
         if let Some(frac) = new_fraction {
             let ctx = ui.ctx();
-            ctx.memory_mut(|m| m.data.insert_temp(frac_id, frac));
+            ctx.data_mut(|d| d.insert_temp(frac_id, frac));
         }
     }
 }
@@ -2050,7 +2042,9 @@ impl<'a> Ruler<'a> {
                 continue;
             }
 
-            let is_bar = beat_f >= 0.0 && beat_f as u32 % self.beats_per_bar == 0;
+            let is_bar = beat_f >= 0.0
+                && self.beats_per_bar > 0
+                && (beat_f as u32).is_multiple_of(self.beats_per_bar);
             let line_height = if is_bar {
                 rect.height()
             } else {
@@ -2127,15 +2121,14 @@ impl ClipKind {
 ///
 /// # Example
 /// ```rust,ignore
-/// let response = TimelineClip::new("clip_1", clip_start, clip_length)
+/// let response = TimelineClip::new(clip_start, clip_length)
 ///     .kind(ClipKind::Audio)
 ///     .label("Kick Loop")
 ///     .color(Color32::from_rgb(120, 60, 180))
-///     .show(ui, &culler);
+///     .show(ui);
 /// if response.drag_delta() != Vec2::ZERO { ... }
 /// ```
 pub struct TimelineClip<'a> {
-    id: egui::Id,
     start: &'a mut f32,
     length: &'a mut f32,
     kind: ClipKind,
@@ -2148,9 +2141,8 @@ pub struct TimelineClip<'a> {
 }
 
 impl<'a> TimelineClip<'a> {
-    pub fn new(id: impl std::hash::Hash, start: &'a mut f32, length: &'a mut f32) -> Self {
+    pub fn new(start: &'a mut f32, length: &'a mut f32) -> Self {
         Self {
-            id: egui::Id::new(id),
             start,
             length,
             kind: ClipKind::Pattern,
@@ -2206,20 +2198,6 @@ impl<'a> TimelineClip<'a> {
             Vec2::new(screen_width, self.height),
         );
 
-        // Allocate full clip rect for body drag
-        let response = ui.allocate_rect(clip_rect, Sense::drag());
-
-        // Handle body drag (move)
-        if response.dragged() {
-            let delta = response.drag_delta();
-            *self.start += delta.x / (self.pixels_per_unit * scale);
-            *self.start = self.start.max(0.0);
-        }
-
-        // Re-calculate positions after potential start change
-        let screen_x = self.origin.x + (*self.start * self.pixels_per_unit * scale) + offset.x;
-        let screen_width = *self.length * self.pixels_per_unit * scale;
-
         let handle_width = 8.0;
 
         // Left resize handle (allocated FIRST so it takes priority in hit-testing)
@@ -2230,10 +2208,25 @@ impl<'a> TimelineClip<'a> {
         let left_handle = ui.allocate_rect(left_handle_rect, Sense::drag());
         if left_handle.dragged() {
             let delta = left_handle.drag_delta();
-            *self.start += delta.x / (self.pixels_per_unit * scale);
-            *self.length -= delta.x / (self.pixels_per_unit * scale);
-            *self.length = self.length.max(0.25);
+            let original_start = *self.start;
+            let original_length = *self.length;
+            let right_edge = original_start + original_length;
+            // Clamp start to 0 and derive length from actual start change (not raw delta)
+            *self.start = (*self.start + delta.x / (self.pixels_per_unit * scale)).max(0.0);
+            *self.length = right_edge - *self.start;
+
+            // Preserve right edge when clamping to minimum length
+            if *self.length < 0.25 {
+                *self.start = (right_edge - 0.25).max(0.0);
+                *self.length = right_edge - *self.start;
+                if *self.length < 0.25 {
+                    *self.length = 0.25; // right_edge was < 0.25; keep start at 0
+                }
+            }
         }
+
+        let screen_x = self.origin.x + (*self.start * self.pixels_per_unit * scale) + offset.x;
+        let screen_width = *self.length * self.pixels_per_unit * scale;
 
         // Right resize handle
         let right_handle_rect = Rect::from_min_size(
@@ -2247,6 +2240,20 @@ impl<'a> TimelineClip<'a> {
             *self.length = self.length.max(0.25);
         }
 
+        // Recompute after right-handle drag mutation
+        let screen_x = self.origin.x + (*self.start * self.pixels_per_unit * scale) + offset.x;
+        let screen_width = *self.length * self.pixels_per_unit * scale;
+
+        // Recompute handle rects for painting (after drag mutations)
+        let left_handle_paint_rect = Rect::from_min_size(
+            Pos2::new(screen_x, self.origin.y),
+            Vec2::new(handle_width, self.height),
+        );
+        let right_handle_paint_rect = Rect::from_min_size(
+            Pos2::new(screen_x + screen_width - handle_width, self.origin.y),
+            Vec2::new(handle_width, self.height),
+        );
+
         // Body rect excludes handle zones (shrink by handle_width on each side)
         let body_rect = Rect::from_min_size(
             Pos2::new(screen_x + handle_width, clip_rect.min.y),
@@ -2254,20 +2261,30 @@ impl<'a> TimelineClip<'a> {
         );
 
         // Allocate full clip rect for body drag
-        let response = ui.allocate_rect(body_rect, Sense::drag());
+        let response = if screen_width >= handle_width * 2.0 + 1.0 {
+            let response = ui.allocate_rect(body_rect, Sense::drag());
 
-        // Handle body drag (move)
-        if response.dragged() {
-            let delta = response.drag_delta();
-            *self.start += delta.x / (self.pixels_per_unit * scale);
-            *self.start = self.start.max(0.0);
-        }
-
-        // Re-calculate positions after potential start change
-        let _screen_x = self.origin.x + (*self.start * self.pixels_per_unit * scale) + offset.x;
-        let _screen_width = *self.length * self.pixels_per_unit * scale;
+            // Handle body drag (move)
+            if response.dragged() {
+                let delta = response.drag_delta();
+                *self.start += delta.x / (self.pixels_per_unit * scale);
+                *self.start = self.start.max(0.0);
+            }
+            response
+        } else {
+            ui.allocate_rect(body_rect, Sense::hover())
+        };
 
         let painter = ui.painter();
+
+        // Recompute clip_rect after all drag mutations for accurate painting
+        let clip_rect = Rect::from_min_size(
+            Pos2::new(
+                self.origin.x + (*self.start * self.pixels_per_unit * scale) + offset.x,
+                self.origin.y,
+            ),
+            Vec2::new(*self.length * self.pixels_per_unit * scale, self.height),
+        );
 
         // Get clip color
         let fill_color = self.color.unwrap_or_else(|| self.kind.default_color());
@@ -2303,13 +2320,16 @@ impl<'a> TimelineClip<'a> {
         // For simplicity, we always draw subtle handle indicators
         let handle_strip_color = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40);
         painter.rect_filled(
-            Rect::from_min_size(left_handle_rect.min, Vec2::new(2.0, self.height)),
+            Rect::from_min_size(left_handle_paint_rect.min, Vec2::new(2.0, self.height)),
             0.0,
             handle_strip_color,
         );
         painter.rect_filled(
             Rect::from_min_size(
-                Pos2::new(right_handle_rect.right() - 2.0, right_handle_rect.min.y),
+                Pos2::new(
+                    right_handle_paint_rect.right() - 2.0,
+                    right_handle_paint_rect.min.y,
+                ),
                 Vec2::new(2.0, self.height),
             ),
             0.0,
@@ -2348,6 +2368,7 @@ impl<'a> TimelineClip<'a> {
 ///     .show(ui);
 /// ```
 pub struct ChannelStrip<'a> {
+    #[allow(dead_code)]
     id: egui::Id,
     volume: &'a mut f64,
     pan: &'a mut f64,
@@ -2442,14 +2463,8 @@ impl<'a> ChannelStrip<'a> {
 
             // Mute/Solo row
             ui.horizontal(|ui| {
-                ui.add_sized(
-                    [w * 0.5, 12.0],
-                    ToggleDot::new(self.id.with("mute"), self.mute_state).size(10.0),
-                );
-                ui.add_sized(
-                    [w * 0.5, 12.0],
-                    ToggleDot::new(self.id.with("solo"), self.solo_state).size(10.0),
-                );
+                ui.add_sized([w * 0.5, 12.0], ToggleDot::new(self.mute_state).size(10.0));
+                ui.add_sized([w * 0.5, 12.0], ToggleDot::new(self.solo_state).size(10.0));
             });
 
             // Spacing
@@ -2752,14 +2767,12 @@ impl<'a, T: Clone> DragReorder<'a, T> {
                 state.drag_offset = 0.0;
             }
 
-            if handle_resp.dragged() {
-                if state.dragging == Some(i) {
-                    state.drag_offset += handle_resp.drag_delta().y;
-                    // Compute target index
-                    let target_f = i as f32 + state.drag_offset / self.item_height;
-                    let target = (target_f.round() as isize).clamp(0, n as isize - 1) as usize;
-                    state.hover_index = Some(target);
-                }
+            if handle_resp.dragged() && state.dragging == Some(i) {
+                state.drag_offset += handle_resp.drag_delta().y;
+                // Compute target index
+                let target_f = i as f32 + state.drag_offset / self.item_height;
+                let target = (target_f.round() as isize).clamp(0, n as isize - 1) as usize;
+                state.hover_index = Some(target);
             }
 
             if handle_resp.drag_stopped() {
@@ -3247,6 +3260,7 @@ pub struct CollapsePanel<'a> {
     default_open: bool,
     header_height: f32,
     animation_duration: f32,
+    max_height: f32,
 }
 
 impl<'a> CollapsePanel<'a> {
@@ -3257,6 +3271,7 @@ impl<'a> CollapsePanel<'a> {
             default_open: true,
             header_height: 32.0,
             animation_duration: 0.2,
+            max_height: 2000.0,
         }
     }
 
@@ -3272,6 +3287,10 @@ impl<'a> CollapsePanel<'a> {
         self.animation_duration = secs;
         self
     }
+    pub fn max_height(mut self, h: f32) -> Self {
+        self.max_height = h;
+        self
+    }
 
     /// Show the collapsible panel.
     ///
@@ -3279,12 +3298,12 @@ impl<'a> CollapsePanel<'a> {
     pub fn show(self, ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) -> bool {
         let ctx = ui.ctx().clone();
 
-        let mut state: CollapsePanelState = ctx
-            .memory(|m| m.data.get_temp(self.id))
-            .unwrap_or_else(|| CollapsePanelState {
-                open: self.default_open,
-                anim_t: if self.default_open { 1.0 } else { 0.0 },
-            });
+        let mut state: CollapsePanelState =
+            ctx.data(|d| d.get_temp(self.id))
+                .unwrap_or(CollapsePanelState {
+                    open: self.default_open,
+                    anim_t: if self.default_open { 1.0 } else { 0.0 },
+                });
 
         // Advance animation
         let dt = ctx.input(|i| i.stable_dt).min(0.1);
@@ -3370,8 +3389,7 @@ impl<'a> CollapsePanel<'a> {
             let content_start = ui.cursor().min;
 
             // Use a child UI with clipping
-            let max_content_height = 2000.0; // generous max
-            let clip_height = eased * max_content_height;
+            let clip_height = eased * self.max_height;
 
             let child_rect = egui::Rect::from_min_size(
                 content_start,
@@ -3391,7 +3409,7 @@ impl<'a> CollapsePanel<'a> {
             ui.allocate_space(egui::Vec2::new(available_width, actual_height));
         }
 
-        ctx.memory_mut(|m| m.data.insert_temp(self.id, state));
+        ctx.data_mut(|d| d.insert_temp(self.id, state));
         is_visible
     }
 }

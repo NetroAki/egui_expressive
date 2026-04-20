@@ -28,43 +28,6 @@ impl std::fmt::Display for FigmaExportError {
 
 impl std::error::Error for FigmaExportError {}
 
-// ─── Figma Tokens Plugin JSON Structures ────────────────────────────────────────
-
-/// A single token entry in Figma Tokens plugin format.
-#[derive(Debug, Deserialize)]
-struct TokenEntry {
-    value: TokenValue,
-    #[serde(rename = "type")]
-    token_type: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum TokenValue {
-    String(String),
-    Object(TokenObject),
-}
-
-#[derive(Debug, Deserialize)]
-struct TokenObject {
-    value: Option<String>,
-    #[serde(rename = "type")]
-    token_type: Option<String>,
-}
-
-/// Top-level structure for Figma Tokens plugin JSON (with "global" wrapper).
-#[derive(Debug, Deserialize)]
-struct FigmaTokensGlobal {
-    global: Option<FigmaTokenGroups>,
-}
-
-/// Direct token groups without "global" wrapper.
-#[derive(Debug, Deserialize)]
-struct FigmaTokenGroups {
-    #[serde(flatten)]
-    groups: std::collections::HashMap<String, serde_json::Value>,
-}
-
 /// A parsed color value ready for code generation.
 #[derive(Clone, Debug)]
 struct ParsedColor {
@@ -339,8 +302,6 @@ const ACCENT_NAMES: [&str; 6] = ["glow", "active", "midi", "audio", "warn", "dan
 
 const SPACING_NAMES: [&str; 6] = ["xs", "sm", "md", "lg", "xl", "xxl"];
 
-const ROUNDING_NAMES: [&str; 4] = ["sm", "md", "lg", "full"];
-
 /// Generate the Rust source code from extracted tokens.
 fn generate_rust_code(tokens: &ExtractedTokens) -> String {
     let mut out = String::new();
@@ -359,7 +320,7 @@ fn generate_rust_code(tokens: &ExtractedTokens) -> String {
     // Surface palette
     out.push_str("        surface: SurfacePalette {\n");
     for stop in &SURFACE_STOPS {
-        let color = tokens.surface_color(stop).unwrap_or_else(|| ParsedColor {
+        let color = tokens.surface_color(stop).unwrap_or(ParsedColor {
             r: 0,
             g: 0,
             b: 0,
@@ -376,7 +337,7 @@ fn generate_rust_code(tokens: &ExtractedTokens) -> String {
     // Accent colors
     out.push_str("        accent: AccentColors {\n");
     for name in &ACCENT_NAMES {
-        let color = tokens.accent_color(name).unwrap_or_else(|| ParsedColor {
+        let color = tokens.accent_color(name).unwrap_or(ParsedColor {
             r: 0,
             g: 0,
             b: 0,
@@ -417,7 +378,7 @@ pub fn figma_tokens_to_rust(json: &str) -> Result<String, FigmaExportError> {
         serde_json::from_str(json).map_err(|e| FigmaExportError::ParseError(e.to_string()))?;
 
     // Check if this is a Figma REST API styles response
-    if let Some(styles_response) = value.get("styles") {
+    if let Some(_styles_response) = value.get("styles") {
         if let Ok(resp) = serde_json::from_str::<FigmaStylesResponse>(json) {
             if let Some(styles) = resp.styles {
                 return generate_from_figma_styles(&styles);
@@ -477,19 +438,15 @@ fn generate_from_figma_styles(styles: &[FigmaStyleEntry]) -> Result<String, Figm
         if let Some((_, desc)) = entry {
             let comment = desc.as_deref().unwrap_or("");
             if !comment.is_empty() {
-                out.push_str(&format!(
-                    "            // {}: \"{}\"\n",
-                    format!("s{}", stop),
-                    comment
-                ));
+                out.push_str(&format!("            // s{}: \"{}\"\n", stop, comment));
             }
             out.push_str(&format!(
-                "            s{}: Color32::from_rgba_unmultiplied(0, 0, 0, 255), // TODO: fill\n",
+                "            s{}: Color32::from_rgba_unmultiplied(0, 0, 0, 255), // Replace with actual color from design tokens\n",
                 stop
             ));
         } else {
             out.push_str(&format!(
-                "            s{}: Color32::from_rgba_unmultiplied(0, 0, 0, 255), // TODO: fill\n",
+                "            s{}: Color32::from_rgba_unmultiplied(0, 0, 0, 255), // Replace with actual color from design tokens\n",
                 stop
             ));
         }
@@ -507,7 +464,7 @@ fn generate_from_figma_styles(styles: &[FigmaStyleEntry]) -> Result<String, Figm
             }
         }
         out.push_str(&format!(
-            "            {}: Color32::from_rgba_unmultiplied(0, 0, 0, 255), // TODO: fill\n",
+            "            {}: Color32::from_rgba_unmultiplied(0, 0, 0, 255), // Replace with actual color from design tokens\n",
             name
         ));
     }
@@ -516,101 +473,17 @@ fn generate_from_figma_styles(styles: &[FigmaStyleEntry]) -> Result<String, Figm
     // Default spacing and rounding (no data from REST API)
     out.push_str("        spacing: SpacingScale {\n");
     for name in &SPACING_NAMES {
-        out.push_str(&format!("            {}: 0.0, // TODO: fill\n", name));
+        out.push_str(&format!("            {}: 0.0, // Replace with actual spacing value from design tokens\n", name));
     }
     out.push_str("        },\n");
 
-    out.push_str("        rounding: 4.0, // TODO: fill\n");
-    out.push_str("        panel_rounding: 8.0, // TODO: fill\n");
+    out.push_str("        rounding: 4.0, // Replace with actual rounding from design tokens\n");
+    out.push_str("        panel_rounding: 8.0, // Replace with actual panel rounding from design tokens\n");
 
     out.push_str("    }\n");
     out.push_str("}\n");
 
     Ok(out)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_hex_color_6() {
-        let color = parse_hex_color("#ff8040").unwrap();
-        assert_eq!(color.r, 255);
-        assert_eq!(color.g, 128);
-        assert_eq!(color.b, 64);
-        assert_eq!(color.a, 255);
-    }
-
-    #[test]
-    fn test_parse_hex_color_8() {
-        let color = parse_hex_color("#ff804080").unwrap();
-        assert_eq!(color.r, 255);
-        assert_eq!(color.g, 128);
-        assert_eq!(color.b, 64);
-        assert_eq!(color.a, 128);
-    }
-
-    #[test]
-    fn test_parse_color_value_rgb() {
-        let color = parse_color_value("rgb(255, 128, 64)").unwrap();
-        assert_eq!(color.r, 255);
-        assert_eq!(color.g, 128);
-        assert_eq!(color.b, 64);
-        assert_eq!(color.a, 255);
-    }
-
-    #[test]
-    fn test_parse_color_value_rgba() {
-        let color = parse_color_value("rgba(255, 128, 64, 0.5)").unwrap();
-        assert_eq!(color.r, 255);
-        assert_eq!(color.g, 128);
-        assert_eq!(color.b, 64);
-        assert_eq!(color.a, 127); // 0.5 * 255 = 127.5 truncates to 127
-    }
-
-    #[test]
-    fn test_figma_tokens_basic() {
-        let json = r##"{
-            "global": {
-                "surface": {
-                    "50": { "value": "#f8f8f8", "type": "color" },
-                    "950": { "value": "#0a0a0a", "type": "color" }
-                },
-                "accent": {
-                    "glow": { "value": "#7c3aed", "type": "color" }
-                },
-                "spacing": {
-                    "md": { "value": "8", "type": "spacing" }
-                },
-                "rounding": {
-                    "md": { "value": "4", "type": "borderRadius" }
-                }
-            }
-        }"##;
-
-        let result = figma_tokens_to_rust(json);
-        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-        let code = result.unwrap();
-        assert!(code.contains("pub fn design_tokens()"));
-        assert!(code.contains("SurfacePalette"));
-        assert!(code.contains("AccentColors"));
-    }
-
-    #[test]
-    fn test_figma_tokens_no_wrapper() {
-        let json = r##"{
-            "surface": {
-                "50": { "value": "#ffffff", "type": "color" }
-            },
-            "accent": {
-                "glow": { "value": "#000000", "type": "color" }
-            }
-        }"##;
-
-        let result = figma_tokens_to_rust(json);
-        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-    }
 }
 
 // ─── Runtime Deserializer ────────────────────────────────────────────────────
@@ -706,4 +579,88 @@ pub fn design_tokens_from_json(json: &str) -> Result<DesignTokens, FigmaExportEr
         rounding: get_spacing("rounding").max(0.0),
         panel_rounding: get_spacing("panel-rounding").max(0.0),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_hex_color_6() {
+        let color = parse_hex_color("#ff8040").unwrap();
+        assert_eq!(color.r, 255);
+        assert_eq!(color.g, 128);
+        assert_eq!(color.b, 64);
+        assert_eq!(color.a, 255);
+    }
+
+    #[test]
+    fn test_parse_hex_color_8() {
+        let color = parse_hex_color("#ff804080").unwrap();
+        assert_eq!(color.r, 255);
+        assert_eq!(color.g, 128);
+        assert_eq!(color.b, 64);
+        assert_eq!(color.a, 128);
+    }
+
+    #[test]
+    fn test_parse_color_value_rgb() {
+        let color = parse_color_value("rgb(255, 128, 64)").unwrap();
+        assert_eq!(color.r, 255);
+        assert_eq!(color.g, 128);
+        assert_eq!(color.b, 64);
+        assert_eq!(color.a, 255);
+    }
+
+    #[test]
+    fn test_parse_color_value_rgba() {
+        let color = parse_color_value("rgba(255, 128, 64, 0.5)").unwrap();
+        assert_eq!(color.r, 255);
+        assert_eq!(color.g, 128);
+        assert_eq!(color.b, 64);
+        assert_eq!(color.a, 127); // 0.5 * 255 = 127.5 truncates to 127
+    }
+
+    #[test]
+    fn test_figma_tokens_basic() {
+        let json = r##"{
+            "global": {
+                "surface": {
+                    "50": { "value": "#f8f8f8", "type": "color" },
+                    "950": { "value": "#0a0a0a", "type": "color" }
+                },
+                "accent": {
+                    "glow": { "value": "#7c3aed", "type": "color" }
+                },
+                "spacing": {
+                    "md": { "value": "8", "type": "spacing" }
+                },
+                "rounding": {
+                    "md": { "value": "4", "type": "borderRadius" }
+                }
+            }
+        }"##;
+
+        let result = figma_tokens_to_rust(json);
+        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+        let code = result.unwrap();
+        assert!(code.contains("pub fn design_tokens()"));
+        assert!(code.contains("SurfacePalette"));
+        assert!(code.contains("AccentColors"));
+    }
+
+    #[test]
+    fn test_figma_tokens_no_wrapper() {
+        let json = r##"{
+            "surface": {
+                "50": { "value": "#ffffff", "type": "color" }
+            },
+            "accent": {
+                "glow": { "value": "#000000", "type": "color" }
+            }
+        }"##;
+
+        let result = figma_tokens_to_rust(json);
+        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    }
 }

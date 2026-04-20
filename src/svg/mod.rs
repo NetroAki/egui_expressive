@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use egui::{epaint::PathStroke, Color32, Pos2, Rect, Shape, Stroke};
 
 /// Parse an SVG path `d` string into an egui Shape.
@@ -13,7 +11,7 @@ pub fn svg_path_to_shape(d: &str, fill: Color32, stroke: Stroke) -> Shape {
         return Shape::Noop;
     }
 
-    let closed = !d.trim().ends_with('Z') && !d.trim().ends_with('z');
+    let closed = d.trim().ends_with('Z') || d.trim().ends_with('z');
 
     Shape::Path(egui::epaint::PathShape {
         points,
@@ -30,7 +28,7 @@ pub fn svg_path_to_points(d: &str) -> Vec<Pos2> {
     let mut start_pos = Pos2::ZERO;
     let mut last_cubic_control: Option<Pos2> = None;
     let mut last_quad_control: Option<Pos2> = None;
-    let mut tokens = tokenize_svg_path(d);
+    let tokens = tokenize_svg_path(d);
     let mut i = 0;
 
     while i < tokens.len() {
@@ -376,8 +374,8 @@ fn approximate_arc(
         return points;
     }
 
-    let rx = rx.abs();
-    let ry = ry.abs();
+    let mut rx = rx.abs();
+    let mut ry = ry.abs();
 
     // Convert rotation angle to radians
     let r = x_rotation.to_radians();
@@ -394,8 +392,8 @@ fn approximate_arc(
     let lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
     if lambda > 1.0 {
         let sqrt_lambda = lambda.sqrt();
-        let rx = sqrt_lambda * rx;
-        let ry = sqrt_lambda * ry;
+        rx *= sqrt_lambda;
+        ry *= sqrt_lambda;
     }
 
     // Compute (cx', cy') - the center in transformed coordinates
@@ -469,28 +467,43 @@ fn tokenize_svg_path(d: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut prev_was_command = true;
+    let mut has_dot = false;
 
     for ch in d.chars() {
         if ch.is_ascii_alphabetic() && !current.is_empty() {
             tokens.push(current.clone());
             current.clear();
+            has_dot = false;
             tokens.push(ch.to_string());
             prev_was_command = true;
         } else if ch == '-' && !prev_was_command && !current.is_empty() {
             // Negative number after a value
             tokens.push(current.clone());
             current.clear();
+            has_dot = false;
             current.push(ch);
             prev_was_command = false;
         } else if ch.is_ascii_whitespace() || ch == ',' {
             if !current.is_empty() {
                 tokens.push(current.clone());
                 current.clear();
+                has_dot = false;
             }
             prev_was_command = false;
         } else if ch == '.' && current == "-" {
             current.push('.');
+            has_dot = true;
+        } else if ch == '.' && has_dot {
+            // Second dot in a number, split here
+            tokens.push(current.clone());
+            current.clear();
+            current.push('.');
+            has_dot = true;
+            prev_was_command = false;
         } else if ch.is_ascii_digit() || ch == '.' || ch == '-' {
+            if ch == '.' {
+                has_dot = true;
+            }
             current.push(ch);
             prev_was_command = false;
         }
@@ -504,7 +517,7 @@ fn tokenize_svg_path(d: &str) -> Vec<String> {
 }
 
 fn is_command(s: &str) -> bool {
-    s.len() == 1 && s.chars().next().map_or(false, |c| c.is_ascii_alphabetic())
+    s.len() == 1 && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
 }
 
 /// Parse a minimal SVG string (no external deps, no full XML parser).
@@ -541,7 +554,7 @@ pub fn svg_to_shapes(svg: &str) -> Vec<(Shape, Rect)> {
 
                     let points = svg_path_to_points(d);
                     if !points.is_empty() {
-                        let closed = !d.contains('Z') && !d.contains('z');
+                        let closed = d.contains('Z') || d.contains('z');
 
                         // Calculate bounding rect
                         let min_x = points.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
@@ -602,9 +615,7 @@ pub fn parse_svg_color(s: &str) -> Option<Color32> {
     let s = s.trim();
 
     // Handle hex colors
-    if s.starts_with('#') {
-        let hex = &s[1..];
-
+    if let Some(hex) = s.strip_prefix('#') {
         match hex.len() {
             3 => {
                 // #rgb
@@ -685,21 +696,21 @@ pub fn parse_svg_color(s: &str) -> Option<Color32> {
 
     // Handle named colors (common ones)
     match s.to_lowercase().as_str() {
-        "none" => return Some(Color32::TRANSPARENT),
-        "black" => return Some(Color32::BLACK),
-        "white" => return Some(Color32::WHITE),
-        "red" => return Some(Color32::from_rgb(255, 0, 0)),
-        "green" => return Some(Color32::from_rgb(0, 128, 0)),
-        "blue" => return Some(Color32::from_rgb(0, 0, 255)),
-        "yellow" => return Some(Color32::from_rgb(255, 255, 0)),
-        "cyan" => return Some(Color32::from_rgb(0, 255, 255)),
-        "magenta" => return Some(Color32::from_rgb(255, 0, 255)),
-        "gray" | "grey" => return Some(Color32::from_gray(128)),
-        "orange" => return Some(Color32::from_rgb(255, 165, 0)),
-        "purple" => return Some(Color32::from_rgb(128, 0, 128)),
-        "pink" => return Some(Color32::from_rgb(255, 192, 203)),
-        "brown" => return Some(Color32::from_rgb(165, 42, 42)),
-        _ => return None,
+        "none" => Some(Color32::TRANSPARENT),
+        "black" => Some(Color32::BLACK),
+        "white" => Some(Color32::WHITE),
+        "red" => Some(Color32::from_rgb(255, 0, 0)),
+        "green" => Some(Color32::from_rgb(0, 128, 0)),
+        "blue" => Some(Color32::from_rgb(0, 0, 255)),
+        "yellow" => Some(Color32::from_rgb(255, 255, 0)),
+        "cyan" => Some(Color32::from_rgb(0, 255, 255)),
+        "magenta" => Some(Color32::from_rgb(255, 0, 255)),
+        "gray" | "grey" => Some(Color32::from_gray(128)),
+        "orange" => Some(Color32::from_rgb(255, 165, 0)),
+        "purple" => Some(Color32::from_rgb(128, 0, 128)),
+        "pink" => Some(Color32::from_rgb(255, 192, 203)),
+        "brown" => Some(Color32::from_rgb(165, 42, 42)),
+        _ => None,
     }
 }
 
@@ -837,9 +848,9 @@ pub fn parse_ase(bytes: &[u8]) -> Result<Vec<(String, Color32)>, AseError> {
 
                         offset += 12;
 
-                        let r = (r.max(0.0).min(1.0) * 255.0) as u8;
-                        let g = (g.max(0.0).min(1.0) * 255.0) as u8;
-                        let b = (b.max(0.0).min(1.0) * 255.0) as u8;
+                        let r = (r.clamp(0.0, 1.0) * 255.0) as u8;
+                        let g = (g.clamp(0.0, 1.0) * 255.0) as u8;
+                        let b = (b.clamp(0.0, 1.0) * 255.0) as u8;
 
                         Color32::from_rgb(r, g, b)
                     }
@@ -876,10 +887,10 @@ pub fn parse_ase(bytes: &[u8]) -> Result<Vec<(String, Color32)>, AseError> {
                         offset += 16;
 
                         // CMYK to RGB conversion
-                        let c = c.max(0.0).min(1.0);
-                        let m = m.max(0.0).min(1.0);
-                        let y = y.max(0.0).min(1.0);
-                        let k = k.max(0.0).min(1.0);
+                        let c = c.clamp(0.0, 1.0);
+                        let m = m.clamp(0.0, 1.0);
+                        let y = y.clamp(0.0, 1.0);
+                        let k = k.clamp(0.0, 1.0);
 
                         let r = (255.0 * (1.0 - c) * (1.0 - k)) as u8;
                         let g = (255.0 * (1.0 - m) * (1.0 - k)) as u8;
@@ -900,7 +911,7 @@ pub fn parse_ase(bytes: &[u8]) -> Result<Vec<(String, Color32)>, AseError> {
                         ]);
                         offset += 4;
 
-                        let gray = (gray.max(0.0).min(1.0) * 255.0) as u8;
+                        let gray = (gray.clamp(0.0, 1.0) * 255.0) as u8;
                         Color32::from_gray(gray)
                     }
                     b"LAB " => {
@@ -913,7 +924,8 @@ pub fn parse_ase(bytes: &[u8]) -> Result<Vec<(String, Color32)>, AseError> {
                     }
                     _ => {
                         // Unknown color model, skip the block content
-                        offset += block_length as usize - 6 - name_bytes_len - 4;
+                        let skip = (block_length as usize).saturating_sub(10 + name_bytes_len);
+                        offset += skip;
                         continue;
                     }
                 };

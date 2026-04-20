@@ -181,6 +181,12 @@ pub struct M3Card {
     width: Option<f32>,
 }
 
+impl Default for M3Card {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl M3Card {
     pub fn new() -> Self {
         Self {
@@ -223,7 +229,7 @@ impl M3Card {
             .fill(bg)
             .stroke(stroke)
             .corner_radius(CornerRadius::same(12))
-            .inner_margin(Margin::same(self.padding as i8));
+            .inner_margin(Margin::same(self.padding.clamp(0.0, 127.0).round() as i8));
 
         let resp = frame.show(ui, |ui| {
             if let Some(w) = self.width {
@@ -644,14 +650,20 @@ impl Widget for M3LinearProgress {
                 }
                 None => {
                     // Indeterminate — animated sliding bar
-                    let t = ui.ctx().animate_value_with_time(self.id, 1.0, 1.5);
+                    let duration = 1.5;
+                    let phase = ((self.id.value() % 1000) as f64 / 1000.0) * duration;
+                    let t = (((ui.input(|i| i.time) + phase) % duration) / duration) as f32;
                     let bar_w = rect.width() * 0.4;
                     let x = rect.left() + (rect.width() + bar_w) * t - bar_w;
-                    let fill_rect = Rect::from_min_size(
-                        Pos2::new(x.max(rect.left()), rect.top()),
-                        Vec2::new(bar_w.min(rect.width()), self.height),
-                    );
-                    painter.rect_filled(fill_rect, rounding, c.primary);
+                    let x0 = x.max(rect.left());
+                    let x1 = (x + bar_w).min(rect.right());
+                    if x1 > x0 {
+                        let fill_rect = Rect::from_min_max(
+                            Pos2::new(x0, rect.top()),
+                            Pos2::new(x1, rect.top() + self.height),
+                        );
+                        painter.rect_filled(fill_rect, rounding, c.primary);
+                    }
                     ui.ctx().request_repaint();
                 }
             }
@@ -719,7 +731,9 @@ impl Widget for M3CircularProgress {
             let (start_angle, sweep) = match self.value {
                 Some(v) => (-std::f32::consts::FRAC_PI_2, v * std::f32::consts::TAU),
                 None => {
-                    let t = ui.ctx().animate_value_with_time(self.id, 1.0, 1.2);
+                    let duration = 1.2;
+                    let phase = ((self.id.value() % 1000) as f64 / 1000.0) * duration;
+                    let t = (((ui.input(|i| i.time) + phase) % duration) / duration) as f32;
                     let start = t * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
                     ui.ctx().request_repaint();
                     (start, std::f32::consts::PI * 1.5)
@@ -834,21 +848,15 @@ impl Widget for M3Badge {
 pub struct M3Slider<'a> {
     value: &'a mut f32,
     range: std::ops::RangeInclusive<f32>,
-    id: Id,
     steps: Option<u32>,
     show_value: bool,
 }
 
 impl<'a> M3Slider<'a> {
-    pub fn new(
-        id: impl std::hash::Hash,
-        value: &'a mut f32,
-        range: std::ops::RangeInclusive<f32>,
-    ) -> Self {
+    pub fn new(value: &'a mut f32, range: std::ops::RangeInclusive<f32>) -> Self {
         Self {
             value,
             range,
-            id: Id::new(id),
             steps: None,
             show_value: false,
         }
@@ -878,12 +886,17 @@ impl Widget for M3Slider<'_> {
         if response.dragged() {
             let delta = response.drag_delta().x;
             let range_size = *self.range.end() - *self.range.start();
-            *self.value = (*self.value + delta / width * range_size)
+            let track_width = (width - thumb_r * 2.0).max(1.0);
+            *self.value = (*self.value + delta / track_width * range_size)
                 .clamp(*self.range.start(), *self.range.end());
 
             if let Some(steps) = self.steps {
-                let step = range_size / steps as f32;
-                *self.value = (*self.value / step).round() * step;
+                if steps > 0 {
+                    let step = range_size / steps as f32;
+                    let v = *self.value - *self.range.start();
+                    *self.value = (v / step).round() * step + *self.range.start();
+                    *self.value = self.value.clamp(*self.range.start(), *self.range.end());
+                }
             }
         }
 
@@ -918,14 +931,16 @@ impl Widget for M3Slider<'_> {
 
             // Tick marks
             if let Some(steps) = self.steps {
-                for i in 0..=steps {
-                    let tx = track_rect.left() + (i as f32 / steps as f32) * track_rect.width();
-                    let tick_color = if tx <= thumb_x {
-                        c.on_primary
-                    } else {
-                        c.on_surface_variant
-                    };
-                    painter.circle_filled(Pos2::new(tx, track_y), 2.0, tick_color);
+                if steps > 0 {
+                    for i in 0..=steps {
+                        let tx = track_rect.left() + (i as f32 / steps as f32) * track_rect.width();
+                        let tick_color = if tx <= thumb_x {
+                            c.on_primary
+                        } else {
+                            c.on_surface_variant
+                        };
+                        painter.circle_filled(Pos2::new(tx, track_y), 2.0, tick_color);
+                    }
                 }
             }
         }
@@ -1024,22 +1039,17 @@ impl<'a> M3Tooltip<'a> {
 
     /// Show tooltip on hover of the given response.
     pub fn show_on_hover(self, ui: &Ui, response: &Response) {
-        if response.hovered() {
-            let theme = M3Theme::load(ui.ctx());
-            let c = &theme.colors;
-            egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), Id::new("m3_tooltip"), |ui| {
-                let frame = Frame::NONE
-                    .fill(c.inverse_surface)
-                    .corner_radius(CornerRadius::same(4))
-                    .inner_margin(Margin::symmetric(8, 4));
-                frame.show(ui, |ui| {
-                    ui.label(
-                        RichText::new(self.text)
-                            .color(c.inverse_on_surface)
-                            .size(12.0),
-                    );
-                });
+        let theme = M3Theme::load(ui.ctx());
+        let c = &theme.colors;
+        let text = self.text;
+        response.clone().on_hover_ui(|ui| {
+            let frame = Frame::NONE
+                .fill(c.inverse_surface)
+                .corner_radius(CornerRadius::same(4))
+                .inner_margin(Margin::symmetric(8, 4));
+            frame.show(ui, |ui| {
+                ui.label(RichText::new(text).color(c.inverse_on_surface).size(12.0));
             });
-        }
+        });
     }
 }

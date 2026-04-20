@@ -1,6 +1,4 @@
-#![allow(dead_code)]
-
-use egui::{Color32, Context, CornerRadius, FontId, Pos2, Rect, RichText, Stroke, Ui, Widget};
+use egui::{Color32, Context, FontId, Pos2, Rect, RichText, Stroke, Ui, Widget};
 
 /// Text decoration style.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -147,7 +145,7 @@ impl Default for TypeSpec {
 }
 
 /// A type scale with named presets matching common design system conventions.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct TypeScale {
     pub display: TypeSpec,  // 57px, weight 400
     pub headline: TypeSpec, // 32px, weight 400
@@ -163,9 +161,8 @@ pub struct TypeScale {
     pub mono: TypeSpec,     // 13px, weight 400, monospace
 }
 
-impl TypeScale {
-    /// Creates a default type scale with common design system presets.
-    pub fn default() -> Self {
+impl Default for TypeScale {
+    fn default() -> Self {
         Self {
             display: TypeSpec::new(57.0),
             headline: TypeSpec::new(32.0),
@@ -181,7 +178,9 @@ impl TypeScale {
             mono: TypeSpec::new(13.0).font_family("mono"),
         }
     }
+}
 
+impl TypeScale {
     /// Stores this type scale in egui's context.
     pub fn store(&self, ctx: &Context) {
         ctx.data_mut(|d| d.insert_temp(egui::Id::new("egui_expressive_type_scale"), self.clone()));

@@ -2,6 +2,9 @@ use super::{M3Elevation, M3Theme};
 use crate::style::with_alpha;
 use egui::{CornerRadius, Id, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
 
+/// Boxed header closure for [`M3NavigationRail`].
+type HeaderFn<'a> = Box<dyn FnOnce(&mut Ui) + 'a>;
+
 // ─── M3TextField ──────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Default, Debug)]
@@ -368,7 +371,7 @@ pub struct M3NavigationRail<'a> {
     items: Vec<M3NavItem<'a>>,
     selected: &'a mut usize,
     width: f32,
-    header: Option<Box<dyn FnOnce(&mut Ui) + 'a>>,
+    header: Option<HeaderFn<'a>>,
 }
 
 impl<'a> M3NavigationRail<'a> {

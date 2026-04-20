@@ -24,9 +24,9 @@ impl Default for SeqApp {
         steps[0][12] = true;
 
         // Hi-hat: every other beat
-        for i in 0..16 {
-            if i % 2 == 0 {
-                steps[1][i] = true;
+        for (i, step) in steps[1].iter_mut().enumerate().take(16) {
+            if i.is_multiple_of(2) {
+                *step = true;
             }
         }
 
@@ -60,7 +60,7 @@ impl eframe::App for SeqApp {
             self.step_interval = new_interval;
         }
 
-        if self.frame_count % self.step_interval.max(1) == 0 {
+        if self.frame_count.is_multiple_of(self.step_interval.max(1)) {
             self.playhead = (self.playhead + 1) % 16;
         }
 

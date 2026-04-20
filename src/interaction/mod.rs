@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Interaction helpers: drag, pan/zoom, and gestures.
 
 use egui::{Context, Modifiers, Pos2, Response, Vec2};
@@ -29,10 +27,8 @@ impl DragDelta {
         let total_id = id.with("__drag_total");
         let vel_id = id.with("__drag_vel");
 
-        let prev_total: Vec2 = ctx
-            .memory(|m| m.data.get_temp(total_id))
-            .unwrap_or_default();
-        let mut velocity: Vec2 = ctx.memory(|m| m.data.get_temp(vel_id)).unwrap_or_default();
+        let prev_total: Vec2 = ctx.data(|d| d.get_temp(total_id)).unwrap_or_default();
+        let mut velocity: Vec2 = ctx.data(|d| d.get_temp(vel_id)).unwrap_or_default();
 
         let delta = response.drag_delta();
         let mut total = prev_total;
@@ -41,6 +37,7 @@ impl DragDelta {
 
         if response.drag_started() {
             total = Vec2::ZERO;
+            velocity = Vec2::ZERO; // reset stale velocity from previous drag
             started = true;
         }
 
@@ -50,7 +47,8 @@ impl DragDelta {
 
         if response.drag_stopped() {
             released = true;
-            total = Vec2::ZERO;
+            // Don't zero total here — consumers need the final accumulated total on the release frame.
+            // The next drag_started will reset it.
         }
 
         // Apply axis constraint before updating velocity
@@ -61,7 +59,9 @@ impl DragDelta {
         };
 
         // Update velocity with EMA smoothing
-        velocity = velocity * 0.8 + constrained_delta * 0.2;
+        let dt = ctx.input(|i| i.unstable_dt).max(1e-3);
+        let delta_per_sec = constrained_delta / dt;
+        velocity = velocity * 0.8 + delta_per_sec * 0.2;
 
         // Apply axis constraint to total
         let constrained_total = match axis {
@@ -72,8 +72,8 @@ impl DragDelta {
 
         // Store updated state
         if response.drag_started() || response.dragged() || response.drag_stopped() {
-            ctx.memory_mut(|m| m.data.insert_temp(total_id, constrained_total));
-            ctx.memory_mut(|m| m.data.insert_temp(vel_id, velocity));
+            ctx.data_mut(|d| d.insert_temp(total_id, constrained_total));
+            ctx.data_mut(|d| d.insert_temp(vel_id, velocity));
         }
 
         let modifiers = ctx.input(|i| i.modifiers);
@@ -121,7 +121,6 @@ impl PanZoom {
     pub fn handle(
         &mut self,
         ctx: &Context,
-        _id: egui::Id,
         response: &Response,
         scale_range: std::ops::RangeInclusive<f32>,
         zoom_to_cursor: bool,
@@ -156,8 +155,8 @@ impl PanZoom {
             // If zooming to cursor, adjust offset to keep cursor position fixed
             if zoom_to_cursor {
                 if let Some(cursor_screen) = ctx.input(|i| i.pointer.hover_pos()) {
-                    let cursor_logical = self.to_logical(cursor_screen, Pos2::ZERO);
-                    let screen_offset = (cursor_screen - Pos2::ZERO) / new_scale;
+                    let cursor_logical = self.to_logical(cursor_screen, response.rect.min);
+                    let screen_offset = (cursor_screen - response.rect.min) / new_scale;
                     self.offset = cursor_logical.to_vec2() - screen_offset;
                 }
             }
@@ -402,6 +401,15 @@ impl SwipeGesture {
         ctx: &egui::Context,
     ) -> Option<SwipeEvent> {
         let total_id = id.with("__sw_total");
+        let start_time_id = id.with("__sw_start");
+
+        if response.drag_started() {
+            let now = ctx.input(|i| i.time);
+            ctx.data_mut(|d| {
+                d.insert_temp(start_time_id, now);
+                d.insert_temp(total_id, egui::Vec2::ZERO); // reset any stale total
+            });
+        }
 
         if response.dragged() {
             let prev: egui::Vec2 = ctx.data(|d| d.get_temp(total_id)).unwrap_or_default();
@@ -410,19 +418,20 @@ impl SwipeGesture {
 
         if response.drag_stopped() {
             let total: egui::Vec2 = ctx.data(|d| d.get_temp(total_id)).unwrap_or_default();
-            ctx.data_mut(|d| d.remove::<egui::Vec2>(total_id));
+            let start_time: f64 = ctx.data(|d| d.get_temp(start_time_id)).unwrap_or(0.0);
+            ctx.data_mut(|d| {
+                d.remove::<egui::Vec2>(total_id);
+                d.remove::<f64>(start_time_id);
+            });
 
             let dist = total.length();
             if dist < self.min_distance {
                 return None;
             }
 
-            let dt = ctx.input(|i| i.stable_dt);
-            let velocity = if dt > 0.0 {
-                total / dt
-            } else {
-                egui::Vec2::ZERO
-            };
+            let now = ctx.input(|i| i.time);
+            let duration = (now - start_time).max(0.016) as f32; // at least one frame
+            let velocity = total / duration;
             if velocity.length() < self.min_velocity {
                 return None;
             }
@@ -433,12 +442,10 @@ impl SwipeGesture {
                 } else {
                     SwipeDirection::Left
                 }
+            } else if total.y > 0.0 {
+                SwipeDirection::Down
             } else {
-                if total.y > 0.0 {
-                    SwipeDirection::Down
-                } else {
-                    SwipeDirection::Up
-                }
+                SwipeDirection::Up
             };
 
             return Some(SwipeEvent {

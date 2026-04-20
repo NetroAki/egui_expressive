@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Typed persistent state and state machines.
 
 use egui::Context;

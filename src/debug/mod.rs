@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Debugging overlays and visual helpers.
 
 use egui::{Color32, Context, Id, LayerId, Order, Pos2, Rect, Response, Stroke, StrokeKind};

@@ -80,20 +80,27 @@ pub fn soft_shadow(
     let sigma = blur_radius / 3.0;
     let base_a = color.a() as f32;
 
-    for i in 0..n {
+    // Pre-compute weights and normalize
+    let weights: Vec<f32> = (0..n)
+        .map(|i| {
+            let t = i as f32 / (n - 1) as f32;
+            let x = t * blur_radius;
+            gaussian(x, sigma)
+        })
+        .collect();
+    let weight_sum: f32 = weights.iter().sum();
+    let weight_sum = if weight_sum > 0.0 { weight_sum } else { 1.0 };
+
+    for (i, &weight) in weights.iter().enumerate() {
         let t = i as f32 / (n - 1) as f32;
         let x = t * blur_radius;
-        let weight = gaussian(x, sigma);
-        // Normalize weights so the first and last sample have meaningful weight
-        // (Gaussian at 0 and at radius)
-        let alpha = (base_a * weight).clamp(0.0, 255.0) as u8;
+        let alpha = (base_a * weight / weight_sum).clamp(0.0, 255.0) as u8;
 
         if alpha == 0 {
             continue;
         }
 
-        // Expand rect: spread + (blur_radius - x) on each side
-        let expansion = spread + (blur_radius - x);
+        let expansion = spread + x;
         let shadow_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
         let shadow_rect = Rect::from_min_max(
             Pos2::new(
@@ -105,7 +112,7 @@ pub fn soft_shadow(
                 rect.max.y + expansion + offset.y,
             ),
         );
-        let rounding = CornerRadius::same((expansion * 0.5).max(0.0) as u8);
+        let rounding = CornerRadius::same((expansion * 0.5).max(0.0).round() as u8);
         shapes.push(Shape::Rect(RectShape::filled(
             shadow_rect,
             rounding,
@@ -179,9 +186,9 @@ pub fn soft_glow(rect: Rect, color: Color32, radius: f32, quality: BlurQuality) 
 /// # Returns
 /// A new blurred `ColorImage`.
 pub fn blur_image(image: &ColorImage, radius: u32) -> ColorImage {
-    let radius = radius.min(32).max(1);
+    let radius = radius.clamp(1, 32);
     let [width, height] = image.size;
-    let (width, height) = (width as usize, height as usize);
+    let (width, height) = (width, height);
 
     if width == 0 || height == 0 {
         return image.clone();

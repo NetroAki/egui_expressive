@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Large canvas viewport culling support (50k+ px).
 //!
 //! ## Overview
@@ -47,8 +45,6 @@ use egui::{Id, Pos2, Rect, Response, Ui, Vec2};
 /// When zoomed and panned, a portion of logical space maps to the screen viewport.
 #[derive(Debug, Clone)]
 pub struct ViewportCuller {
-    /// Visible screen area (in screen coordinates).
-    screen_viewport: Rect,
     /// Visible area in logical coordinates.
     logical_viewport: Rect,
     /// Pan/zoom state for coordinate transformation.
@@ -76,7 +72,6 @@ impl ViewportCuller {
         );
 
         Self {
-            screen_viewport,
             logical_viewport,
             pan_zoom,
             origin,
@@ -236,8 +231,6 @@ impl ViewportCuller {
 pub struct LargeCanvas {
     /// Unique identifier for this canvas.
     id: Id,
-    /// Size of the logical canvas in units.
-    logical_size: Vec2,
     /// Minimum zoom level.
     min_zoom: f32,
     /// Maximum zoom level.
@@ -252,10 +245,9 @@ impl LargeCanvas {
     /// # Arguments
     /// * `id` - Unique identifier (use `ui.id().with("name")`)
     /// * `logical_size` - Size of the virtual canvas in logical units
-    pub fn new(id: Id, logical_size: Vec2) -> Self {
+    pub fn new(id: Id, _logical_size: Vec2) -> Self {
         Self {
             id,
-            logical_size,
             min_zoom: 0.01,
             max_zoom: 100.0,
             scroll_enabled: true,
@@ -324,20 +316,11 @@ impl LargeCanvas {
 
         // Load or initialize pan/zoom state from memory
         let pz_id = self.id.with("__pz");
-        let mut pan_zoom: PanZoom = ctx
-            .memory(|m| m.data.get_temp(pz_id))
-            .unwrap_or_else(PanZoom::new);
+        let mut pan_zoom: PanZoom = ctx.memory(|m| m.data.get_temp(pz_id)).unwrap_or_default();
 
         // Handle pan/zoom interactions
         if self.scroll_enabled {
-            let handle_id = self.id.with("__pz_handle");
-            pan_zoom.handle(
-                ctx,
-                handle_id,
-                &response,
-                self.min_zoom..=self.max_zoom,
-                true,
-            );
+            pan_zoom.handle(ctx, &response, self.min_zoom..=self.max_zoom, true);
         }
 
         // Save pan/zoom state to memory

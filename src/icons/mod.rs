@@ -1,8 +1,6 @@
-#![allow(dead_code)]
-
 use egui::{Color32, FontFamily, FontId, Response, Ui, Vec2, Widget};
 
-pub mod icons {
+pub mod chars {
     // Playback
     pub const PLAY: char = '\u{E037}';
     pub const PAUSE: char = '\u{E034}';
@@ -74,6 +72,10 @@ pub mod icons {
     pub const BRUSH: char = '\u{E3AE}';
     pub const LAYERS: char = '\u{E53B}';
 }
+
+/// Deprecated: use `chars` instead.
+#[deprecated(note = "use `egui_expressive::icons::chars` instead")]
+pub use chars as icons;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IconSize {

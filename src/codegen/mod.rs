@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! SVG layout inference and Rust scaffold code generation.
 //!
 //! This module provides a pure-Rust pipeline for converting SVG exports from
@@ -56,9 +54,10 @@ pub enum BlendMode {
     Luminosity,
 }
 
-impl BlendMode {
-    pub fn from_str(s: &str) -> Self {
-        match s {
+impl std::str::FromStr for BlendMode {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             "multiply" => Self::Multiply,
             "screen" => Self::Screen,
             "overlay" => Self::Overlay,
@@ -75,7 +74,7 @@ impl BlendMode {
             "color" => Self::Color,
             "luminosity" => Self::Luminosity,
             _ => Self::Normal,
-        }
+        })
     }
 }
 
@@ -148,13 +147,14 @@ pub enum StrokeCap {
     Square,
 }
 
-impl StrokeCap {
-    pub fn from_str(s: &str) -> Self {
-        match s {
+impl std::str::FromStr for StrokeCap {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             "round" => Self::Round,
             "square" => Self::Square,
             _ => Self::Butt,
-        }
+        })
     }
 }
 
@@ -166,13 +166,14 @@ pub enum StrokeJoin {
     Bevel,
 }
 
-impl StrokeJoin {
-    pub fn from_str(s: &str) -> Self {
-        match s {
+impl std::str::FromStr for StrokeJoin {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             "round" => Self::Round,
             "bevel" => Self::Bevel,
             _ => Self::Miter,
-        }
+        })
     }
 }
 
@@ -184,13 +185,14 @@ pub enum TextDecoration {
     Both,
 }
 
-impl TextDecoration {
-    pub fn from_str(s: &str) -> Self {
-        match s {
+impl std::str::FromStr for TextDecoration {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             "strikethrough" => Self::Strikethrough,
             "underline_strikethrough" | "both" => Self::Both,
             _ => Self::Underline,
-        }
+        })
     }
 }
 
@@ -201,12 +203,13 @@ pub enum TextTransform {
     SmallCaps,
 }
 
-impl TextTransform {
-    pub fn from_str(s: &str) -> Self {
-        match s {
+impl std::str::FromStr for TextTransform {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             "small_caps" => Self::SmallCaps,
             _ => Self::AllCaps,
-        }
+        })
     }
 }
 
@@ -242,6 +245,51 @@ pub struct AppearanceStroke {
     pub width: f32,
     pub opacity: f32,
     pub blend_mode: BlendMode,
+}
+
+/// Visual styling properties carried through the layout node tree.
+#[derive(Clone, Debug, Default)]
+pub struct VisualStyle {
+    pub opacity: f32, // 1.0 = fully opaque
+    pub rotation_deg: f32,
+    pub corner_radius: f32,
+    pub gradient: Option<GradientDef>,
+    pub blend_mode: BlendMode,
+    pub effects: Vec<EffectDef>,
+    pub stroke_dash: Option<Vec<f32>>,
+    pub stroke_cap: Option<StrokeCap>,
+    pub stroke_join: Option<StrokeJoin>,
+    pub stroke: Option<(f32, Color32)>,
+    pub image_path: Option<String>, // for Image nodes
+}
+
+impl VisualStyle {
+    pub fn from_element(elem: &LayoutElement) -> Self {
+        Self {
+            opacity: elem.opacity,
+            rotation_deg: elem.rotation_deg,
+            corner_radius: elem.corner_radius,
+            gradient: elem.gradient.clone(),
+            blend_mode: elem.blend_mode.clone(),
+            effects: elem.effects.clone(),
+            stroke_dash: elem.stroke_dash.clone(),
+            stroke_cap: elem.stroke_cap.clone(),
+            stroke_join: elem.stroke_join.clone(),
+            stroke: elem.stroke,
+            image_path: None,
+        }
+    }
+
+    pub fn is_default(&self) -> bool {
+        self.opacity >= 0.999
+            && self.rotation_deg.abs() < 0.001
+            && self.corner_radius.abs() < 0.001
+            && self.gradient.is_none()
+            && self.blend_mode == BlendMode::Normal
+            && self.effects.is_empty()
+            && self.stroke_dash.is_none()
+            && self.stroke.is_none()
+    }
 }
 
 /// A parsed element from SVG/Illustrator export.
@@ -289,6 +337,8 @@ pub struct LayoutElement {
     // Appearance stack (multiple fills/strokes from expand+analyze)
     pub appearance_fills: Vec<AppearanceFill>,
     pub appearance_strokes: Vec<AppearanceStroke>,
+    /// Artboard this element belongs to (None = unassigned / appears in all artboards).
+    pub artboard_name: Option<String>,
 }
 
 impl LayoutElement {
@@ -330,7 +380,7 @@ impl LayoutElement {
             third_party_effects: vec![],
             notes: vec![],
             appearance_fills: vec![],
-            appearance_strokes: vec![],
+            appearance_strokes: vec![], artboard_name: None,
         }
     }
 }
@@ -385,6 +435,7 @@ pub enum LayoutNode {
         text: String,
         size: f32,
         color: Option<Color32>,
+        font_family: Option<String>,
         id: String,
     },
     TextEdit {
@@ -413,6 +464,7 @@ pub enum LayoutNode {
         h: f32,
         fill: Color32,
         id: String,
+        style: VisualStyle,
     },
     Image {
         x: f32,
@@ -420,6 +472,7 @@ pub enum LayoutNode {
         w: f32,
         h: f32,
         id: String,
+        style: VisualStyle,
     },
     Unknown {
         id: String,
@@ -447,10 +500,7 @@ pub fn parse_naming(name: &str) -> NamingHint {
     // Check for gap-N first (might be standalone)
     if let Some(gap_idx) = lower.find("gap-") {
         let after = &lower[gap_idx + 4..];
-        if let Some(end_idx) = after
-            .find(char::is_whitespace)
-            .or_else(|| Some(after.len()))
-        {
+        if let Some(end_idx) = after.find(char::is_whitespace).or(Some(after.len())) {
             let num_str = &after[..end_idx];
             if let Ok(gap) = num_str.parse::<f32>() {
                 return NamingHint::Gap(gap);
@@ -706,7 +756,7 @@ fn median(values: &[f32]) -> f32 {
     let mut sorted = values.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let mid = sorted.len() / 2;
-    if sorted.len() % 2 == 0 {
+    if sorted.len().is_multiple_of(2) {
         (sorted[mid - 1] + sorted[mid]) / 2.0
     } else {
         sorted[mid]
@@ -734,10 +784,7 @@ pub fn cluster_into_rows(
     let mut rows: Vec<Vec<LayoutElement>> = Vec::new();
     let mut current_row: Vec<LayoutElement> = vec![sorted[0].clone()];
 
-    for i in 1..sorted.len() {
-        let elem = &sorted[i];
-        let prev_in_row = current_row.last().unwrap();
-
+    for elem in sorted.iter().skip(1) {
         // Calculate vertical overlap between this element and the current row
         let row_top = current_row[0].y;
         let row_bottom = current_row
@@ -826,12 +873,6 @@ pub fn infer_layout(elements: &[LayoutElement], options: &InferenceOptions) -> V
         nodes.push(node);
     }
 
-    // Post-process to detect panels and cards
-    let artboard_w = elements.iter().map(|e| e.x + e.w).fold(0.0f32, f32::max);
-    let artboard_h = elements.iter().map(|e| e.y + e.h).fold(0.0f32, f32::max);
-
-    detect_panels_and_cards(&mut nodes, artboard_w, artboard_h);
-
     nodes
 }
 
@@ -913,6 +954,7 @@ fn infer_element(elem: &LayoutElement, options: &InferenceOptions) -> LayoutNode
                     },
                     size: elem.text_size.unwrap_or(14.0),
                     color: elem.fill,
+                    font_family: None,
                     id: elem.id.clone(),
                 };
             }
@@ -966,10 +1008,45 @@ fn infer_element(elem: &LayoutElement, options: &InferenceOptions) -> LayoutNode
                     w: elem.w,
                     h: elem.h,
                     id: label,
+                    style: VisualStyle::from_element(elem),
+                };
+            }
+            NamingHint::Chip(label) => {
+                // Chip is a small button-like element
+                return LayoutNode::Button {
+                    label,
+                    id: elem.id.clone(),
+                };
+            }
+            NamingHint::Toggle(label) => {
+                // Toggle/checkbox - treat as button (no Checkbox variant in LayoutNode)
+                return LayoutNode::Button {
+                    label,
+                    id: elem.id.clone(),
+                };
+            }
+            NamingHint::Slider(label) => {
+                // Slider - treat as shape (no Slider variant in LayoutNode)
+                return LayoutNode::Shape {
+                    x: elem.x,
+                    y: elem.y,
+                    w: elem.w,
+                    h: elem.h,
+                    fill: elem.fill.unwrap_or(Color32::from_gray(128)),
+                    id: label,
+                    style: VisualStyle::from_element(elem),
+                };
+            }
+            NamingHint::Grid(label) => {
+                // Grid layout - treat as column with tight spacing
+                return LayoutNode::Column {
+                    gap: 2.0,
+                    children: vec![],
+                    bg: elem.fill,
+                    id: label,
                 };
             }
             NamingHint::None => {}
-            _ => {}
         }
     }
 
@@ -1020,11 +1097,13 @@ fn infer_element(elem: &LayoutElement, options: &InferenceOptions) -> LayoutNode
             h: elem.h,
             fill: elem.fill.unwrap_or(Color32::from_gray(128)),
             id: elem.id.clone(),
+            style: VisualStyle::from_element(elem),
         },
         ElementType::Text => LayoutNode::Label {
             text: elem.text.clone().unwrap_or_default(),
             size: elem.text_size.unwrap_or(14.0),
             color: elem.fill,
+            font_family: None,
             id: elem.id.clone(),
         },
         ElementType::Image => LayoutNode::Image {
@@ -1033,6 +1112,7 @@ fn infer_element(elem: &LayoutElement, options: &InferenceOptions) -> LayoutNode
             w: elem.w,
             h: elem.h,
             id: elem.id.clone(),
+            style: VisualStyle::from_element(elem),
         },
         ElementType::Path => {
             // Paths get rendered as shapes
@@ -1043,6 +1123,7 @@ fn infer_element(elem: &LayoutElement, options: &InferenceOptions) -> LayoutNode
                 h: elem.h.max(1.0),
                 fill: elem.fill.unwrap_or(Color32::TRANSPARENT),
                 id: elem.id.clone(),
+                style: VisualStyle::from_element(elem),
             }
         }
         ElementType::Unknown => LayoutNode::Unknown {
@@ -1124,10 +1205,7 @@ fn is_vertical_group(elements: &[LayoutElement]) -> bool {
         return false;
     }
 
-    // Check if elements are stacked vertically
-    let sorted_by_y: Vec<_> = elements.iter().collect();
-    let sorted_by_x: Vec<_> = elements.iter().collect();
-
+    // Check if elements are stacked vertically by comparing positional variance
     let mut y_variance = 0.0f32;
     let mut x_variance = 0.0f32;
     let y_mean = elements.iter().map(|e| e.y).sum::<f32>() / elements.len() as f32;
@@ -1142,13 +1220,6 @@ fn is_vertical_group(elements: &[LayoutElement]) -> bool {
 
     // More vertical variance means vertical stacking
     y_variance > x_variance
-}
-
-fn detect_panels_and_cards(nodes: &mut [LayoutNode], _artboard_w: f32, _artboard_h: f32) {
-    // This is a post-processing step that would identify panels and cards
-    // based on spanning elements. For now, this is handled during inference
-    // via naming conventions.
-    // A full implementation would look for elements that span >80% of the artboard.
 }
 
 // ============================================================================
@@ -1173,7 +1244,7 @@ pub fn generate_rust(
     output.push_str("use egui_expressive::{hstack, vstack, ShapeBuilder, LayeredPainter};\n");
     output.push_str("use super::tokens;\n");
     output.push_str("use super::state::*;\n");
-    output.push_str("\n");
+    output.push('\n');
 
     output.push_str("// Auto-generated by egui_expressive\n");
     output.push_str(&format!(
@@ -1198,7 +1269,7 @@ pub fn generate_rust(
 
     output.push_str("    let origin = ui.cursor().min;\n");
     output.push_str("    let painter = ui.painter();\n");
-    output.push_str("\n");
+    output.push('\n');
 
     // Background
     if let Some(bg) = bg_color {
@@ -1215,7 +1286,7 @@ pub fn generate_rust(
             bg.b()
         ));
         output.push_str("    );\n");
-        output.push_str("\n");
+        output.push('\n');
     }
 
     // Generate code for each top-level node
@@ -1228,11 +1299,121 @@ pub fn generate_rust(
     output
 }
 
+/// Generate egui font setup code for loading custom fonts.
+///
+/// Returns a Rust function `setup_fonts(ctx: &egui::Context)` that registers
+/// the given font families using `egui::FontDefinitions`. Each family name
+/// maps to a font file expected at `assets/fonts/<family>.ttf`.
+///
+/// # Example output
+/// ```ignore
+/// use egui::{FontData, FontDefinitions, FontFamily};
+///
+/// pub fn setup_fonts(ctx: &egui::Context) {
+///     let mut fonts = FontDefinitions::default();
+///     // Font: Inter
+///     fonts.font_data.insert(
+///         "inter".to_owned(),
+///         FontData::from_static(include_bytes!("../assets/fonts/Inter.ttf")),
+///     );
+///     fonts.families.entry(FontFamily::Name("Inter".into()))
+///         .or_default()
+///         .push("inter".to_owned());
+///     ctx.set_fonts(fonts);
+/// }
+/// ```
+pub fn generate_font_setup(font_families: &[&str]) -> String {
+    if font_families.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("use egui::{FontData, FontDefinitions, FontFamily};\n\n");
+    out.push_str("/// Register custom fonts with egui. Call once from App::new().\n");
+    out.push_str("pub fn setup_fonts(ctx: &egui::Context) {\n");
+    out.push_str("    let mut fonts = FontDefinitions::default();\n\n");
+
+    for family in font_families {
+        let safe_name = family.replace(['-', ' '], "_").to_lowercase();
+        out.push_str(&format!("    // Font: {}\n", family));
+        out.push_str(&format!(
+            "    fonts.font_data.insert(\n        \"{}\".to_owned(),\n",
+            safe_name
+        ));
+        out.push_str(&format!(
+            "        FontData::from_static(include_bytes!(\"../assets/fonts/{}.ttf\")),\n    );\n",
+            family
+        ));
+        out.push_str(&format!(
+            "    fonts.families.entry(FontFamily::Name(\"{}\".into()))\n",
+            family
+        ));
+        out.push_str(&format!(
+            "        .or_default()\n        .push(\"{}\".to_owned());\n\n",
+            safe_name
+        ));
+    }
+
+    out.push_str("    ctx.set_fonts(fonts);\n");
+    out.push_str("}\n");
+    out
+}
+
 fn sanitize_fn_name(name: &str) -> String {
-    name.to_lowercase()
+    const RUST_KEYWORDS: &[&str] = &[
+        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
+        "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref",
+        "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
+        "use", "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do",
+        "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield",
+    ];
+    let sanitized: String = name
+        .to_lowercase()
         .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '_')
-        .collect()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    // Remove leading/trailing underscores, collapse multiple underscores
+    let sanitized = sanitized.trim_matches('_').to_string();
+    let sanitized = {
+        let mut s = String::new();
+        let mut prev_underscore = false;
+        for c in sanitized.chars() {
+            if c == '_' {
+                if !prev_underscore {
+                    s.push(c);
+                }
+                prev_underscore = true;
+            } else {
+                s.push(c);
+                prev_underscore = false;
+            }
+        }
+        s
+    };
+    // Handle empty result
+    let sanitized = if sanitized.is_empty() {
+        "function".to_string()
+    } else {
+        sanitized
+    };
+    // Handle leading digit
+    let sanitized = if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("f_{}", sanitized)
+    } else {
+        sanitized
+    };
+    // Handle Rust keywords
+    if RUST_KEYWORDS.contains(&sanitized.as_str()) {
+        format!("{}_", sanitized)
+    } else {
+        sanitized
+    }
 }
 
 /// Generate Rust code for a single LayoutNode (recursive).
@@ -1261,11 +1442,8 @@ pub fn generate_node(
                     indent_str
                 ));
                 // Calculate row bounds
-                let row_w: f32 = children.iter().map(|c| get_node_width(c)).sum();
-                let row_h: f32 = children
-                    .iter()
-                    .map(|c| get_node_height(c))
-                    .fold(0.0f32, f32::max);
+                let row_w: f32 = children.iter().map(get_node_width).sum();
+                let row_h: f32 = children.iter().map(get_node_height).fold(0.0f32, f32::max);
                 output.push_str(&format!("{}{:.1}, {:.1})),\n", indent_str, row_w, row_h));
                 output.push_str(&format!(
                     "{});\n{}painter.rect_filled(row_rect, 0.0, {});\n",
@@ -1303,11 +1481,8 @@ pub fn generate_node(
                     "{}let col_rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(\n",
                     indent_str
                 ));
-                let col_w: f32 = children
-                    .iter()
-                    .map(|c| get_node_width(c))
-                    .fold(0.0f32, f32::max);
-                let col_h: f32 = children.iter().map(|c| get_node_height(c)).sum();
+                let col_w: f32 = children.iter().map(get_node_width).fold(0.0f32, f32::max);
+                let col_h: f32 = children.iter().map(get_node_height).sum();
                 output.push_str(&format!("{}{:.1}, {:.1})),\n", indent_str, col_w, col_h));
                 output.push_str(&format!(
                     "{});\n{}painter.rect_filled(col_rect, 0.0, {});\n",
@@ -1387,7 +1562,7 @@ pub fn generate_node(
         }
         LayoutNode::Button { label, id } => {
             output.push_str(&format!(
-                "{}// Button: {}\n{}if ui.button(\"{}\").clicked() {{\n{}{}// TODO: handle click\n{}{}}}\n",
+                "{}// Button: {}\n{}if ui.button(\"{}\").clicked() {{\n{}{}// Add click handler here\n{}{}}}\n",
                 indent_str, id, indent_str, label, indent_str, indent_str, indent_str, indent_str
             ));
         }
@@ -1395,6 +1570,7 @@ pub fn generate_node(
             text,
             size,
             color,
+            font_family,
             id,
         } => {
             let color_str = if let Some(c) = color {
@@ -1402,30 +1578,35 @@ pub fn generate_node(
             } else {
                 "egui::Color32::from_gray(200)".to_string()
             };
+            let font_chain = if let Some(family) = font_family {
+                format!(".family(egui::FontFamily::Name(\"{}\".into()))", family)
+            } else {
+                String::new()
+            };
             output.push_str(&format!(
-                "{}// Label: {}\n{}ui.label(egui::RichText::new(\"{}\").size({:.1}).color({}));\n",
+                "{}// Label: {}\n{}ui.label(egui::RichText::new(\"{}\").size({:.1}).color({}){});\n",
                 indent_str,
                 id,
                 indent_str,
                 text.replace('"', "\\\""),
                 size,
-                color_str
+                color_str,
+                font_chain
             ));
         }
         LayoutNode::TextEdit { placeholder, id } => {
-            let sanitized_id = id.replace('-', "_").replace(' ', "_");
+            let sanitized_id = id.replace(['-', ' '], "_");
             output.push_str(&format!(
-                "{}// TextEdit: {}\n{}ui.text_edit_singleline(&mut state.{})\n",
+                "{}// TextEdit: {}\n{}ui.add(egui::TextEdit::singleline(&mut state.{})",
                 indent_str, id, indent_str, sanitized_id
             ));
             if !placeholder.is_empty() {
                 output.push_str(&format!(
-                    "{}.hint_text(\"{}\")\n",
-                    indent_str,
+                    ".hint_text(\"{}\")",
                     placeholder.replace('"', "\\\"")
                 ));
             }
-            output.push_str(&format!("{};\n", indent_str));
+            output.push_str(");\n");
         }
         LayoutNode::Separator { id } => {
             output.push_str(&format!(
@@ -1467,33 +1648,224 @@ pub fn generate_node(
             h,
             fill,
             id,
+            style,
         } => {
             output.push_str(&format!(
-                "{}// Shape: {}\n{}{{\n{}{}let shape = egui_expressive::ShapeBuilder::rect(\n",
-                indent_str, id, indent_str, indent_str, indent_str
+                "{}// Shape: {}\n{}{{\n",
+                indent_str, id, indent_str
             ));
+            let inner = " ".repeat(indent + 4);
             output.push_str(&format!(
-                "{}{}{}egui::Rect::from_min_size(origin + egui::vec2({:.1}, {:.1}), egui::vec2({:.1}, {:.1}))\n",
-                indent_str, indent_str, indent_str, x, y, w, h
+                "{}let rect = egui::Rect::from_min_size(origin + egui::vec2({:.1}, {:.1}), egui::vec2({:.1}, {:.1}));\n",
+                inner, x, y, w, h
             ));
-            output.push_str(&format!(
-                "{}{}{}).fill({}).build();\n",
-                indent_str,
-                indent_str,
-                indent_str,
-                color_to_token_or_literal(fill, token_map)
-            ));
-            output.push_str(&format!(
-                "{}{}painter.add(shape);\n",
-                indent_str, indent_str
-            ));
+
+            // Drop shadows (before shape) — scale shadow alpha by shape opacity
+            // Use to_srgba_unmultiplied() to get straight-alpha bytes (Color32 stores premultiplied)
+            for effect in &style.effects {
+                let [sr, sg, sb, sa] = effect.color.to_srgba_unmultiplied();
+                let shadow_a = (sa as f32 * style.opacity).clamp(0.0, 255.0) as u8;
+                match effect.effect_type {
+                    EffectType::DropShadow => {
+                        output.push_str(&format!(
+                            "{}for s in egui_expressive::box_shadow(rect, egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}), {:.1}, {:.1}, egui_expressive::ShadowOffset::new({:.1}, {:.1})) {{ painter.add(s); }}\n",
+                            inner,
+                            sr, sg, sb, shadow_a,
+                            effect.blur, effect.spread, effect.x, effect.y
+                        ));
+                    }
+                    EffectType::OuterGlow => {
+                        output.push_str(&format!(
+                            "{}for s in egui_expressive::soft_shadow(rect, egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}), {:.1}, 0.0, egui_expressive::ShadowOffset::zero(), egui_expressive::BlurQuality::Medium) {{ painter.add(s); }}\n",
+                            inner,
+                            sr, sg, sb, shadow_a,
+                            effect.blur
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+
+            // Fill
+            let fill_color = color_to_token_or_literal(fill, token_map);
+            if style.opacity < 1.0 {
+                output.push_str(&format!(
+                    "{}let fill = egui_expressive::with_alpha({}, {:.2});\n",
+                    inner, fill_color, style.opacity
+                ));
+            } else {
+                output.push_str(&format!("{}let fill = {};\n", inner, fill_color));
+            }
+
+            // Stroke
+            if let Some((width, color)) = style.stroke {
+                let stroke_color = color_to_token_or_literal(&color, token_map);
+                if style.opacity < 1.0 {
+                    output.push_str(&format!(
+                        "{}let stroke = egui::Stroke::new({:.1}, egui_expressive::with_alpha({}, {:.2}));\n",
+                        inner, width, stroke_color, style.opacity
+                    ));
+                } else {
+                    output.push_str(&format!(
+                        "{}let stroke = egui::Stroke::new({:.1}, {});\n",
+                        inner, width, stroke_color
+                    ));
+                }
+            } else {
+                output.push_str(&format!("{}let stroke = egui::Stroke::NONE;\n", inner));
+            }
+
+            // Main shape: gradient or solid fill
+            let has_rotation = style.rotation_deg.abs() > 0.001;
+            if has_rotation && style.gradient.is_none() {
+                output.push_str(&format!(
+                    "{}let _rot = egui_expressive::Transform2D::rotate_around({:.4}, rect.center());\n",
+                    inner, style.rotation_deg
+                ));
+                output.push_str(&format!(
+                    "{}let _rot_pts = vec![_rot.apply(rect.min), _rot.apply(egui::pos2(rect.max.x, rect.min.y)), _rot.apply(rect.max), _rot.apply(egui::pos2(rect.min.x, rect.max.y))];\n",
+                    inner
+                ));
+                output.push_str(&format!(
+                    "{}painter.add(egui::Shape::convex_polygon(_rot_pts, fill, stroke));\n",
+                    inner
+                ));
+            } else if let Some(grad) = &style.gradient {
+                if has_rotation {
+                    output.push_str(&format!(
+                        "{}// Note: rotation not supported with gradients\n",
+                        inner
+                    ));
+                }
+                let stops_str: String = grad
+                    .stops
+                    .iter()
+                    .map(|s| {
+                        let [sr, sg, sb, sa] = s.color.to_srgba_unmultiplied();
+                        let a = (sa as f32 * style.opacity).clamp(0.0, 255.0) as u8;
+                        format!(
+                            "({:.3}, egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}))",
+                            s.position, sr, sg, sb, a
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                match grad.gradient_type {
+                    GradientType::Linear => {
+                        output.push_str(&format!(
+                            "{}painter.add(egui_expressive::linear_gradient_rect(rect, &[{}], egui_expressive::GradientDir::Angle({:.1})));\n",
+                            inner, stops_str, grad.angle_deg
+                        ));
+                    }
+                    GradientType::Radial => {
+                        // radial_gradient_rect takes inner_color, outer_color, segments
+                        // Use first stop as inner, last stop as outer
+                        let inner_color = grad
+                            .stops
+                            .first()
+                            .map(|s| {
+                                let [sr, sg, sb, sa] = s.color.to_srgba_unmultiplied();
+                                let a = (sa as f32 * style.opacity).clamp(0.0, 255.0) as u8;
+                                format!(
+                                    "egui::Color32::from_rgba_unmultiplied({}, {}, {}, {})",
+                                    sr, sg, sb, a
+                                )
+                            })
+                            .unwrap_or_else(|| "egui::Color32::WHITE".to_string());
+                        let outer_color = grad
+                            .stops
+                            .last()
+                            .map(|s| {
+                                let [sr, sg, sb, sa] = s.color.to_srgba_unmultiplied();
+                                let a = (sa as f32 * style.opacity).clamp(0.0, 255.0) as u8;
+                                format!(
+                                    "egui::Color32::from_rgba_unmultiplied({}, {}, {}, {})",
+                                    sr, sg, sb, a
+                                )
+                            })
+                            .unwrap_or_else(|| "egui::Color32::TRANSPARENT".to_string());
+                        output.push_str(&format!(
+                            "{}painter.add(egui_expressive::radial_gradient_rect(rect, {}, {}, 32));\n",
+                            inner, inner_color, outer_color
+                        ));
+                    }
+                }
+                // Emit stroke on top of gradient fill if present
+                output.push_str(&format!(
+                    "{}if stroke != egui::Stroke::NONE {{ painter.rect_stroke(rect, {:.1}, stroke, egui::StrokeKind::Outside); }}\n",
+                    inner, style.corner_radius
+                ));
+            } else {
+                // Solid fill — use the pre-declared `fill` and `stroke` variables (which already handle opacity)
+                let rounding = style.corner_radius;
+                output.push_str(&format!(
+                    "{}let shape = egui_expressive::ShapeBuilder::rect(rect).fill(fill).stroke(stroke).rounding({:.1}).build();\n",
+                    inner, rounding
+                ));
+                output.push_str(&format!("{}painter.add(shape);\n", inner));
+            }
+
+            // Inner shadow (after shape)
+            for effect in &style.effects {
+                if effect.effect_type == EffectType::InnerShadow {
+                    output.push_str(&format!(
+                        "{}// inner_shadow: blur={:.1} color=rgba({},{},{},{})\n",
+                        inner,
+                        effect.blur,
+                        effect.color.r(),
+                        effect.color.g(),
+                        effect.color.b(),
+                        effect.color.a()
+                    ));
+                }
+            }
+
             output.push_str(&format!("{}}}\n", indent_str));
         }
-        LayoutNode::Image { x, y, w, h, id } => {
+        LayoutNode::Image {
+            x,
+            y,
+            w,
+            h,
+            id,
+            style,
+        } => {
             output.push_str(&format!(
-                "{}// Image: {}\n{}// TODO: Load and display image at ({:.1}, {:.1}) size ({:.1}, {:.1})\n",
-                indent_str, id, indent_str, x, y, w, h
+                "{}// Image: {}\n{}{{\n",
+                indent_str, id, indent_str
             ));
+            let inner = " ".repeat(indent + 4);
+            output.push_str(&format!(
+                "{}let rect = egui::Rect::from_min_size(origin + egui::vec2({:.1}, {:.1}), egui::vec2({:.1}, {:.1}));\n",
+                inner, x, y, w, h
+            ));
+            if let Some(path) = &style.image_path {
+                output.push_str(&format!(
+                    "{}ui.painter().image(egui::TextureId::default(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE); // image: {}\n",
+                    inner, path
+                ));
+            } else {
+                // Placeholder: tinted rect
+                output.push_str(&format!(
+                    "{}// Replace with actual image texture for \"{}\"\n",
+                    inner, id
+                ));
+                output.push_str(&format!(
+                    "{}painter.rect_filled(rect, {:.1}, egui::Color32::from_rgba_premultiplied(80, 80, 80, 180));\n",
+                    inner, style.corner_radius
+                ));
+                output.push_str(&format!(
+                    "{}painter.rect_stroke(rect, {:.1}, egui::Stroke::new(1.0, egui::Color32::from_gray(120)), egui::StrokeKind::Outside);\n",
+                    inner, style.corner_radius
+                ));
+            }
+            if style.opacity < 0.999 {
+                output.push_str(&format!(
+                    "{}// opacity: {:.2} — wrap image in with_opacity() after loading texture\n",
+                    inner, style.opacity
+                ));
+            }
+            output.push_str(&format!("{}}}\n", indent_str));
         }
         LayoutNode::Unknown { id, comment } => {
             output.push_str(&format!("{}// Unknown: {} ({})\n", indent_str, id, comment));
@@ -1509,20 +1881,26 @@ fn color_to_token_or_literal(
     token_map: Option<&HashMap<String, Color32>>,
 ) -> String {
     if let Some(map) = token_map {
-        // Look up the color in the token map
-        for (name, c) in map.iter() {
+        // Look up the color in the token map — sort keys for deterministic output
+        let mut entries: Vec<(&String, &Color32)> = map.iter().collect();
+        entries.sort_by_key(|(name, _)| name.as_str());
+        for (name, c) in entries {
             if *c == *color {
                 return format!("tokens::{}", name.to_uppercase());
             }
         }
     }
-    // Fall back to literal
-    format!(
-        "egui::Color32::from_rgb({}, {}, {})",
-        color.r(),
-        color.g(),
-        color.b()
-    )
+    // Fall back to literal — use to_srgba_unmultiplied() to get straight-alpha bytes
+    // (Color32 stores premultiplied; feeding .r()/.g()/.b() to from_rgba_unmultiplied would double-premultiply)
+    let [r, g, b, a] = color.to_srgba_unmultiplied();
+    if a < 255 {
+        format!(
+            "egui::Color32::from_rgba_unmultiplied({}, {}, {}, {})",
+            r, g, b, a
+        )
+    } else {
+        format!("egui::Color32::from_rgb({}, {}, {})", r, g, b)
+    }
 }
 
 fn get_node_width(node: &LayoutNode) -> f32 {
@@ -1675,7 +2053,7 @@ pub fn generate_tokens_file(color_map: &HashMap<String, Color32>, spacing: &[f32
     }
 
     // Generate spacing tokens
-    output.push_str("\n");
+    output.push('\n');
     let spacing_tokens = [
         ("SPACING_SM", 8.0),
         ("SPACING_MD", 16.0),
@@ -1683,11 +2061,7 @@ pub fn generate_tokens_file(color_map: &HashMap<String, Color32>, spacing: &[f32
         ("SPACING_XL", 32.0),
     ];
     for (name, value) in spacing_tokens {
-        if !spacing.is_empty() {
-            output.push_str(&format!("pub const {}: f32 = {:.1};\n", name, value));
-        } else {
-            output.push_str(&format!("pub const {}: f32 = {:.1};\n", name, value));
-        }
+        output.push_str(&format!("pub const {}: f32 = {:.1};\n", name, value));
     }
 
     // Add custom spacing from the spacing array
@@ -1719,7 +2093,7 @@ pub fn generate_state_file(artboards: &[ArtboardState]) -> String {
         // Generate Default impl
         output.push_str(&format!("impl Default for {}State {{\n", struct_name));
         output.push_str("    fn default() -> Self {\n");
-        output.push_str(&format!("        Self {{\n"));
+        output.push_str("        Self {\n");
         for field in &artboard.text_fields {
             let field_name = sanitize_field_name(field);
             output.push_str(&format!("            {}: String::new(),\n", field_name));
@@ -1773,7 +2147,7 @@ pub fn generate_components_file(components: &[ComponentDef]) -> String {
             "pub fn {}(ui: &mut Ui, label: &str) -> egui::Response {{\n",
             fn_name
         ));
-        output.push_str(&format!("    let btn = egui::Button::new(\n",));
+        output.push_str("    let btn = egui::Button::new(\n");
         output.push_str(&format!(
             "        RichText::new(label).size({:.1}).color(tokens::ON_PRIMARY)\n",
             comp.text_size
@@ -1884,15 +2258,11 @@ fn collect_colors_from_nodes(nodes: &[LayoutNode], color_map: &mut HashMap<Strin
         match node {
             LayoutNode::Shape { fill, id, .. } => {
                 let name = id.to_string();
-                if !color_map.contains_key(&name) {
-                    color_map.insert(name, *fill);
-                }
+                color_map.entry(name).or_insert(*fill);
             }
             LayoutNode::Card { bg, id, .. } => {
                 let name = format!("{}_bg", id);
-                if !color_map.contains_key(&name) {
-                    color_map.insert(name, *bg);
-                }
+                color_map.entry(name).or_insert(*bg);
             }
             LayoutNode::Row { children, .. } => {
                 collect_colors_from_nodes(children, color_map);
@@ -1934,7 +2304,19 @@ fn collect_spacing_from_nodes(nodes: &[LayoutNode], spacing: &mut Vec<f32>) {
 
 /// Convert a string to PascalCase.
 fn to_pascal_case(s: &str) -> String {
-    s.split(|c: char| c == '_' || c == '-' || c.is_whitespace())
+    // Strip non-ASCII and non-alphanumeric chars (except separators)
+    let cleaned: String = s
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    let result: String = cleaned
+        .split(|c: char| c == '_' || c == '-' || c.is_whitespace())
         .filter(|part| !part.is_empty())
         .map(|part| {
             let mut chars = part.chars();
@@ -1945,43 +2327,194 @@ fn to_pascal_case(s: &str) -> String {
                 }
             }
         })
-        .collect()
+        .collect();
+    // Handle empty result
+    let result = if result.is_empty() {
+        "Component".to_string()
+    } else {
+        result
+    };
+    // Handle leading digit
+    if result.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("S{}", result)
+    } else {
+        result
+    }
 }
 
 /// Sanitize a field name for use in Rust code.
 fn sanitize_field_name(name: &str) -> String {
-    name.to_lowercase()
+    const RUST_KEYWORDS: &[&str] = &[
+        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
+        "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref",
+        "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
+        "use", "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do",
+        "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield",
+    ];
+    let sanitized: String = name
+        .to_lowercase()
         .chars()
         .map(|c| {
-            if c.is_alphanumeric() || c == '_' {
+            if c.is_ascii_alphanumeric() || c == '_' {
                 c
             } else {
                 '_'
             }
         })
-        .collect()
+        .collect();
+    // Remove leading/trailing underscores, collapse multiple underscores
+    let sanitized = sanitized.trim_matches('_').to_string();
+    let sanitized = {
+        let mut s = String::new();
+        let mut prev_underscore = false;
+        for c in sanitized.chars() {
+            if c == '_' {
+                if !prev_underscore {
+                    s.push(c);
+                }
+                prev_underscore = true;
+            } else {
+                s.push(c);
+                prev_underscore = false;
+            }
+        }
+        s
+    };
+    // Handle empty result
+    let sanitized = if sanitized.is_empty() {
+        "field".to_string()
+    } else {
+        sanitized
+    };
+    // Handle leading digit
+    let sanitized = if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("f_{}", sanitized)
+    } else {
+        sanitized
+    };
+    // Handle Rust keywords
+    if RUST_KEYWORDS.contains(&sanitized.as_str()) {
+        format!("{}_", sanitized)
+    } else {
+        sanitized
+    }
 }
 
 /// Sanitize a module name for use in Rust code.
 fn sanitize_module_name(name: &str) -> String {
-    name.to_lowercase()
+    const RUST_KEYWORDS: &[&str] = &[
+        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
+        "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref",
+        "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
+        "use", "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do",
+        "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield",
+    ];
+    let sanitized: String = name
+        .to_lowercase()
         .chars()
         .map(|c| {
-            if c.is_alphanumeric() || c == '_' {
+            if c.is_ascii_alphanumeric() || c == '_' {
                 c
             } else {
                 '_'
             }
         })
-        .collect()
+        .collect();
+    // Remove leading/trailing underscores, collapse multiple underscores
+    let sanitized = sanitized.trim_matches('_').to_string();
+    let sanitized = {
+        let mut s = String::new();
+        let mut prev_underscore = false;
+        for c in sanitized.chars() {
+            if c == '_' {
+                if !prev_underscore {
+                    s.push(c);
+                }
+                prev_underscore = true;
+            } else {
+                s.push(c);
+                prev_underscore = false;
+            }
+        }
+        s
+    };
+    // Handle empty result
+    let sanitized = if sanitized.is_empty() {
+        "module".to_string()
+    } else {
+        sanitized
+    };
+    // Handle leading digit
+    let sanitized = if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("m_{}", sanitized)
+    } else {
+        sanitized
+    };
+    // Handle Rust keywords
+    if RUST_KEYWORDS.contains(&sanitized.as_str()) {
+        format!("{}_", sanitized)
+    } else {
+        sanitized
+    }
 }
 
 /// Sanitize a token name for use in Rust code (uppercase with underscores).
 fn sanitize_token_name(name: &str) -> String {
-    name.to_lowercase()
+    const RUST_KEYWORDS: &[&str] = &[
+        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
+        "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref",
+        "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
+        "use", "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do",
+        "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield",
+    ];
+    let sanitized: String = name
+        .to_lowercase()
         .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .collect()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    // Remove leading/trailing underscores, collapse multiple underscores
+    let sanitized = sanitized.trim_matches('_').to_string();
+    let sanitized = {
+        let mut s = String::new();
+        let mut prev_underscore = false;
+        for c in sanitized.chars() {
+            if c == '_' {
+                if !prev_underscore {
+                    s.push(c);
+                }
+                prev_underscore = true;
+            } else {
+                s.push(c);
+                prev_underscore = false;
+            }
+        }
+        s
+    };
+    let sanitized = sanitized.to_uppercase();
+    // Handle empty result
+    let sanitized = if sanitized.is_empty() {
+        "TOKEN".to_string()
+    } else {
+        sanitized
+    };
+    // Handle leading digit
+    let sanitized = if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("T_{}", sanitized)
+    } else {
+        sanitized
+    };
+    // Handle Rust keywords
+    if RUST_KEYWORDS.contains(&sanitized.to_lowercase().as_str()) {
+        format!("{}_", sanitized)
+    } else {
+        sanitized
+    }
 }
 
 // ============================================================================
@@ -2028,16 +2561,8 @@ pub fn parse_svg_elements(svg: &str) -> Vec<LayoutElement> {
                         el_type: ElementType::Group,
                         x: x.unwrap_or(min_x),
                         y: y.unwrap_or(min_y),
-                        w: if x.is_some() {
-                            max_x - min_x
-                        } else {
-                            max_x - min_x
-                        },
-                        h: if y.is_some() {
-                            max_y - min_y
-                        } else {
-                            max_y - min_y
-                        },
+                        w: max_x - min_x,
+                        h: max_y - min_y,
                         fill: extract_fill_from_tag(g_tag),
                         stroke: extract_stroke_from_tag(g_tag),
                         text: None,
@@ -2068,7 +2593,7 @@ pub fn parse_svg_elements(svg: &str) -> Vec<LayoutElement> {
                         third_party_effects: vec![],
                         notes: vec![],
                         appearance_fills: vec![],
-                        appearance_strokes: vec![],
+                        appearance_strokes: vec![], artboard_name: None,
                     });
                 }
             }
@@ -2081,11 +2606,6 @@ pub fn parse_svg_elements(svg: &str) -> Vec<LayoutElement> {
 
     // Also look for top-level elements not in groups
     elements.extend(parse_top_level_elements(svg));
-
-    // If no elements found, try to parse rects/texts directly
-    if elements.is_empty() {
-        elements.extend(parse_top_level_elements(svg));
-    }
 
     elements
 }
@@ -2144,7 +2664,7 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 third_party_effects: vec![],
                 notes: vec![],
                 appearance_fills: vec![],
-                appearance_strokes: vec![],
+                appearance_strokes: vec![], artboard_name: None,
             });
 
             rect_start = tag_end + 1;
@@ -2215,7 +2735,7 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                     third_party_effects: vec![],
                     notes: vec![],
                     appearance_fills: vec![],
-                    appearance_strokes: vec![],
+                    appearance_strokes: vec![], artboard_name: None,
                 });
             }
 
@@ -2285,7 +2805,7 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 third_party_effects: vec![],
                 notes: vec![],
                 appearance_fills: vec![],
-                appearance_strokes: vec![],
+                appearance_strokes: vec![], artboard_name: None,
             });
 
             path_start = tag_end + 1;
@@ -2345,7 +2865,7 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 third_party_effects: vec![],
                 notes: vec![],
                 appearance_fills: vec![],
-                appearance_strokes: vec![],
+                appearance_strokes: vec![], artboard_name: None,
             });
 
             img_start = tag_end + 1;
@@ -2415,7 +2935,7 @@ fn parse_top_level_elements(svg: &str) -> Vec<LayoutElement> {
                     third_party_effects: vec![],
                     notes: vec![],
                     appearance_fills: vec![],
-                    appearance_strokes: vec![],
+                    appearance_strokes: vec![], artboard_name: None,
                 });
             }
 
@@ -2436,7 +2956,7 @@ fn parse_top_level_elements(svg: &str) -> Vec<LayoutElement> {
             let preceding = &svg[text_start..idx];
             if preceding
                 .rfind("<g")
-                .map_or(true, |g_pos| g_pos < preceding.rfind("</g").unwrap_or(0))
+                .is_none_or(|g_pos| g_pos < preceding.rfind("</g").unwrap_or(0))
             {
                 let tag = &svg[idx..tag_end + 1];
                 let text_content_start = tag_end + 1;
@@ -2489,7 +3009,7 @@ fn parse_top_level_elements(svg: &str) -> Vec<LayoutElement> {
                         third_party_effects: vec![],
                         notes: vec![],
                         appearance_fills: vec![],
-                        appearance_strokes: vec![],
+                        appearance_strokes: vec![], artboard_name: None,
                     });
                 }
             }
@@ -2599,8 +3119,7 @@ fn extract_stroke_from_tag(tag: &str) -> Option<(f32, Color32)> {
 fn extract_transform_xy(tag: &str) -> (Option<f32>, Option<f32>) {
     if let Some(transform) = extract_attr(tag, "transform") {
         // Parse translate(x, y) or translate(x y)
-        if transform.starts_with("translate(") {
-            let inner = &transform[10..];
+        if let Some(inner) = transform.strip_prefix("translate(") {
             if let Some(end) = inner.find(')') {
                 let coords = &inner[..end];
                 let parts: Vec<&str> = coords
@@ -2877,7 +3396,7 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
         let fill = elem_value
             .get("fill")
             .and_then(|v| v.as_str())
-            .and_then(|s| crate::svg::parse_svg_color(s));
+            .and_then(crate::svg::parse_svg_color);
 
         let stroke_width = elem_value
             .get("strokeWidth")
@@ -2888,7 +3407,7 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
         let stroke_color = elem_value
             .get("stroke")
             .and_then(|v| v.as_str())
-            .and_then(|s| crate::svg::parse_svg_color(s));
+            .and_then(crate::svg::parse_svg_color);
 
         let stroke = stroke_width.and_then(|w| stroke_color.map(|c| (w, c)));
 
@@ -2941,22 +3460,22 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
             .map(|v| v as f32);
 
         // Parse blend mode
-        let blend_mode = BlendMode::from_str(
-            elem_value
-                .get("blendMode")
-                .and_then(|v| v.as_str())
-                .unwrap_or("normal"),
-        );
+        let blend_mode = elem_value
+            .get("blendMode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("normal")
+            .parse::<BlendMode>()
+            .unwrap();
 
         // Parse new fields from Illustrator
         let stroke_cap = elem_value
             .get("strokeCap")
             .and_then(|v| v.as_str())
-            .map(StrokeCap::from_str);
+            .map(|s| s.parse::<StrokeCap>().unwrap());
         let stroke_join = elem_value
             .get("strokeJoin")
             .and_then(|v| v.as_str())
-            .map(StrokeJoin::from_str);
+            .map(|s| s.parse::<StrokeJoin>().unwrap());
         let stroke_miter_limit = elem_value
             .get("strokeMiterLimit")
             .and_then(|v| v.as_f64())
@@ -2964,11 +3483,11 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
         let text_decoration = elem_value
             .get("textDecoration")
             .and_then(|v| v.as_str())
-            .map(TextDecoration::from_str);
+            .map(|s| s.parse::<TextDecoration>().unwrap());
         let text_transform = elem_value
             .get("textTransform")
             .and_then(|v| v.as_str())
-            .map(TextTransform::from_str);
+            .map(|s| s.parse::<TextTransform>().unwrap());
         let symbol_name = elem_value
             .get("symbolName")
             .and_then(|v| v.as_str())
@@ -3068,11 +3587,12 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
                             fo.get("b")?.as_u64()? as u8,
                         ),
                         opacity: fo.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
-                        blend_mode: BlendMode::from_str(
-                            fo.get("blendMode")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("normal"),
-                        ),
+                        blend_mode: fo
+                            .get("blendMode")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("normal")
+                            .parse::<BlendMode>()
+                            .unwrap(),
                     })
                 })
                 .collect()
@@ -3096,11 +3616,12 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
                         ),
                         width: so.get("width").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
                         opacity: so.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
-                        blend_mode: BlendMode::from_str(
-                            so.get("blendMode")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("normal"),
-                        ),
+                        blend_mode: so
+                            .get("blendMode")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("normal")
+                            .parse::<BlendMode>()
+                            .unwrap(),
                     })
                 })
                 .collect()
@@ -3133,7 +3654,7 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
                                 let color = stop
                                     .get("color")?
                                     .as_str()
-                                    .and_then(|s| crate::svg::parse_svg_color(s))
+                                    .and_then(crate::svg::parse_svg_color)
                                     .unwrap_or(egui::Color32::BLACK);
                                 Some(GradientStop { position, color })
                             })
@@ -3189,13 +3710,14 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
                         let color = e
                             .get("color")?
                             .as_str()
-                            .and_then(|s| crate::svg::parse_svg_color(s))
+                            .and_then(crate::svg::parse_svg_color)
                             .unwrap_or(egui::Color32::BLACK);
-                        let blend_mode = BlendMode::from_str(
-                            e.get("blendMode")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("normal"),
-                        );
+                        let blend_mode = e
+                            .get("blendMode")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("normal")
+                            .parse::<BlendMode>()
+                            .unwrap();
                         let depth = e
                             .get("depth")
                             .and_then(|v| v.as_f64())
@@ -3209,11 +3731,11 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
                         let highlight = e
                             .get("highlight")
                             .and_then(|v| v.as_str())
-                            .and_then(|s| crate::svg::parse_svg_color(s));
+                            .and_then(crate::svg::parse_svg_color);
                         let shadow_color = e
                             .get("shadowColor")
                             .and_then(|v| v.as_str())
-                            .and_then(|s| crate::svg::parse_svg_color(s));
+                            .and_then(crate::svg::parse_svg_color);
                         let radius = e
                             .get("radius")
                             .and_then(|v| v.as_f64())
@@ -3244,6 +3766,7 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
                 .get("children")
                 .and_then(|v| v.as_array())
                 .map(|arr| {
+                    #[allow(clippy::unnecessary_filter_map)]
                     arr.iter()
                         .filter_map(|child| {
                             let child_id = child
@@ -3284,7 +3807,7 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
                             let child_fill = child
                                 .get("fill")
                                 .and_then(|v| v.as_str())
-                                .and_then(|s| crate::svg::parse_svg_color(s));
+                                .and_then(crate::svg::parse_svg_color);
 
                             Some(LayoutElement {
                                 id: child_id,
@@ -3323,7 +3846,7 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
                                 third_party_effects: vec![],
                                 notes: vec![],
                                 appearance_fills: vec![],
-                                appearance_strokes: vec![],
+                                appearance_strokes: vec![], artboard_name: None,
                             })
                         })
                         .collect()
@@ -3370,7 +3893,7 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
             third_party_effects,
             notes,
             appearance_fills,
-            appearance_strokes,
+            appearance_strokes, artboard_name: None,
         });
     }
 
@@ -3385,7 +3908,7 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
 #[derive(Clone, Debug)]
 pub enum SidecarChange {
     /// A new element was added.
-    Added(LayoutElement),
+    Added(Box<LayoutElement>),
     /// An element was removed.
     Removed(String),
     /// An element moved positions.
@@ -3433,7 +3956,7 @@ pub fn diff_sidecars(old_json: &str, new_json: &str) -> Vec<SidecarChange> {
     // Added
     for (id, el) in &new_map {
         if !old_map.contains_key(id) {
-            changes.push(SidecarChange::Added((*el).clone()));
+            changes.push(SidecarChange::Added(Box::new((*el).clone())));
         }
     }
 
@@ -3507,6 +4030,61 @@ pub fn svg_to_rust_scaffold(svg: &str, fn_name: &str, options: &InferenceOptions
     generate_rust(
         fn_name, artboard_w, artboard_h, &nodes, bg_color, None, None,
     )
+}
+
+/// Generate a complete Rust source file for a single artboard.
+///
+/// Returns a string containing a valid `.rs` file with a `pub fn draw_<name>(ui: &mut egui::Ui)`
+/// function that renders all elements belonging to this artboard.
+pub fn generate_artboard_file(
+    artboard_name: &str,
+    artboard_w: f32,
+    artboard_h: f32,
+    elements: &[LayoutElement],
+    token_map: &HashMap<String, Color32>,
+) -> String {
+    let fn_name = sanitize_fn_name(artboard_name);
+    let fn_name = if fn_name.is_empty() { "artboard".to_string() } else { fn_name };
+    let options = InferenceOptions::default();
+    let layout = infer_layout(elements, &options);
+    // generate_rust already produces a complete file (imports + pub fn draw_X)
+    generate_rust(&fn_name, artboard_w, artboard_h, &layout, None, None, Some(token_map))
+}
+
+/// Generate one Rust file per artboard.
+///
+/// Returns a `Vec<(filename, file_content)>` — one entry per artboard.
+/// Elements are assigned to artboards by their `artboard_name` field if set.
+/// Elements with no `artboard_name` (unassigned) are placed in the **first** artboard only,
+/// consistent with the `--per-artboard` CLI flag behavior.
+pub fn generate_all_artboards(
+    all_elements: &[LayoutElement],
+    artboards: &[(&str, f32, f32)],
+    token_map: &HashMap<String, Color32>,
+) -> Vec<(String, String)> {
+    artboards
+        .iter()
+        .enumerate()
+        .map(|(artboard_idx, &(name, w, h))| {
+            let sanitized = {
+                let s = sanitize_fn_name(name);
+                if s.is_empty() { "artboard".to_string() } else { s }
+            };
+            let filename = format!("{}.rs", sanitized);
+            // Filter elements belonging to this artboard.
+            // Unassigned elements (artboard_name == None) go to the first artboard only.
+            let artboard_elements: Vec<LayoutElement> = all_elements
+                .iter()
+                .filter(|e| {
+                    e.artboard_name.as_deref() == Some(name)
+                        || (e.artboard_name.is_none() && artboard_idx == 0)
+                })
+                .cloned()
+                .collect();
+            let code = generate_artboard_file(name, w, h, &artboard_elements, token_map);
+            (filename, code)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -3595,6 +4173,7 @@ mod tests {
                 text_align: None,
                 letter_spacing: None,
                 line_height: None,
+                ..LayoutElement::new("a".to_string(), ElementType::Shape, 0.0, 0.0, 100.0, 50.0)
             },
             LayoutElement {
                 id: "b".to_string(),
@@ -3619,6 +4198,7 @@ mod tests {
                 text_align: None,
                 letter_spacing: None,
                 line_height: None,
+                ..LayoutElement::new("b".to_string(), ElementType::Shape, 110.0, 5.0, 100.0, 50.0)
             },
             LayoutElement {
                 id: "c".to_string(),
@@ -3643,6 +4223,14 @@ mod tests {
                 text_align: None,
                 letter_spacing: None,
                 line_height: None,
+                ..LayoutElement::new(
+                    "c".to_string(),
+                    ElementType::Shape,
+                    50.0,
+                    100.0,
+                    100.0,
+                    50.0,
+                )
             },
         ];
 
@@ -3679,6 +4267,7 @@ mod tests {
                 text_align: None,
                 letter_spacing: None,
                 line_height: None,
+                ..LayoutElement::new("a".to_string(), ElementType::Shape, 0.0, 0.0, 100.0, 50.0)
             },
             LayoutElement {
                 id: "b".to_string(),
@@ -3703,6 +4292,7 @@ mod tests {
                 text_align: None,
                 letter_spacing: None,
                 line_height: None,
+                ..LayoutElement::new("b".to_string(), ElementType::Shape, 108.0, 0.0, 100.0, 50.0)
             },
             LayoutElement {
                 id: "c".to_string(),
@@ -3727,6 +4317,7 @@ mod tests {
                 text_align: None,
                 letter_spacing: None,
                 line_height: None,
+                ..LayoutElement::new("c".to_string(), ElementType::Shape, 216.0, 0.0, 100.0, 50.0)
             },
         ];
 
@@ -3760,6 +4351,7 @@ mod tests {
                 text_align: None,
                 letter_spacing: None,
                 line_height: None,
+                ..LayoutElement::new("a".to_string(), ElementType::Shape, 0.0, 0.0, 100.0, 50.0)
             },
             LayoutElement {
                 id: "b".to_string(),
@@ -3784,6 +4376,7 @@ mod tests {
                 text_align: None,
                 letter_spacing: None,
                 line_height: None,
+                ..LayoutElement::new("b".to_string(), ElementType::Shape, 0.0, 58.0, 100.0, 50.0)
             },
         ];
 
@@ -3855,6 +4448,7 @@ mod tests {
                 text: "Hello".to_string(),
                 size: 24.0,
                 color: Some(Color32::WHITE),
+                font_family: None,
                 id: "greeting".to_string(),
             },
             LayoutNode::Button {
@@ -3936,6 +4530,14 @@ mod tests {
                     text_align: None,
                     letter_spacing: None,
                     line_height: None,
+                    ..LayoutElement::new(
+                        "btn-a".to_string(),
+                        ElementType::Shape,
+                        0.0,
+                        0.0,
+                        100.0,
+                        40.0,
+                    )
                 },
                 LayoutElement {
                     id: "btn-b".to_string(),
@@ -3960,6 +4562,14 @@ mod tests {
                     text_align: None,
                     letter_spacing: None,
                     line_height: None,
+                    ..LayoutElement::new(
+                        "btn-b".to_string(),
+                        ElementType::Shape,
+                        110.0,
+                        0.0,
+                        100.0,
+                        40.0,
+                    )
                 },
             ],
             opacity: 1.0,
@@ -3973,6 +4583,14 @@ mod tests {
             text_align: None,
             letter_spacing: None,
             line_height: None,
+            ..LayoutElement::new(
+                "row-buttons".to_string(),
+                ElementType::Group,
+                0.0,
+                0.0,
+                300.0,
+                50.0,
+            )
         }];
 
         let options = InferenceOptions::default();
@@ -3980,11 +4598,8 @@ mod tests {
 
         assert!(!nodes.is_empty());
         // The row should be inferred from the naming convention
-        match &nodes[0] {
-            LayoutNode::Row { id, .. } => {
-                assert_eq!(id, "buttons");
-            }
-            _ => {}
+        if let LayoutNode::Row { id, .. } = &nodes[0] {
+            assert_eq!(id, "buttons");
         }
     }
 
@@ -4041,5 +4656,38 @@ mod tests {
         let components_file = generate_components_file(&components);
         assert!(components_file.contains("pub fn primary_button"));
         assert!(components_file.contains("tokens::ON_PRIMARY"));
+    }
+
+    #[test]
+    fn test_generate_artboard_file_produces_valid_rust() {
+        let elements = vec![LayoutElement::new("btn".to_string(), ElementType::Shape, 10.0, 20.0, 80.0, 40.0)];
+        let token_map = HashMap::new();
+        let code = generate_artboard_file("My Artboard", 375.0, 812.0, &elements, &token_map);
+        // Must contain a pub fn with a valid Rust identifier
+        assert!(code.contains("pub fn draw_"), "missing pub fn draw_: {}", &code[..200.min(code.len())]);
+        // Must contain egui imports
+        assert!(code.contains("use egui"));
+        // Must not contain nested pub fn (double-wrapping bug)
+        let fn_count = code.matches("pub fn draw_").count();
+        assert_eq!(fn_count, 1, "expected exactly 1 pub fn draw_, found {}", fn_count);
+    }
+
+    #[test]
+    fn test_generate_all_artboards_partitions_elements() {
+        let mut e1 = LayoutElement::new("e1".to_string(), ElementType::Shape, 0.0, 0.0, 50.0, 50.0);
+        e1.artboard_name = Some("Home".to_string());
+        let mut e2 = LayoutElement::new("e2".to_string(), ElementType::Shape, 0.0, 0.0, 50.0, 50.0);
+        e2.artboard_name = Some("Settings".to_string());
+        let elements = vec![e1, e2];
+        let token_map = HashMap::new();
+        let artboards = [("Home", 375.0f32, 812.0f32), ("Settings", 375.0, 812.0)];
+        let files = generate_all_artboards(&elements, &artboards, &token_map);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].0, "home.rs");
+        assert_eq!(files[1].0, "settings.rs");
+        // Home file should contain e1's id, Settings file should contain e2's id
+        // (both may appear since unassigned elements are included in all artboards)
+        assert!(files[0].1.contains("pub fn draw_home"));
+        assert!(files[1].1.contains("pub fn draw_settings"));
     }
 }

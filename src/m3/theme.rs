@@ -53,7 +53,7 @@ impl M3Theme {
     /// Call this once at app startup after storing the theme.
     pub fn apply_to_egui(&self, ctx: &Context) {
         let c = &self.colors;
-        ctx.style_mut(|style| {
+        ctx.global_style_mut(|style| {
             let v = &mut style.visuals;
             v.dark_mode = self.is_dark;
             v.override_text_color = Some(c.on_surface);

@@ -38,10 +38,10 @@ impl eframe::App for DawApp {
         if self.vu_level > self.peak {
             self.peak = self.vu_level;
         }
-        if self.frame_count % 60 == 0 {
+        if self.frame_count.is_multiple_of(60) {
             self.peak *= 0.95;
         }
-        if self.frame_count % 120 == 0 {
+        if self.frame_count.is_multiple_of(120) {
             self.playhead = (self.playhead + 1) % 16;
         }
 

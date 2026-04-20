@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Layered painter helpers and fluent shape builders for egui.
 
 use egui::{
@@ -220,23 +218,12 @@ impl CircleBuilder {
     /// Build the final [`Shape`].
     #[inline]
     pub fn build(self) -> Shape {
-        if self.fill == Color32::TRANSPARENT && self.stroke == Stroke::NONE {
-            Shape::Circle(egui::epaint::CircleShape {
-                center: self.center,
-                radius: self.radius,
-                fill: self.fill,
-                stroke: self.stroke,
-            })
-        } else if self.stroke == Stroke::NONE {
-            Shape::circle_filled(self.center, self.radius, self.fill)
-        } else {
-            Shape::Circle(egui::epaint::CircleShape {
-                center: self.center,
-                radius: self.radius,
-                fill: self.fill,
-                stroke: self.stroke,
-            })
-        }
+        Shape::Circle(egui::epaint::CircleShape {
+            center: self.center,
+            radius: self.radius,
+            fill: self.fill,
+            stroke: self.stroke,
+        })
     }
 }
 
@@ -317,7 +304,7 @@ pub fn box_shadow(
     spread: f32,
     offset: ShadowOffset,
 ) -> Vec<egui::Shape> {
-    let steps = (blur_radius.ceil() as usize).max(1).min(12);
+    let steps = (blur_radius.ceil() as usize).clamp(1, 12);
     let mut shapes = Vec::with_capacity(steps);
     let base_alpha = color.a() as f32 / steps as f32;
 
@@ -337,7 +324,7 @@ pub fn box_shadow(
                 rect.max.y + expansion + offset.y,
             ),
         );
-        let rounding = egui::CornerRadius::same((expansion * 0.5) as u8);
+        let rounding = egui::CornerRadius::same((expansion * 0.5).round() as u8);
         shapes.push(egui::Shape::Rect(egui::epaint::RectShape::filled(
             shadow_rect,
             rounding,
@@ -354,7 +341,7 @@ pub fn glow(rect: egui::Rect, color: egui::Color32, radius: f32) -> Vec<egui::Sh
 
 /// Inner shadow (inset) approximated by drawing a border with gradient-like alpha.
 pub fn inner_shadow(rect: egui::Rect, color: egui::Color32, blur_radius: f32) -> Vec<egui::Shape> {
-    let steps = (blur_radius.ceil() as usize).max(1).min(8);
+    let steps = (blur_radius.ceil() as usize).clamp(1, 8);
     let mut shapes = Vec::with_capacity(steps * 4);
     let base_alpha = color.a() as f32 / steps as f32;
 
@@ -488,24 +475,70 @@ pub fn gradient_rect(rect: egui::Rect, top: egui::Color32, bottom: egui::Color32
     linear_gradient_rect(rect, &[(0.0, top), (1.0, bottom)], GradientDir::TopToBottom)
 }
 
+/// Convert RGB (0.0–1.0) to HSL (hue 0.0–360.0, saturation 0.0–1.0, lightness 0.0–1.0).
+fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l = (max + min) * 0.5;
+    if (max - min).abs() < 1e-6 {
+        return (0.0, 0.0, l);
+    }
+    let d = max - min;
+    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let h = if (max - r).abs() < 1e-6 {
+        (g - b) / d + if g < b { 6.0 } else { 0.0 }
+    } else if (max - g).abs() < 1e-6 {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    (h * 60.0, s, l)
+}
+
+/// Convert HSL (hue 0.0–360.0, saturation 0.0–1.0, lightness 0.0–1.0) to RGB (0.0–1.0).
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+    if s < 1e-6 {
+        return (l, l, l);
+    }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let hue_to_rgb = |p: f32, q: f32, mut t: f32| -> f32 {
+        if t < 0.0 { t += 1.0; }
+        if t > 1.0 { t -= 1.0; }
+        if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
+        if t < 0.5 { return q; }
+        if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+        p
+    };
+    let h = h / 360.0;
+    (
+        hue_to_rgb(p, q, h + 1.0 / 3.0),
+        hue_to_rgb(p, q, h),
+        hue_to_rgb(p, q, h - 1.0 / 3.0),
+    )
+}
+
 /// Blend two colors using the specified blend mode.
 pub fn blend_color(
     fg: egui::Color32,
     bg: egui::Color32,
     mode: crate::codegen::BlendMode,
 ) -> egui::Color32 {
-    // Convert to linear RGBA (0-1 range)
+    // Unpack as straight (unmultiplied) RGBA so blend math operates on true color values.
+    // Color32 stores premultiplied bytes; to_srgba_unmultiplied() reverses that.
+    let fg_arr = fg.to_srgba_unmultiplied();
+    let bg_arr = bg.to_srgba_unmultiplied();
     let fg = (
-        fg.r() as f32 / 255.0,
-        fg.g() as f32 / 255.0,
-        fg.b() as f32 / 255.0,
-        fg.a() as f32 / 255.0,
+        fg_arr[0] as f32 / 255.0,
+        fg_arr[1] as f32 / 255.0,
+        fg_arr[2] as f32 / 255.0,
+        fg_arr[3] as f32 / 255.0,
     );
     let bg = (
-        bg.r() as f32 / 255.0,
-        bg.g() as f32 / 255.0,
-        bg.b() as f32 / 255.0,
-        bg.a() as f32 / 255.0,
+        bg_arr[0] as f32 / 255.0,
+        bg_arr[1] as f32 / 255.0,
+        bg_arr[2] as f32 / 255.0,
+        bg_arr[3] as f32 / 255.0,
     );
 
     let (r, g, b) = match mode {
@@ -528,24 +561,98 @@ pub fn blend_color(
         }
         crate::codegen::BlendMode::Darken => (bg.0.min(fg.0), bg.1.min(fg.1), bg.2.min(fg.2)),
         crate::codegen::BlendMode::Lighten => (bg.0.max(fg.0), bg.1.max(fg.1), bg.2.max(fg.2)),
-        // Advanced blend modes - fall back to normal for now
-        crate::codegen::BlendMode::ColorDodge
-        | crate::codegen::BlendMode::ColorBurn
-        | crate::codegen::BlendMode::HardLight
-        | crate::codegen::BlendMode::SoftLight
-        | crate::codegen::BlendMode::Difference
-        | crate::codegen::BlendMode::Exclusion
-        | crate::codegen::BlendMode::Hue
-        | crate::codegen::BlendMode::Saturation
-        | crate::codegen::BlendMode::Color
-        | crate::codegen::BlendMode::Luminosity => (fg.0, fg.1, fg.2),
+        // Advanced blend modes
+        crate::codegen::BlendMode::ColorDodge => (
+            if fg.0 >= 1.0 { 1.0 } else { (bg.0 / (1.0 - fg.0)).min(1.0) },
+            if fg.1 >= 1.0 { 1.0 } else { (bg.1 / (1.0 - fg.1)).min(1.0) },
+            if fg.2 >= 1.0 { 1.0 } else { (bg.2 / (1.0 - fg.2)).min(1.0) },
+        ),
+        crate::codegen::BlendMode::ColorBurn => (
+            if fg.0 <= 0.0 { 0.0 } else { 1.0 - ((1.0 - bg.0) / fg.0).min(1.0) },
+            if fg.1 <= 0.0 { 0.0 } else { 1.0 - ((1.0 - bg.1) / fg.1).min(1.0) },
+            if fg.2 <= 0.0 { 0.0 } else { 1.0 - ((1.0 - bg.2) / fg.2).min(1.0) },
+        ),
+        crate::codegen::BlendMode::HardLight => {
+            // HardLight = Overlay with fg and bg swapped
+            let blend = |fg: f32, bg: f32| {
+                if fg < 0.5 { 2.0 * fg * bg } else { 1.0 - 2.0 * (1.0 - fg) * (1.0 - bg) }
+            };
+            (blend(fg.0, bg.0), blend(fg.1, bg.1), blend(fg.2, bg.2))
+        }
+        crate::codegen::BlendMode::SoftLight => {
+            // W3C SoftLight formula
+            let blend = |bg: f32, fg: f32| {
+                if fg <= 0.5 {
+                    bg - (1.0 - 2.0 * fg) * bg * (1.0 - bg)
+                } else {
+                    let d = if bg <= 0.25 {
+                        ((16.0 * bg - 12.0) * bg + 4.0) * bg
+                    } else {
+                        bg.sqrt()
+                    };
+                    bg + (2.0 * fg - 1.0) * (d - bg)
+                }
+            };
+            (blend(bg.0, fg.0), blend(bg.1, fg.1), blend(bg.2, fg.2))
+        }
+        crate::codegen::BlendMode::Difference => (
+            (bg.0 - fg.0).abs(),
+            (bg.1 - fg.1).abs(),
+            (bg.2 - fg.2).abs(),
+        ),
+        crate::codegen::BlendMode::Exclusion => (
+            bg.0 + fg.0 - 2.0 * bg.0 * fg.0,
+            bg.1 + fg.1 - 2.0 * bg.1 * fg.1,
+            bg.2 + fg.2 - 2.0 * bg.2 * fg.2,
+        ),
+        crate::codegen::BlendMode::Hue => {
+            // Set hue of bg to hue of fg, keep bg saturation and luminosity
+            let (fh, _fs, _fl) = rgb_to_hsl(fg.0, fg.1, fg.2);
+            let (_bh, bs, bl) = rgb_to_hsl(bg.0, bg.1, bg.2);
+            hsl_to_rgb(fh, bs, bl)
+        }
+        crate::codegen::BlendMode::Saturation => {
+            // Set saturation of bg to saturation of fg, keep bg hue and luminosity
+            let (_fh, fs, _fl) = rgb_to_hsl(fg.0, fg.1, fg.2);
+            let (bh, _bs, bl) = rgb_to_hsl(bg.0, bg.1, bg.2);
+            hsl_to_rgb(bh, fs, bl)
+        }
+        crate::codegen::BlendMode::Color => {
+            // Set hue+saturation of bg to fg, keep bg luminosity
+            let (fh, fs, _fl) = rgb_to_hsl(fg.0, fg.1, fg.2);
+            let (_bh, _bs, bl) = rgb_to_hsl(bg.0, bg.1, bg.2);
+            hsl_to_rgb(fh, fs, bl)
+        }
+        crate::codegen::BlendMode::Luminosity => {
+            // Set luminosity of bg to luminosity of fg, keep bg hue+saturation
+            let (_fh, _fs, fl) = rgb_to_hsl(fg.0, fg.1, fg.2);
+            let (bh, bs, _bl) = rgb_to_hsl(bg.0, bg.1, bg.2);
+            hsl_to_rgb(bh, bs, fl)
+        }
+    };
+
+    // Full W3C Porter-Duff "source over" compositing in straight-alpha space:
+    //   co = cs·αs·(1−αb) + αs·αb·B(cb,cs) + cb·αb·(1−αs)
+    // where B(cb,cs) = r/g/b from the blend mode above.
+    let out_a = fg.3 + bg.3 * (1.0 - fg.3);
+    let (r, g, b) = if out_a > 1e-6 {
+        let compose = |cs: f32, blend: f32, cb: f32| {
+            (cs * fg.3 * (1.0 - bg.3) + fg.3 * bg.3 * blend + cb * bg.3 * (1.0 - fg.3)) / out_a
+        };
+        (
+            compose(fg.0, r, bg.0),
+            compose(fg.1, g, bg.1),
+            compose(fg.2, b, bg.2),
+        )
+    } else {
+        (0.0, 0.0, 0.0)
     };
 
     // Convert back to u8
     let r = (r.clamp(0.0, 1.0) * 255.0) as u8;
     let g = (g.clamp(0.0, 1.0) * 255.0) as u8;
     let b = (b.clamp(0.0, 1.0) * 255.0) as u8;
-    let a = ((fg.3 * fg.3 + bg.3 * (1.0 - fg.3)).sqrt().clamp(0.0, 1.0) * 255.0) as u8;
+    let a = (out_a.clamp(0.0, 1.0) * 255.0) as u8;
 
     egui::Color32::from_rgba_unmultiplied(r, g, b, a)
 }
@@ -634,7 +741,7 @@ pub fn radial_gradient(
     outer_color: egui::Color32,
     segments: u32,
 ) -> egui::Shape {
-    use egui::{epaint::Mesh, Pos2, Vec2};
+    use egui::{epaint::Mesh, Vec2};
     let mut mesh = Mesh::default();
 
     // Center vertex
@@ -865,13 +972,11 @@ pub fn dashed_path(painter: &egui::Painter, points: &[Pos2], stroke: &RichStroke
                         if seg_start.is_none() {
                             seg_start = Some(current_pos);
                         }
-                    } else {
-                        if let Some(start) = seg_start.take() {
-                            painter.line_segment(
-                                [start, current_pos],
-                                Stroke::new(stroke.width, stroke.color),
-                            );
-                        }
+                    } else if let Some(start) = seg_start.take() {
+                        painter.line_segment(
+                            [start, current_pos],
+                            Stroke::new(stroke.width, stroke.color),
+                        );
                     }
 
                     current_pos = next_pos;
@@ -960,9 +1065,9 @@ impl Transform2D {
 
     /// Create a rotation around a center point (angle in degrees).
     pub fn rotate_around(angle_deg: f32, center: Pos2) -> Self {
-        Self::translate(center.x, center.y)
+        Self::translate(-center.x, -center.y)
             .then(Self::rotate(angle_deg))
-            .then(Self::translate(-center.x, -center.y))
+            .then(Self::translate(center.x, center.y))
     }
 
     /// Create a scale transform.
@@ -980,12 +1085,12 @@ impl Transform2D {
     /// Compose two transforms (first apply self, then other).
     pub fn then(self, other: Self) -> Self {
         Self {
-            a: self.a * other.a + self.b * other.c,
-            b: self.a * other.b + self.b * other.d,
-            c: self.c * other.a + self.d * other.c,
-            d: self.c * other.b + self.d * other.d,
-            e: self.e * other.a + self.f * other.c + other.e,
-            f: self.e * other.b + self.f * other.d + other.f,
+            a: other.a * self.a + other.c * self.b,
+            b: other.b * self.a + other.d * self.b,
+            c: other.a * self.c + other.c * self.d,
+            d: other.b * self.c + other.d * self.d,
+            e: other.a * self.e + other.c * self.f + other.e,
+            f: other.b * self.e + other.d * self.f + other.f,
         }
     }
 
@@ -1000,6 +1105,23 @@ impl Transform2D {
     /// Apply transform to a shape.
     pub fn apply_to_shape(&self, shape: Shape) -> Shape {
         transform_shape(shape, self)
+    }
+
+    /// Apply transform to a rect, returning the axis-aligned bounding box of the transformed corners.
+    pub fn apply_to_rect(&self, rect: egui::Rect) -> egui::Rect {
+        let corners = [
+            self.apply(rect.min),
+            self.apply(egui::Pos2::new(rect.max.x, rect.min.y)),
+            self.apply(rect.max),
+            self.apply(egui::Pos2::new(rect.min.x, rect.max.y)),
+        ];
+        let min = corners.iter().fold(corners[0], |a, &b| {
+            egui::Pos2::new(a.x.min(b.x), a.y.min(b.y))
+        });
+        let max = corners.iter().fold(corners[0], |a, &b| {
+            egui::Pos2::new(a.x.max(b.x), a.y.max(b.y))
+        });
+        egui::Rect::from_min_max(min, max)
     }
 }
 
@@ -1052,10 +1174,15 @@ pub fn transform_shape(shape: Shape, t: &Transform2D) -> Shape {
 // ─── Clipped Rounded Rect ─────────────────────────────────────────────────────
 
 /// Render content clipped to a rounded rectangle.
+///
+/// Note: egui's native clip system only supports rectangular clip rects, so
+/// true rounded clipping isn't possible. The `rounding` parameter is accepted
+/// for API compatibility but has no effect on the clipping shape. Content is
+/// clipped to the rectangular intersection of the clip rect and the given rect.
 pub fn clipped_rounded_rect(
     ui: &mut egui::Ui,
     rect: Rect,
-    rounding: f32,
+    _rounding: f32,
     content: impl FnOnce(&mut egui::Ui),
 ) {
     let clip = ui.painter().clip_rect().intersect(rect);
@@ -1148,31 +1275,14 @@ pub fn with_opacity(
     content: impl FnOnce(&mut egui::Ui),
 ) -> egui::Response {
     if (opacity - 1.0).abs() < 0.001 {
-        // Full opacity — no overhead
         return ui.scope(content).response;
     }
-
-    // Capture shapes painted during the closure by using a child painter
-    // We use egui's layer system: paint to a temp layer, then fade and re-add
-    let layer_id = egui::LayerId::new(egui::Order::Middle, ui.id().with("__opacity_layer"));
-    let painter = ui.ctx().layer_painter(layer_id);
-    let _ = painter; // painter is used implicitly by child ui
-
-    // Simpler approach: scope the content, then fade shapes in the response rect
-    let scope = ui.scope(content);
-    let rect = scope.response.rect;
-
-    // Paint a semi-transparent overlay to simulate opacity reduction
-    // (True opacity groups require render-to-texture which egui doesn't expose)
-    if opacity < 1.0 {
-        let overlay_alpha = ((1.0 - opacity) * 255.0) as u8;
-        // Use the window background color with alpha to blend
-        let bg = ui.visuals().window_fill();
-        let overlay = egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), overlay_alpha);
-        ui.painter().rect_filled(rect, 0.0, overlay);
-    }
-
-    scope.response
+    let opacity = opacity.clamp(0.0, 1.0);
+    ui.scope(|ui| {
+        ui.multiply_opacity(opacity);
+        content(ui);
+    })
+    .response
 }
 
 // ---------------------------------------------------------------------------
@@ -1214,13 +1324,13 @@ pub fn zstack<R>(
     bg_response.inner
 }
 
+/// A boxed layer closure for use with [`zstack_layers`].
+pub type LayerFn = Box<dyn FnOnce(&mut egui::Ui)>;
+
 /// Stack multiple layers at the same position.
 /// Each layer is a closure that receives a `&mut Ui` positioned at `rect`.
 /// The rect is determined by the first layer.
-pub fn zstack_layers(
-    ui: &mut egui::Ui,
-    layers: Vec<Box<dyn FnOnce(&mut egui::Ui)>>,
-) -> egui::Response {
+pub fn zstack_layers(ui: &mut egui::Ui, layers: Vec<LayerFn>) -> egui::Response {
     if layers.is_empty() {
         return ui.allocate_rect(egui::Rect::NOTHING, egui::Sense::hover());
     }
@@ -1240,33 +1350,491 @@ pub fn zstack_layers(
     bg.response
 }
 
-/// Alignment for ZStack children.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// ============================================================================
+// Blend Layer Compositing
+// ============================================================================
+
+/// A layer of shapes to be composited with a specific blend mode and opacity.
+///
+/// Used with [`composite_layers`] to combine multiple layers using
+/// Photoshop/Illustrator-style blend modes via CPU-side compositing.
+pub struct BlendLayer {
+    /// Shapes to render in this layer.
+    pub shapes: Vec<egui::Shape>,
+    /// Blend mode for compositing this layer over the layers below it.
+    pub blend_mode: crate::codegen::BlendMode,
+    /// Overall opacity of this layer (0.0–1.0).
+    pub opacity: f32,
+}
+
+impl BlendLayer {
+    /// Create a new blend layer with Normal blend mode and full opacity.
+    pub fn new(shapes: Vec<egui::Shape>) -> Self {
+        Self {
+            shapes,
+            blend_mode: crate::codegen::BlendMode::Normal,
+            opacity: 1.0,
+        }
+    }
+
+    /// Set the blend mode.
+    pub fn blend_mode(mut self, mode: crate::codegen::BlendMode) -> Self {
+        self.blend_mode = mode;
+        self
+    }
+
+    /// Set the opacity (0.0–1.0).
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+}
+
+/// Composite multiple [`BlendLayer`]s using CPU-side blend math.
+///
+/// Layers are composited bottom-to-top. For `Normal` blend mode at full opacity,
+/// shapes are painted directly. For other blend modes, shape fill/stroke colors
+/// are blended against the theme background color as an approximation.
+///
+/// # Limitations
+/// This implementation approximates blend modes by blending each shape's color
+/// against `ui.visuals().window_fill()`. It does **not** perform true per-pixel
+/// compositing against the actual rendered content beneath the shapes. For
+/// accurate Multiply/Screen/Overlay compositing, a `PaintCallback` with a custom
+/// wgpu fragment shader is required (planned for a future release).
+///
+/// For Normal blend mode at full opacity, behavior is exact.
+pub fn composite_layers(ui: &mut egui::Ui, layers: Vec<BlendLayer>) {
+    if layers.is_empty() {
+        return;
+    }
+    for layer in layers {
+        let opacity = layer.opacity;
+        if (opacity - 1.0).abs() < 0.001 && layer.blend_mode == crate::codegen::BlendMode::Normal {
+            // Fast path: normal blend at full opacity
+            for shape in layer.shapes {
+                ui.painter().add(shape);
+            }
+        } else {
+            // Apply opacity to each shape's colors.
+            // Note: blend modes other than Normal are approximated by blending against
+            // the theme background color. Full per-pixel compositing against actual
+            // rendered content requires a PaintCallback + wgpu offscreen texture
+            // (planned for a future release).
+            let bg = ui.visuals().window_fill();
+            for shape in layer.shapes {
+                let blended = apply_blend_to_shape(shape, bg, &layer.blend_mode, opacity);
+                ui.painter().add(blended);
+            }
+        }
+    }
+}
+
+/// Apply blend mode and opacity to a shape's colors.
+fn apply_blend_to_shape(
+    shape: egui::Shape,
+    bg: egui::Color32,
+    mode: &crate::codegen::BlendMode,
+    opacity: f32,
+) -> egui::Shape {
+    match shape {
+        egui::Shape::Rect(mut r) => {
+            r.fill = blend_and_fade(r.fill, bg, mode, opacity);
+            r.stroke.color = blend_and_fade(r.stroke.color, bg, mode, opacity);
+            egui::Shape::Rect(r)
+        }
+        egui::Shape::Circle(mut c) => {
+            c.fill = blend_and_fade(c.fill, bg, mode, opacity);
+            c.stroke.color = blend_and_fade(c.stroke.color, bg, mode, opacity);
+            egui::Shape::Circle(c)
+        }
+        egui::Shape::Path(mut p) => {
+            p.fill = blend_and_fade(p.fill, bg, mode, opacity);
+            p.stroke.color = match p.stroke.color {
+                egui::epaint::ColorMode::Solid(c) => {
+                    egui::epaint::ColorMode::Solid(blend_and_fade(c, bg, mode, opacity))
+                }
+                other => other,
+            };
+            egui::Shape::Path(p)
+        }
+        egui::Shape::Text(mut t) => {
+            t.fallback_color = blend_and_fade(t.fallback_color, bg, mode, opacity);
+            egui::Shape::Text(t)
+        }
+        egui::Shape::Vec(shapes) => {
+            egui::Shape::Vec(
+                shapes
+                    .into_iter()
+                    .map(|s| apply_blend_to_shape(s, bg, mode, opacity))
+                    .collect(),
+            )
+        }
+        other => other,
+    }
+}
+
+/// Blend a foreground color against a background using the given blend mode and opacity.
+fn blend_and_fade(fg: egui::Color32, bg: egui::Color32, mode: &crate::codegen::BlendMode, opacity: f32) -> egui::Color32 {
+    if fg == egui::Color32::TRANSPARENT {
+        return fg;
+    }
+    // Apply opacity to the foreground alpha
+    let [r, g, b, a] = fg.to_srgba_unmultiplied();
+    let faded_a = (a as f32 * opacity).clamp(0.0, 255.0) as u8;
+    let faded = egui::Color32::from_rgba_unmultiplied(r, g, b, faded_a);
+    // Apply blend mode
+    blend_color(faded, bg, mode.clone())
+}
+
+// ============================================================================
+// Clipping Mask Support
+// ============================================================================
+
+/// Paint content clipped to a convex polygon using a bounding-box scissor approximation.
+///
+/// This function clips content to the **axis-aligned bounding box** of the polygon,
+/// then paints background-colored triangles over the corners to approximate the
+/// polygon boundary. This approach is correct only when:
+/// - The polygon is convex
+/// - The background behind the clip region is a uniform color matching `ui.visuals().window_fill()`
+///
+/// For non-uniform backgrounds or concave polygons, use `Painter::with_clip_rect` directly
+/// for rectangular clipping, or implement a `PaintCallback` with a wgpu stencil pipeline
+/// for true arbitrary-shape clipping.
+///
+/// # Arguments
+/// * `ui` — the egui UI context
+/// * `clip_polygon` — convex polygon vertices (clockwise or counter-clockwise)
+/// * `content` — closure that paints the clipped content
+pub fn clipped_shape(
+    ui: &mut egui::Ui,
+    clip_polygon: &[egui::Pos2],
+    _clip_closed: bool,
+    content: impl FnOnce(&mut egui::Ui),
+) {
+    if clip_polygon.len() < 3 {
+        // Degenerate: just paint without clipping
+        content(ui);
+        return;
+    }
+
+    // Compute bounding box of the clip polygon
+    let min_x = clip_polygon.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+    let min_y = clip_polygon.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+    let max_x = clip_polygon.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+    let max_y = clip_polygon.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+
+    if min_x >= max_x || min_y >= max_y {
+        return;
+    }
+
+    let clip_rect = egui::Rect::from_min_max(
+        egui::pos2(min_x, min_y),
+        egui::pos2(max_x, max_y),
+    );
+
+    // Use rectangular scissor for the bounding box
+    let painter = ui.painter().with_clip_rect(clip_rect);
+    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(clip_rect));
+    child_ui.set_clip_rect(clip_rect);
+
+    // Paint the content (clipped to bbox of polygon)
+    content(&mut child_ui);
+
+    // Paint corner-covering triangles in the background color to approximate
+    // the polygon clip for convex shapes (e.g. rounded rects, hexagons)
+    let bg = ui.visuals().window_fill();
+    let n = clip_polygon.len();
+    for i in 0..n {
+        let a = clip_polygon[i];
+        let b = clip_polygon[(i + 1) % n];
+        // For each edge, paint the "outside" triangle between the edge and the bbox corner
+        // This is a best-effort approximation for convex polygons
+        let corner = nearest_bbox_corner(a, b, clip_rect);
+        if let Some(corner_pt) = corner {
+            painter.add(egui::Shape::convex_polygon(
+                vec![a, b, corner_pt],
+                bg,
+                egui::Stroke::NONE,
+            ));
+        }
+    }
+}
+
+/// Paint content clipped to an arbitrary polygon using CPU-side alpha masking (Phase 2).
+///
+/// Requires the `clip-mask` feature flag (`tiny-skia` dependency).
+/// When the feature is not enabled, falls back to `clipped_shape` (bbox approximation).
+///
+/// # How it works
+/// 1. Builds a tiny-skia alpha mask from the clip polygon
+/// 2. Clips content to the bounding box via `set_clip_rect`
+/// 3. Overlays the inverted mask to hide regions outside the polygon
+#[cfg(feature = "clip-mask")]
+pub fn clipped_shape_cpu(
+    ui: &mut egui::Ui,
+    clip_polygon: &[egui::Pos2],
+    content: impl FnOnce(&mut egui::Ui),
+) {
+    use tiny_skia::{FillRule, Paint as SkPaint, PathBuilder, Pixmap, Transform as SkTransform};
+
+    if clip_polygon.len() < 3 {
+        content(ui);
+        return;
+    }
+
+    let min_x = clip_polygon.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+    let min_y = clip_polygon.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+    let max_x = clip_polygon.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+    let max_y = clip_polygon.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+
+    if min_x >= max_x || min_y >= max_y {
+        return;
+    }
+
+    let w = (max_x - min_x).ceil() as u32;
+    let h = (max_y - min_y).ceil() as u32;
+    if w == 0 || h == 0 {
+        return;
+    }
+
+    // Build tiny-skia mask pixmap
+    let mut mask_pixmap = match Pixmap::new(w, h) {
+        Some(p) => p,
+        None => {
+            clipped_shape(ui, clip_polygon, true, content);
+            return;
+        }
+    };
+
+    let mut pb = PathBuilder::new();
+    let first = clip_polygon[0];
+    pb.move_to(first.x - min_x, first.y - min_y);
+    for pt in &clip_polygon[1..] {
+        pb.line_to(pt.x - min_x, pt.y - min_y);
+    }
+    pb.close();
+
+    if let Some(path) = pb.finish() {
+        let mut paint = SkPaint::default();
+        paint.set_color_rgba8(255, 255, 255, 255);
+        mask_pixmap.fill_path(
+            &path,
+            &paint,
+            FillRule::Winding,
+            SkTransform::identity(),
+            None,
+        );
+    }
+
+    // Paint content clipped to bbox
+    let clip_rect = egui::Rect::from_min_max(
+        egui::pos2(min_x, min_y),
+        egui::pos2(max_x, max_y),
+    );
+    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(clip_rect));
+    child_ui.set_clip_rect(clip_rect);
+    content(&mut child_ui);
+
+    // Build inverted mask overlay: black where polygon is absent
+    let mask_pixels: Vec<egui::Color32> = mask_pixmap
+        .pixels()
+        .iter()
+        .map(|px| {
+            let a = px.alpha();
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 255u8.saturating_sub(a))
+        })
+        .collect();
+
+    let mask_image = egui::ColorImage {
+        size: [w as usize, h as usize],
+        pixels: mask_pixels,
+        source_size: egui::Vec2::new(w as f32, h as f32),
+    };
+
+    let texture = ui.ctx().load_texture(
+        "__egui_expressive_clip_mask",
+        mask_image,
+        egui::TextureOptions::NEAREST,
+    );
+
+    let painter = ui.painter().with_clip_rect(clip_rect);
+    painter.image(
+        texture.id(),
+        clip_rect,
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        egui::Color32::WHITE,
+    );
+}
+
+/// Composite blend layers using the GPU shader pipeline when available.
+///
+/// # GPU Integration
+/// The WGSL shader at `src/draw/blend_shader.wgsl` implements all 16 blend modes
+/// with Porter-Duff source-over compositing. To activate full GPU compositing,
+/// the host application must wire the shader into its wgpu `RenderState`:
+///
+/// ```ignore
+/// // In your eframe App::setup():
+/// let shader = render_state.device.create_shader_module(
+///     wgpu::include_wgsl!("../draw/blend_shader.wgsl")
+/// );
+/// // Create pipeline, bind groups, and issue PaintCallback with the blend rect.
+/// ```
+///
+/// Until that integration is complete, this function falls back to the CPU
+/// approximation via [`composite_layers`].
+pub fn composite_layers_gpu(
+    ui: &mut egui::Ui,
+    _rect: egui::Rect,
+    layers: Vec<BlendLayer>,
+) {
+    // CPU fallback: blend_shader.wgsl is ready for host-app wgpu integration.
+    // See doc comment above for wiring instructions.
+    composite_layers(ui, layers);
+}
+
+/// Find the nearest bounding box corner to the midpoint of edge (a, b),
+/// on the outside of the polygon. Returns None if the edge is axis-aligned
+/// (no corner masking needed).
+fn nearest_bbox_corner(a: egui::Pos2, b: egui::Pos2, bbox: egui::Rect) -> Option<egui::Pos2> {
+    let mid = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+    // Determine which bbox corner is farthest from the midpoint (outside the polygon)
+    let corners = [
+        bbox.min,
+        egui::pos2(bbox.max.x, bbox.min.y),
+        bbox.max,
+        egui::pos2(bbox.min.x, bbox.max.y),
+    ];
+    // Only return a corner if it's clearly outside the edge
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    // Edge normal (pointing outward for CW polygon)
+    let nx = dy;
+    let ny = -dx;
+    corners
+        .iter()
+        .filter(|&&c| {
+            // Corner is on the outside (positive normal side)
+            let dot = (c.x - mid.x) * nx + (c.y - mid.y) * ny;
+            dot > 1.0
+        })
+        .copied()
+        .next()
+}
+
+/// Alignment for stacked/layered content within a bounding rect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StackAlign {
-    #[default]
-    TopLeft,
-    TopCenter,
-    TopRight,
-    CenterLeft,
-    Center,
-    CenterRight,
-    BottomLeft,
-    BottomCenter,
-    BottomRight,
+    TopLeft, TopCenter, TopRight,
+    CenterLeft, Center, CenterRight,
+    BottomLeft, BottomCenter, BottomRight,
 }
 
 impl StackAlign {
-    fn anchor(self) -> egui::Align2 {
+    /// Convert to egui's `Align2`.
+    pub fn to_align2(self) -> egui::Align2 {
         match self {
-            StackAlign::TopLeft => egui::Align2::LEFT_TOP,
-            StackAlign::TopCenter => egui::Align2::CENTER_TOP,
-            StackAlign::TopRight => egui::Align2::RIGHT_TOP,
-            StackAlign::CenterLeft => egui::Align2::LEFT_CENTER,
-            StackAlign::Center => egui::Align2::CENTER_CENTER,
-            StackAlign::CenterRight => egui::Align2::RIGHT_CENTER,
-            StackAlign::BottomLeft => egui::Align2::LEFT_BOTTOM,
-            StackAlign::BottomCenter => egui::Align2::CENTER_BOTTOM,
-            StackAlign::BottomRight => egui::Align2::RIGHT_BOTTOM,
+            Self::TopLeft     => egui::Align2::LEFT_TOP,
+            Self::TopCenter   => egui::Align2::CENTER_TOP,
+            Self::TopRight    => egui::Align2::RIGHT_TOP,
+            Self::CenterLeft  => egui::Align2::LEFT_CENTER,
+            Self::Center      => egui::Align2::CENTER_CENTER,
+            Self::CenterRight => egui::Align2::RIGHT_CENTER,
+            Self::BottomLeft  => egui::Align2::LEFT_BOTTOM,
+            Self::BottomCenter => egui::Align2::CENTER_BOTTOM,
+            Self::BottomRight => egui::Align2::RIGHT_BOTTOM,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codegen::BlendMode;
+
+    fn opaque(r: u8, g: u8, b: u8) -> egui::Color32 {
+        egui::Color32::from_rgb(r, g, b)
+    }
+
+    #[test]
+    fn test_blend_color_normal() {
+        // Normal: result is fg (fully opaque)
+        let result = blend_color(opaque(200, 100, 50), opaque(50, 50, 50), BlendMode::Normal);
+        let [r, g, b, _] = result.to_srgba_unmultiplied();
+        assert_eq!(r, 200);
+        assert_eq!(g, 100);
+        assert_eq!(b, 50);
+    }
+
+    #[test]
+    fn test_blend_color_multiply() {
+        // Multiply: white * white = white
+        let result = blend_color(opaque(255, 255, 255), opaque(255, 255, 255), BlendMode::Multiply);
+        let [r, _g, _b, _] = result.to_srgba_unmultiplied();
+        assert_eq!(r, 255);
+        // Multiply: black * anything = black
+        let result2 = blend_color(opaque(0, 0, 0), opaque(200, 100, 50), BlendMode::Multiply);
+        let [r2, g2, b2, _] = result2.to_srgba_unmultiplied();
+        assert_eq!(r2, 0);
+        assert_eq!(g2, 0);
+        assert_eq!(b2, 0);
+    }
+
+    #[test]
+    fn test_blend_color_screen() {
+        // Screen: black screen anything = anything
+        let result = blend_color(opaque(0, 0, 0), opaque(200, 100, 50), BlendMode::Screen);
+        let [r, g, _b, _] = result.to_srgba_unmultiplied();
+        assert!((r as i32 - 200).abs() <= 2, "r={}", r);
+        assert!((g as i32 - 100).abs() <= 2, "g={}", g);
+        // Screen: white screen anything = white
+        let result2 = blend_color(opaque(255, 255, 255), opaque(100, 100, 100), BlendMode::Screen);
+        let [r2, _, _, _] = result2.to_srgba_unmultiplied();
+        assert_eq!(r2, 255);
+    }
+
+    #[test]
+    fn test_blend_color_difference() {
+        // Difference: same color = black
+        let result = blend_color(opaque(100, 100, 100), opaque(100, 100, 100), BlendMode::Difference);
+        let [r, g, b, _] = result.to_srgba_unmultiplied();
+        assert!(r <= 2 && g <= 2 && b <= 2, "expected near-black, got ({},{},{})", r, g, b);
+    }
+
+    #[test]
+    fn test_blend_color_exclusion() {
+        // Exclusion: same color = near-black (2*c*(1-c) subtracted)
+        let result = blend_color(opaque(128, 128, 128), opaque(128, 128, 128), BlendMode::Exclusion);
+        let [r, _, _, _] = result.to_srgba_unmultiplied();
+        // 0.5 + 0.5 - 2*0.5*0.5 = 0.5 → ~128
+        assert!((r as i32 - 128).abs() <= 3, "r={}", r);
+    }
+
+    #[test]
+    fn test_blend_color_hsl_modes_no_panic() {
+        // HSL modes should not panic for any input
+        for mode in [BlendMode::Hue, BlendMode::Saturation, BlendMode::Color, BlendMode::Luminosity] {
+            let _ = blend_color(opaque(200, 100, 50), opaque(50, 150, 200), mode);
+        }
+    }
+
+    #[test]
+    fn test_blend_color_color_dodge_white_fg() {
+        // ColorDodge: white fg → white result
+        let result = blend_color(opaque(255, 255, 255), opaque(100, 100, 100), BlendMode::ColorDodge);
+        let [r, g, b, _] = result.to_srgba_unmultiplied();
+        assert_eq!(r, 255);
+        assert_eq!(g, 255);
+        assert_eq!(b, 255);
+    }
+
+    #[test]
+    fn test_blend_color_hard_light() {
+        // HardLight with black fg → black result (2*0*bg = 0)
+        let result = blend_color(opaque(0, 0, 0), opaque(200, 100, 50), BlendMode::HardLight);
+        let [r, g, b, _] = result.to_srgba_unmultiplied();
+        assert!(r <= 2 && g <= 2 && b <= 2, "expected near-black, got ({},{},{})", r, g, b);
     }
 }
