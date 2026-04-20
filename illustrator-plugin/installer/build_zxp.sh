@@ -185,12 +185,12 @@ sign_and_package() {
     info "  Output: $output"
     info "  Cert:   $cert"
 
-    run_signer "$signer" -sign \
+    if ! run_signer "$signer" -sign \
         "$stage" "$output" "$cert" "$CERT_PASSWORD" \
-        -tsa "$TSA_URL"
-
-    if [ $? -ne 0 ]; then
-        error "Failed to sign package"
+        -tsa "$TSA_URL" 2>/dev/null; then
+        warn "TSA unavailable, signing without timestamp"
+        run_signer "$signer" -sign \
+            "$stage" "$output" "$cert" "$CERT_PASSWORD" || { error "Failed to sign package"; }
     fi
 
     # Verify

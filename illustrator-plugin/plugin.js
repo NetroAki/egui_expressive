@@ -1210,8 +1210,12 @@ if (typeof window !== 'undefined' && window.addEventListener) {
         // Duplicate artboard for expansion
         const ab = doc.artboards[artboardIndex];
         const duplicateName = `__expand_temp_${Date.now()}`;
-        const duplicate = doc.artboards.add(duplicateName);
         const rect = ab.artboardRect;
+        let duplicate;
+        try {
+          // doc.artboards.add takes a rect array, not a name
+          duplicate = doc.artboards.add(rect);
+        } catch (e) {}
 
         // Copy items to duplicate artboard
         const items = [];
@@ -1234,7 +1238,16 @@ if (typeof window !== 'undefined' && window.addEventListener) {
         const r = await exportArtboards([artboardIndex], options || {});
 
         // Delete the duplicate artboard
-        try { doc.artboards.remove(duplicate); } catch(e) {}
+        try {
+          // doc.artboards.remove takes an index, not an object
+          if (duplicate) {
+            let dupIndex = -1;
+            for (let i = 0; i < doc.artboards.length; i++) {
+              if (doc.artboards[i] === duplicate) { dupIndex = i; break; }
+            }
+            if (dupIndex !== -1) doc.artboards.remove(dupIndex);
+          }
+        } catch(e) {}
 
         window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } });
       } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); }
