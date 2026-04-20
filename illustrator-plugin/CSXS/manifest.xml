@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CEP Extension Manifest for egui_expressive Exporter
+  Enables .zxp packaging via ZXPSignCmd for Adobe Illustrator.
+
+  UXP manifest (manifest.json) is retained for developer/UXT mode.
+  This CEP manifest enables standard distribution as a .zxp extension.
+-->
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.egui-expressive.illustrator-exporter"
+                   ExtensionBundleVersion="1.0.0"
+                   ExtensionBundleName="egui_expressive Exporter"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+  <ExtensionList>
+    <Extension Id="com.egui-expressive.illustrator-exporter.panel" Version="1.0.0" />
+  </ExtensionList>
+
+  <ExecutionEnvironment>
+    <HostList>
+      <!-- Illustrator 2022 (26) through future versions -->
+      <Host Name="ILST" Version="[26.0,99.9]" />
+    </HostList>
+    <LocaleList>
+      <Locale Code="All" />
+    </LocaleList>
+    <RequiredRuntimeList>
+      <RequiredRuntime Name="CSXS" Version="11.0" />
+    </RequiredRuntimeList>
+  </ExecutionEnvironment>
+
+  <DispatchInfoList>
+    <Extension Id="com.egui-expressive.illustrator-exporter.panel">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./index.html</MainPath>
+          <ScriptPath>./plugin.js</ScriptPath>
+          <CEFCommandLine>
+            <Parameter>--allow-file-access-from-files</Parameter>
+            <Parameter>--enable-nodejs</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
+        </Lifecycle>
+        <UI>
+          <Type>Panel</Type>
+          <Menu>egui_expressive Export</Menu>
+          <Geometry>
+            <Size>
+              <Height>500</Height>
+              <Width>320</Width>
+            </Size>
+            <MinSize>
+              <Height>400</Height>
+              <Width>300</Width>
+            </MinSize>
+            <MaxSize>
+              <Height>900</Height>
+              <Width>600</Width>
+            </MaxSize>
+          </Geometry>
+          <Icons />
+        </UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>
