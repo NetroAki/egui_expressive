@@ -1,37 +1,20 @@
 # egui_expressive Illustrator Exporter
 
+This is a **CEP extension** (not UXP) that exports Illustrator artboards to egui Rust code. It installs as a `.zxp` file.
+
 ## Installation
 
-### Windows (Easy)
-1. Download or clone this repository
-2. Navigate to the `illustrator-plugin/` folder
-3. Double-click `install.bat`
-4. Restart Adobe Illustrator
-5. Go to **Plugins → Plugin Manager** and enable **egui_expressive Export**
-
-### Windows (Installer .exe)
-Build the installer using NSIS:
-1. Install [NSIS](https://nsis.sourceforge.io/)
-2. Run `installer/build_installer.bat`
-3. Run the generated `egui_expressive_plugin_installer.exe`
-
-### macOS
-1. Open Terminal in the `illustrator-plugin/` folder
-2. Run: `chmod +x install.sh && ./install.sh`
-3. Restart Adobe Illustrator
-4. Go to **Plugins → Plugin Manager** and enable **egui_expressive Export**
-
-### Manual Installation
-Copy `manifest.json`, `plugin.js`, and `index.html` to:
-- **Windows**: `%APPDATA%\Adobe\UXP\PluginsStorage\ILST\28\develop\egui_expressive_export\`
-- **macOS**: `~/Library/Application Support/Adobe/UXP/PluginsStorage/ILST/28/develop/egui_expressive_export/`
-
-Replace `28` with your Illustrator version number (28=2024, 27=2023, 26=2022).
+1. Build the `.zxp` file by running `installer/build_zxp.sh` (macOS) or `installer\build_zxp.bat` (Windows).
+2. Install the generated `.zxp` file:
+   - **Windows**: Double-click `install.bat`
+   - **macOS**: Run `chmod +x install.sh && ./install.sh`
+3. Restart Adobe Illustrator.
+4. Go to **Window → Extensions → egui_expressive Export** to open the panel.
 
 ## Usage
 
 1. Open your Illustrator document
-2. Open the plugin panel: **Window → Plugins → egui_expressive**
+2. Open the plugin panel: **Window → Extensions → egui_expressive Export**
 3. Select the artboards you want to export
 4. Configure options:
    - **Use naming conventions** — Name layers `row-toolbar`, `btn-save`, `col-sidebar` for better output

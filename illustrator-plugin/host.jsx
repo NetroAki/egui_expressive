@@ -6,7 +6,9 @@
 function getDiagnosticsJSON() {
     var result = { hasApp: false, hasDoc: false, artboardCount: 0, docName: "", error: "" };
     try {
-        result.hasApp = (typeof app !== 'undefined');
+        var appExists = false;
+        try { appExists = (typeof app !== 'undefined'); } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
+        result.hasApp = appExists;
         if (result.hasApp) {
             result.hasDoc = (app.documents.length > 0);
             if (result.hasDoc) {
@@ -14,12 +16,15 @@ function getDiagnosticsJSON() {
                 result.artboardCount = app.activeDocument.artboards.length;
             }
         }
-    } catch(e) { result.error = e.message || String(e); }
+    } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
     return JSON.stringify(result);
 }
 
 function getArtboardsJSON() {
     try {
+        var appExists = false;
+        try { appExists = (typeof app !== 'undefined'); } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
+        if (!appExists || app.documents.length === 0) return "[]";
         var doc = app.activeDocument;
         if (!doc) return "[]";
         var boards = [];
@@ -37,12 +42,15 @@ function getArtboardsJSON() {
         }
         return JSON.stringify(boards);
     } catch (e) {
-        return "[]";
+        return JSON.stringify({ error: e.message || String(e) });
     }
 }
 
 function getPageItemsJSON(artboardIndex) {
     try {
+        var appExists = false;
+        try { appExists = (typeof app !== 'undefined'); } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
+        if (!appExists || app.documents.length === 0) return "[]";
         var doc = app.activeDocument;
         if (!doc) return "[]";
         var ab = doc.artboards[artboardIndex];
@@ -68,12 +76,15 @@ function getPageItemsJSON(artboardIndex) {
         }
         return JSON.stringify(items);
     } catch (e) {
-        return "[]";
+        return JSON.stringify({ error: e.message || String(e) });
     }
 }
 
 function getDocumentName() {
     try {
+        var appExists = false;
+        try { appExists = (typeof app !== 'undefined'); } catch(e) { return ""; }
+        if (!appExists || app.documents.length === 0) return "";
         var doc = app.activeDocument;
         return doc ? doc.name : "";
     } catch (e) {
@@ -83,6 +94,9 @@ function getDocumentName() {
 
 function extractArtboardDataJSON(selectedIndicesJSON) {
     try {
+        var appExists = false;
+        try { appExists = (typeof app !== 'undefined'); } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
+        if (!appExists || app.documents.length === 0) return "[]";
         var doc = app.activeDocument;
         if (!doc) return "[]";
         var selectedIndices = JSON.parse(selectedIndicesJSON);
@@ -375,6 +389,6 @@ function extractArtboardDataJSON(selectedIndicesJSON) {
         
         return JSON.stringify(results);
     } catch (e) {
-        return "[]";
+        return JSON.stringify({ error: e.message || String(e) });
     }
 }

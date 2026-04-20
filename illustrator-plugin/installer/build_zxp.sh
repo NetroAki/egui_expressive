@@ -119,9 +119,6 @@ prepare_staging() {
         cp "$PLUGIN_DIR/host.jsx" "$stage/host.jsx"
     fi
 
-    # UXP manifest (included for developer reference / hybrid mode)
-    cp "$PLUGIN_DIR/manifest.json" "$stage/manifest.json"
-
     # NOTE: .debug file is excluded from production builds.
     # For development, create it manually:
     #   cat > .debug << 'EOF'

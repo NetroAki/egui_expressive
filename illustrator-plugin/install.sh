@@ -1,32 +1,31 @@
 #!/bin/bash
 # egui_expressive Illustrator Plugin Installer (macOS)
 
-PLUGIN_NAME="egui_expressive_export"
-INSTALLED=0
+echo "============================================"
+echo " egui_expressive Illustrator Plugin Installer"
+echo "============================================"
+echo ""
 
-# Try multiple Illustrator versions
-for VERSION in 28 27 26 25; do
-    PLUGIN_BASE="$HOME/Library/Application Support/Adobe/UXP/PluginsStorage/ILST/$VERSION/develop"
-    if [ -d "$PLUGIN_BASE" ]; then
-        PLUGIN_DIR="$PLUGIN_BASE/$PLUGIN_NAME"
-        mkdir -p "$PLUGIN_DIR"
-        cp manifest.json plugin.js index.html "$PLUGIN_DIR/"
-        echo "✓ Plugin installed to: $PLUGIN_DIR"
-        INSTALLED=1
-    fi
-done
+UPIA="/Library/Application Support/Adobe/Adobe Desktop Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent.app/Contents/MacOS/UnifiedPluginInstallerAgent"
 
-if [ $INSTALLED -eq 0 ]; then
-    echo "⚠️  Could not find Illustrator UXP plugin directory."
-    echo ""
-    echo "Please manually copy these files:"
-    echo "  manifest.json, plugin.js, index.html"
-    echo ""
-    echo "To: ~/Library/Application Support/Adobe/UXP/PluginsStorage/ILST/28/develop/$PLUGIN_NAME/"
+ZXP_FILE=$(ls "$(dirname "$0")/../dist/"*.zxp 2>/dev/null | head -1)
+if [ -z "$ZXP_FILE" ]; then
+  echo "ERROR: No .zxp found in dist/. Run installer/build_zxp.sh first."
+  exit 1
 fi
 
-echo ""
-echo "After installation:"
-echo "  1. Restart Adobe Illustrator"
-echo "  2. Go to Plugins > Plugin Manager"
-echo "  3. Enable 'egui_expressive Export'"
+if [ -f "$UPIA" ]; then
+    echo "Found UPIA. Installing ZXP..."
+    "$UPIA" /install "$ZXP_FILE"
+else
+    echo "ERROR: UPIA not found."
+    echo "To install manually on macOS, use UPIA:"
+    echo "  /Library/Application\ Support/Adobe/Adobe\ Desktop\ Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent /install \"\$ZXP_FILE\""
+fi
+
+echo "Enabling CEP debug mode for self-signed extensions..."
+defaults write com.adobe.CSXS.10 PlayerDebugMode 1 2>/dev/null || true
+defaults write com.adobe.CSXS.11 PlayerDebugMode 1 2>/dev/null || true
+defaults write com.adobe.CSXS.12 PlayerDebugMode 1 2>/dev/null || true
+echo "CEP debug mode enabled."
+

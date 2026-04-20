@@ -887,6 +887,43 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
             }
         }
 
+        // Fallback: %%AI_ArtboardRect x1 y1 x2 y2
+        if result.artboards.is_empty() {
+            static AI_ARTBOARD_RECT_RE: OnceLock<Regex> = OnceLock::new();
+            let re = AI_ARTBOARD_RECT_RE.get_or_init(|| {
+                Regex::new(r"%%AI_ArtboardRect\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)").unwrap()
+            });
+            for caps in re.captures_iter(content_str) {
+                if let (Some(x1), Some(y1), Some(x2), Some(y2)) = (caps.get(1), caps.get(2), caps.get(3), caps.get(4)) {
+                    let x1: f64 = x1.as_str().parse().unwrap_or(0.0);
+                    let y1: f64 = y1.as_str().parse().unwrap_or(0.0);
+                    let x2: f64 = x2.as_str().parse().unwrap_or(0.0);
+                    let y2: f64 = y2.as_str().parse().unwrap_or(0.0);
+                    let name = format!("Artboard_{}", result.artboards.len() + 1);
+                    if !result.artboards.iter().any(|a: &Artboard| a.name == name) {
+                        result.artboards.push(Artboard { name, x: x1, y: y1, width: (x2 - x1).abs(), height: (y2 - y1).abs() });
+                    }
+                }
+            }
+        }
+
+        // Fallback: %%HiResBoundingBox or %%BoundingBox
+        if result.artboards.is_empty() {
+            static BBOX_RE: OnceLock<Regex> = OnceLock::new();
+            let re = BBOX_RE.get_or_init(|| {
+                Regex::new(r"%%(?:HiRes)?BoundingBox:\s*(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)").unwrap()
+            });
+            if let Some(caps) = re.captures(content_str) {
+                if let (Some(x1), Some(y1), Some(x2), Some(y2)) = (caps.get(1), caps.get(2), caps.get(3), caps.get(4)) {
+                    let x1: f64 = x1.as_str().parse().unwrap_or(0.0);
+                    let y1: f64 = y1.as_str().parse().unwrap_or(0.0);
+                    let x2: f64 = x2.as_str().parse().unwrap_or(0.0);
+                    let y2: f64 = y2.as_str().parse().unwrap_or(0.0);
+                    result.artboards.push(Artboard { name: "Artboard_1".to_string(), x: x1, y: y1, width: (x2 - x1).abs(), height: (y2 - y1).abs() });
+                }
+            }
+        }
+
         if result.ai_version.is_empty() {
             let version = extract_ai_version(content_str);
             if !version.is_empty() {

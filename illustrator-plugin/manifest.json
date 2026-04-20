@@ -2,6 +2,7 @@
   "id": "com.egui-expressive.illustrator-exporter",
   "name": "egui_expressive Exporter",
   "version": "1.0.0",
+  "main": "index.html",
   "manifestVersion": 5,
   "host": [
     {

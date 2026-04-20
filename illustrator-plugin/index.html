@@ -369,6 +369,11 @@
             window.__adobe_cep__.evalScript('getDiagnosticsJSON()', function(diagResult) {
                 try {
                     var diag = JSON.parse(diagResult);
+                    if (diag && diag.error) {
+                        showArtboardError('Illustrator error: ' + diag.error);
+                        setStatus('Illustrator error: ' + diag.error);
+                        return;
+                    }
                     if (!diag.hasDoc) {
                         showArtboardError('No document open in Illustrator. Open an .ai file first.');
                         setStatus('Open an Illustrator document first');
@@ -389,7 +394,13 @@
                             setStatus('No document open in Illustrator');
                         } else {
                             try {
-                                loadArtboards(JSON.parse(result));
+                                var parsed = JSON.parse(result);
+                                if (parsed && parsed.error) {
+                                    showArtboardError('Illustrator error: ' + parsed.error);
+                                    setStatus('Illustrator error: ' + parsed.error);
+                                    return;
+                                }
+                                loadArtboards(parsed);
                             } catch(e) {
                                 showArtboardError('Error parsing artboard data: ' + e.message);
                                 setStatus('Error parsing artboard data: ' + e.message);
@@ -406,11 +417,9 @@
             showArtboardError('CEP error: ' + ce.message);
             setStatus('CEP error: ' + ce.message);
           }
-        } else if (window.uxpHost) {
-          window.uxpHost.postMessage({ type: 'GET_ARTBOARDS' });
         } else {
-          // Development/preview mode - show empty state
-          loadArtboards([]);
+          // UXP path: postMessage
+          window.postMessage({ type: 'GET_ARTBOARDS' }, '*');
         }
       } catch(e) {
         setStatus('Connect to Illustrator to load artboards');
@@ -474,6 +483,11 @@
               }
               try {
                 const rawData = JSON.parse(result);
+                if (rawData && rawData.error) {
+                  document.getElementById('export-btn').disabled = false;
+                  setStatus('Illustrator error: ' + rawData.error);
+                  return;
+                }
                 const exportResult = exportFromRawData(rawData, options);
                 handleExportResult({ payload: { files: exportResult.files, filesArray: Object.entries(exportResult.files).map(([filename, content]) => ({filename, content})), colorMap: exportResult.colorMap, warnings: exportResult.warnings || [] } });
                 document.getElementById('export-btn').disabled = false;
@@ -486,11 +500,11 @@
           });
         } else {
           // UXP path: postMessage
-          window.uxpHost?.postMessage({ 
+          window.postMessage({ 
             type: 'EXPORT', 
             selectedIndices: selected,
             options 
-          });
+          }, '*');
         }
       } catch(e) {
         setStatus('Error: ' + e.message);
@@ -504,7 +518,12 @@
       if (!msg) return;
 
       if (msg.type === 'ARTBOARDS_RESULT') {
-        loadArtboards(msg.artboards);
+        if (!msg.artboards || msg.artboards.length === 0) {
+          showArtboardError('No artboards found. Make sure an Illustrator document is open with at least one artboard.');
+          setStatus('No artboards found');
+        } else {
+          loadArtboards(msg.artboards);
+        }
       } else if (msg.type === 'EXPORT_RESULT') {
         handleExportResult(msg);
       } else if (msg.type === 'AI_PARSER_STATUS') {
@@ -512,13 +531,16 @@
       } else if (msg.type === 'ERROR') {
         document.getElementById('export-btn').disabled = false;
         setStatus('Error: ' + (msg.message || 'Unknown error'));
+        showArtboardError(msg.message || 'Unknown error');
       }
     });
 
     // Check ai-parser availability on load
     function checkAiParser() {
       try {
-        window.uxpHost?.postMessage({ type: 'CHECK_AI_PARSER' });
+        if (typeof window.__adobe_cep__ === 'undefined') {
+          window.postMessage({ type: 'CHECK_AI_PARSER' }, '*');
+        }
       } catch(e) {
         // Not in UXP context or host not available
       }

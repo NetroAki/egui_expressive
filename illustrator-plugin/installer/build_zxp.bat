@@ -98,7 +98,6 @@ copy "%PLUGIN_DIR%\CSXS\manifest.xml" "%STAGE%\CSXS\manifest.xml" >nul
 copy "%PLUGIN_DIR%\index.html" "%STAGE%\index.html" >nul
 copy "%PLUGIN_DIR%\plugin.js" "%STAGE%\plugin.js" >nul
 if exist "%PLUGIN_DIR%\host.jsx" copy "%PLUGIN_DIR%\host.jsx" "%STAGE%\host.jsx" >nul
-copy "%PLUGIN_DIR%\manifest.json" "%STAGE%\manifest.json" >nul
 
 REM NOTE: .debug file excluded from production builds.
 REM For development, create manually with appropriate Port.

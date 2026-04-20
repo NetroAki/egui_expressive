@@ -5,7 +5,20 @@ const BLEND_MODES = { NORMAL: "normal", MULTIPLY: "multiply", SCREEN: "screen", 
 const BLEND_MODES_BY_NUM = { 0: "normal", 1: "multiply", 2: "screen", 3: "overlay", 4: "darken", 5: "lighten", 6: "color_dodge", 7: "color_burn", 8: "hard_light", 9: "soft_light", 10: "difference", 11: "exclusion", 12: "hue", 13: "saturation", 14: "color", 15: "luminosity" };
 
 // ─── Artboard Discovery ───────────────────────────────────────────────────────
+function getIllustratorApp() {
+  try {
+    // UXP
+    return require('illustrator').app;
+  } catch(e) {
+    // Not in UXP — app not available in panel JS
+    if (typeof app !== 'undefined') return app;
+    return null;
+  }
+}
+
 function getArtboards() {
+  const app = getIllustratorApp();
+  if (!app) return { error: 'Not running inside Illustrator. Install the plugin via the .zxp installer.' };
   const doc = app.activeDocument;
   if (!doc) return [];
   const boards = [];
@@ -1019,6 +1032,8 @@ function mergeAiParserData(domElements, aiParserResult) {
 
 async function extractFromProjectFile(artboardsData) {
     try {
+        const app = getIllustratorApp();
+        if (!app) return artboardsData;
         const doc = app.activeDocument;
         if (!doc) return artboardsData;
 
@@ -1057,6 +1072,8 @@ function isTopLevelItem(item) {
 
 // ─── Main Export ─────────────────────────────────────────────────────────────
 async function exportArtboards(selectedIndices, options) {
+  const app = getIllustratorApp();
+  if (!app) throw new Error("Illustrator app not available");
   const doc = app.activeDocument;
   if (!doc) throw new Error("No active document");
 
@@ -1146,7 +1163,25 @@ function collectWarnings(elements) {
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener("message", async (event) => {
     const { type, payload } = event.data;
-  if (type === "GET_ARTBOARDS") { try { window.postMessage({ type: "ARTBOARDS_RESULT", artboards: await getArtboards() }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
+  if (type === "GET_ARTBOARDS") {
+    try {
+      const app = getIllustratorApp();
+      if (!app) {
+        window.postMessage({ type: "ERROR", message: "Not running inside Illustrator. Install the plugin via the .zxp installer." }, '*');
+      } else if (app.documents.length === 0) {
+        window.postMessage({ type: "ERROR", message: "No document open in Illustrator. Please open an .ai file first." }, '*');
+      } else {
+        const result = await getArtboards();
+        if (result && result.error) {
+          window.postMessage({ type: "ERROR", message: result.error }, '*');
+        } else {
+          window.postMessage({ type: "ARTBOARDS_RESULT", artboards: result }, '*');
+        }
+      }
+    } catch (e) {
+      window.postMessage({ type: "ERROR", message: e.message }, '*');
+    }
+  }
   if (type === "CHECK_AI_PARSER") { window.postMessage({ type: "AI_PARSER_STATUS", available: aiParserAvailable }); }
   if (type === "EXPORT") { try { const ed = event.data; const selectedIndices = ed.selectedIndices || ed.artboardIndices; const options = ed.options || {}; const r = await exportArtboards(selectedIndices || [], options); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
   if (type === "EXPORT_SINGLE") { try { const ed = event.data; const artboardIndex = ed.artboardIndex; const options = ed.options || {}; const r = await exportArtboards([artboardIndex], options); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
@@ -1156,6 +1191,8 @@ if (typeof window !== 'undefined' && window.addEventListener) {
       // Returns the same format as EXPORT but with expanded elements
       try {
         const { artboardIndex, options } = payload || {};
+        const app = getIllustratorApp();
+        if (!app) throw new Error("Illustrator app not available");
         const doc = app.activeDocument;
         if (!doc) throw new Error("No active document");
 
@@ -1212,6 +1249,8 @@ function exportSelected(selectedIndicesJSON, optionsJSON) {
 }
 
 function exportArtboardsSync(selectedIndices, options) {
+  const app = getIllustratorApp();
+  if (!app) return { error: "Illustrator app not available" };
   const doc = app.activeDocument;
   if (!doc) return { error: "No active document" };
   const allEls = [], results = [];
