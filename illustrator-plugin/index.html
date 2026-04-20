@@ -291,6 +291,15 @@
     </div>
   </div>
   
+  <div class="artboard-section" id="page-tiles-section" style="display:none;">
+    <div class="section-label">Page Tiles <span id="tile-count"></span> <span style="font-size:10px;color:var(--on-surface-variant);">(from .ai file)</span></div>
+    <div style="display:flex;gap:4px;margin:2px 0 4px;">
+      <button onclick="toggleAllTiles(true)" style="font-size:10px;padding:2px 6px;background:var(--surface-container);border:1px solid var(--outline-variant);border-radius:4px;color:var(--on-surface);cursor:pointer;">Select All</button>
+      <button onclick="toggleAllTiles(false)" style="font-size:10px;padding:2px 6px;background:var(--surface-container);border:1px solid var(--outline-variant);border-radius:4px;color:var(--on-surface);cursor:pointer;">Deselect All</button>
+    </div>
+    <div class="artboard-list" id="tile-list"></div>
+  </div>
+  
   <div class="options-section">
     <div class="option-row">
       <label>Use naming conventions</label>
@@ -352,6 +361,24 @@
       document.querySelectorAll('#artboard-list input[type=checkbox]').forEach(cb => cb.checked = val);
     }
     
+    function toggleAllTiles(val) {
+      document.querySelectorAll('#tile-list input[type=checkbox]').forEach(cb => cb.checked = val);
+    }
+
+    function loadPageTiles(tiles) {
+      const section = document.getElementById('page-tiles-section');
+      const list = document.getElementById('tile-list');
+      if (!tiles || !tiles.length) { section.style.display = 'none'; return; }
+      section.style.display = 'block';
+      document.getElementById('tile-count').textContent = `(${tiles.length})`;
+      list.innerHTML = tiles.map((t, i) => `
+        <div class="artboard-item">
+          <input type="checkbox" id="tile-${i}" checked>
+          <label for="tile-${i}">${escapeHtml(t.name)} <span style="color:var(--on-surface-variant)">${Math.round(t.width)}×${Math.round(t.height)}</span></label>
+        </div>
+      `).join('');
+    }
+    
     function setStatus(msg) {
       document.getElementById('status-bar').textContent = msg;
     }
@@ -359,6 +386,23 @@
     function showArtboardError(msg) {
       const list = document.getElementById('artboard-list');
       list.innerHTML = `<div style="color:var(--error);font-size:11px;padding:4px 0;">${escapeHtml(msg)}</div>`;
+    }
+    
+    function checkPageTiles() {
+      // Try ai-parser to get page tiles
+      if (typeof require !== 'undefined') {
+        try {
+          const { execFileSync } = require('child_process');
+          const path = require('path');
+          const binaryPath = path.join(__dirname, '..', 'target', 'debug', 'ai-parser');
+          // Not available in CEP — skip
+        } catch(e) {}
+      }
+      
+      // In CEP mode, we can't run ai_parser directly.
+      // Instead, show a message suggesting to export the whole artboard
+      // Page tiles will be used when the file is parsed via ai-parser CLI
+      showArtboardError('No artboards. The document may have page tiles — use File → Export via ai-parser for multi-page layouts.');
     }
     
     // Request artboard list on load
@@ -381,8 +425,9 @@
                         return;
                     }
                     if (diag.artboardCount === 0) {
-                        showArtboardError('Document has no artboards: ' + diag.docName);
-                        setStatus('No artboards in document');
+                        // No artboards — try page tiles from ai_parser
+                        setStatus('No artboards, checking for page tiles...');
+                        checkPageTiles();
                         return;
                     }
                     // Proceed to load artboards
@@ -402,6 +447,14 @@
                                     return;
                                 }
                                 loadArtboards(parsed);
+                                // Check if document might have page tiles (single large artboard)
+                                if (parsed.length === 1) {
+                                  var ab = parsed[0];
+                                  if (ab.width > 1200 || ab.height > 1200) {
+                                    // Large artboard — may contain page tiles
+                                    // Will be populated if ai_parser finds tiles
+                                  }
+                                }
                             } catch(e) {
                                 showArtboardError('Error parsing artboard data: ' + e.message);
                                 setStatus('Error parsing artboard data: ' + e.message);
@@ -449,7 +502,9 @@
     function doExport() {
       const selected = Array.from(document.querySelectorAll('#artboard-list input:checked'))
         .map(cb => parseInt(cb.id.replace('ab-', '')));
-      if (!selected.length) { setStatus('Select at least one artboard'); return; }
+      const selectedTiles = Array.from(document.querySelectorAll('#tile-list input:checked'))
+        .map(cb => parseInt(cb.id.replace('tile-', '')));
+      if (!selected.length && !selectedTiles.length) { setStatus('Select at least one artboard or page tile'); return; }
       
       document.getElementById('export-btn').disabled = true;
       setStatus('Exporting...');

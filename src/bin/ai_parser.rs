@@ -98,6 +98,16 @@ pub struct ThreeD {
     pub rotation_z: f64,
 }
 
+/// Page tile representation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageTile {
+    pub name: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 /// Artboard representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Artboard {
@@ -162,6 +172,8 @@ pub struct AiParseResult {
     pub ai_version: String,
     #[serde(default)]
     pub artboards: Vec<Artboard>,
+    #[serde(default)]
+    pub page_tiles: Vec<PageTile>,
     #[serde(default)]
     pub elements: Vec<Element>,
     #[serde(default)]
@@ -796,6 +808,7 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
         source_file,
         ai_version: String::new(),
         artboards: Vec::new(),
+        page_tiles: Vec::new(),
         elements: Vec::new(),
         errors: Vec::new(),
     };
@@ -934,6 +947,76 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
         }
     }
 
+    // Parse page tiles from ArtBox entries in PDF stream
+    if result.page_tiles.is_empty() {
+        if let Ok(bytes) = std::fs::read(path) {
+            let full_content = String::from_utf8_lossy(&bytes);
+            static ARTBOX_RE: OnceLock<Regex> = OnceLock::new();
+            let re = ARTBOX_RE.get_or_init(|| {
+                Regex::new(r"ArtBox\[(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\]").unwrap()
+            });
+            for (i, caps) in re.captures_iter(&full_content).enumerate() {
+                if let (Some(x1), Some(y1), Some(x2), Some(y2)) = (caps.get(1), caps.get(2), caps.get(3), caps.get(4)) {
+                    let x1: f64 = x1.as_str().parse().unwrap_or(0.0);
+                    let y1: f64 = y1.as_str().parse().unwrap_or(0.0);
+                    let x2: f64 = x2.as_str().parse().unwrap_or(0.0);
+                    let y2: f64 = y2.as_str().parse().unwrap_or(0.0);
+                    result.page_tiles.push(PageTile {
+                        name: format!("Page_{}", i + 1),
+                        x: x1,
+                        y: y1,
+                        width: (x2 - x1).abs(),
+                        height: (y2 - y1).abs(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Parse tile region from %AI3_TileBox
+    if result.page_tiles.is_empty() {
+        if let Ok(bytes) = std::fs::read(path) {
+            let full_content = String::from_utf8_lossy(&bytes);
+            static TILEBOX_RE: OnceLock<Regex> = OnceLock::new();
+            let re = TILEBOX_RE.get_or_init(|| {
+                Regex::new(r"%AI3_TileBox:\s*(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)").unwrap()
+            });
+            if let Some(caps) = re.captures(&full_content) {
+                if let (Some(x1), Some(y1), Some(x2), Some(y2)) = (caps.get(1), caps.get(2), caps.get(3), caps.get(4)) {
+                    let x1: f64 = x1.as_str().parse().unwrap_or(0.0);
+                    let y1: f64 = y1.as_str().parse().unwrap_or(0.0);
+                    let x2: f64 = x2.as_str().parse().unwrap_or(0.0);
+                    let y2: f64 = y2.as_str().parse().unwrap_or(0.0);
+                    result.page_tiles.push(PageTile {
+                        name: "TileRegion_1".to_string(),
+                        x: x1,
+                        y: y1,
+                        width: (x2 - x1).abs(),
+                        height: (y2 - y1).abs(),
+                    });
+                }
+            }
+        }
+    }
+
+    // If page tiles exist, prefer them over a single bounding-box artboard
+    // (page tiles are more specific than a whole-canvas %%HiResBoundingBox)
+    if !result.page_tiles.is_empty()
+        && (result.artboards.is_empty()
+            || (result.artboards.len() == 1 && result.page_tiles.len() > 1))
+    {
+        result.artboards.clear();
+        for tile in &result.page_tiles {
+            result.artboards.push(Artboard {
+                name: tile.name.clone(),
+                x: tile.x,
+                y: tile.y,
+                width: tile.width,
+                height: tile.height,
+            });
+        }
+    }
+
     if result.ai_version.is_empty() {
         // Try to get version from document info dictionary
         if let Ok(info_ref) = doc.trailer.get(b"Info") {
@@ -1024,6 +1107,7 @@ fn main() {
                 source_file: args[1].clone(),
                 ai_version: String::new(),
                 artboards: Vec::new(),
+                page_tiles: Vec::new(),
                 elements: Vec::new(),
                 errors: vec![e],
             };

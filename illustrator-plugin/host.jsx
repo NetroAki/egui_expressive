@@ -14,6 +14,22 @@ function getDiagnosticsJSON() {
             if (result.hasDoc) {
                 result.docName = app.activeDocument.name;
                 result.artboardCount = app.activeDocument.artboards.length;
+                
+                // Check for potential page tiling
+                result.hasPageTiles = false;
+                result.estimatedPageCount = 1;
+                if (result.artboardCount === 1) {
+                    try {
+                        var ab = app.activeDocument.artboards[0];
+                        var r = ab.artboardRect;
+                        var w = Math.abs(r[2] - r[0]);
+                        var h = Math.abs(r[1] - r[3]);
+                        if (w > 1200 || h > 1200) {
+                            result.hasPageTiles = true;
+                            result.estimatedPageCount = Math.max(1, Math.round((w * h) / (595 * 842)));
+                        }
+                    } catch(e) {}
+                }
             }
         }
     } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
@@ -41,6 +57,50 @@ function getArtboardsJSON() {
             });
         }
         return JSON.stringify(boards);
+    } catch (e) {
+        return JSON.stringify({ error: e.message || String(e) });
+    }
+}
+
+function getDocumentInfoJSON() {
+    try {
+        var appExists = false;
+        try { appExists = (typeof app !== 'undefined'); } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
+        if (!appExists || app.documents.length === 0) return JSON.stringify({ error: "No document" });
+        var doc = app.activeDocument;
+        if (!doc) return JSON.stringify({ error: "No active document" });
+        
+        var info = {
+            name: doc.name,
+            artboardCount: doc.artboards.length,
+            pageCount: 1,
+            hasPageTiles: false,
+            filePath: ""
+        };
+        
+        try { info.filePath = doc.fullName ? doc.fullName.fsName : ""; } catch(e) {}
+        
+        // If single artboard, check if content spans multiple "pages"
+        // by looking at content bounds vs typical page size
+        if (doc.artboards.length === 1) {
+            try {
+                var ab = doc.artboards[0];
+                var r = ab.artboardRect;
+                var w = Math.abs(r[2] - r[0]);
+                var h = Math.abs(r[1] - r[3]);
+                // Large canvas suggests page tiling
+                // Standard page: ~595x842 (A4), ~612x792 (Letter)
+                // If artboard much larger, likely tiled
+                if (w > 1200 || h > 1200) {
+                    info.hasPageTiles = true;
+                    // Estimate page count from artboard size
+                    // This is approximate — actual parsing via ai_parser is more accurate
+                    info.pageCount = Math.max(1, Math.round((w * h) / (595 * 842)));
+                }
+            } catch(e) {}
+        }
+        
+        return JSON.stringify(info);
     } catch (e) {
         return JSON.stringify({ error: e.message || String(e) });
     }
