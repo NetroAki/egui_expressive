@@ -74,4 +74,12 @@ if defined UPIA_PATH (
     echo [INFO] Restart Illustrator to load the extension.
 )
 
+REM Enable CEP debug mode for self-signed extensions (no admin required)
+echo [INFO] Enabling CEP debug mode for self-signed extensions...
+REM Try CSXS.11 (Illustrator 2022-2023), CSXS.12 (2024+), CSXS.10 (older)
+reg add "HKCU\SOFTWARE\Adobe\CSXS.11" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
+reg add "HKCU\SOFTWARE\Adobe\CSXS.12" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
+reg add "HKCU\SOFTWARE\Adobe\CSXS.10" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
+echo [INFO] CEP debug mode enabled. Restart Illustrator for changes to take effect.
+
 endlocal

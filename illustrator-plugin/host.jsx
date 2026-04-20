@@ -3,6 +3,21 @@
 // It provides the Illustrator DOM access that the CEP panel needs.
 // The code generation logic lives in plugin.js (browser-side).
 
+function getDiagnosticsJSON() {
+    var result = { hasApp: false, hasDoc: false, artboardCount: 0, docName: "", error: "" };
+    try {
+        result.hasApp = (typeof app !== 'undefined');
+        if (result.hasApp) {
+            result.hasDoc = (app.documents.length > 0);
+            if (result.hasDoc) {
+                result.docName = app.activeDocument.name;
+                result.artboardCount = app.activeDocument.artboards.length;
+            }
+        }
+    } catch(e) { result.error = e.message || String(e); }
+    return JSON.stringify(result);
+}
+
 function getArtboardsJSON() {
     try {
         var doc = app.activeDocument;

@@ -1,0 +1,9 @@
+[package]
+name = "neutraudio-mock"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+egui_expressive = { path = "..", features = ["daw"] }
+egui = "0.34"
+eframe = "0.34"

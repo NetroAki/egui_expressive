@@ -355,21 +355,56 @@
       document.getElementById('status-bar').textContent = msg;
     }
     
+    function showArtboardError(msg) {
+      const list = document.getElementById('artboard-list');
+      list.innerHTML = `<div style="color:var(--error);font-size:11px;padding:4px 0;">${escapeHtml(msg)}</div>`;
+    }
+    
     // Request artboard list on load
     window.addEventListener('load', () => {
       try {
         if (window.__adobe_cep__) {
           // CEP: use evalScript to call ExtendScript functions in host.jsx
           try {
-            window.__adobe_cep__.evalScript('getArtboardsJSON()', function(result) {
-              if (result && result !== 'undefined' && result !== 'EvalScript error.') {
-                try { loadArtboards(JSON.parse(result)); } catch(e) { loadArtboards([]); }
-              } else {
-                loadArtboards([]);
-              }
+            window.__adobe_cep__.evalScript('getDiagnosticsJSON()', function(diagResult) {
+                try {
+                    var diag = JSON.parse(diagResult);
+                    if (!diag.hasDoc) {
+                        showArtboardError('No document open in Illustrator. Open an .ai file first.');
+                        setStatus('Open an Illustrator document first');
+                        return;
+                    }
+                    if (diag.artboardCount === 0) {
+                        showArtboardError('Document has no artboards: ' + diag.docName);
+                        setStatus('No artboards in document');
+                        return;
+                    }
+                    // Proceed to load artboards
+                    window.__adobe_cep__.evalScript('getArtboardsJSON()', function(result) {
+                        if (result === 'EvalScript error.') {
+                            showArtboardError('evalScript error — host.jsx may not be loaded. Check CEP debug mode.');
+                            setStatus('evalScript error — host.jsx may not be loaded. Check CEP debug mode.');
+                        } else if (!result || result === 'undefined') {
+                            showArtboardError('No document open in Illustrator');
+                            setStatus('No document open in Illustrator');
+                        } else {
+                            try {
+                                loadArtboards(JSON.parse(result));
+                            } catch(e) {
+                                showArtboardError('Error parsing artboard data: ' + e.message);
+                                setStatus('Error parsing artboard data: ' + e.message);
+                            }
+                        }
+                    });
+                } catch(e) {
+                    // diagResult was 'EvalScript error.' or unparseable — evalScript not working
+                    showArtboardError('evalScript failed — CEP debug mode may not be enabled. Run install_zxp.bat again to enable it.');
+                    setStatus('CEP evalScript not working');
+                }
             });
           } catch(ce) {
-            loadArtboards([]);
+            showArtboardError('CEP error: ' + ce.message);
+            setStatus('CEP error: ' + ce.message);
           }
         } else if (window.uxpHost) {
           window.uxpHost.postMessage({ type: 'GET_ARTBOARDS' });
@@ -416,15 +451,23 @@
           // in ExtendScript or UXP contexts. Attempt client-side codegen with
           // data fetched from host.jsx via evalScript.
           window.__adobe_cep__.evalScript('getArtboardsJSON()', function(abResult) {
-            if (!abResult || abResult === 'EvalScript error.') {
+            if (abResult === 'EvalScript error.') {
               document.getElementById('export-btn').disabled = false;
-              setStatus('Could not access Illustrator document');
+              setStatus('evalScript error — host.jsx may not be loaded. Check CEP debug mode.');
+              return;
+            } else if (!abResult || abResult === 'undefined') {
+              document.getElementById('export-btn').disabled = false;
+              setStatus('No document open in Illustrator');
               return;
             }
             // In CEP, we can show artboards but export needs ExtendScript-side processing
             // Since full export pipeline is in ExtendScript host.jsx, call it per artboard
             window.__adobe_cep__.evalScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(selected)) + ')', function(result) {
-              if (!result || result === 'EvalScript error.') {
+              if (result === 'EvalScript error.') {
+                document.getElementById('export-btn').disabled = false;
+                setStatus('evalScript error — host.jsx may not be loaded. Check CEP debug mode.');
+                return;
+              } else if (!result || result === 'undefined') {
                 document.getElementById('export-btn').disabled = false;
                 setStatus('Could not extract artboard data');
                 return;

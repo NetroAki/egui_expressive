@@ -1,6 +1,9 @@
 /target
+**/target/
 Cargo.lock
 SPEC.md
 /dist
 *.p12
 *.zxp
+tools/ZXPSignCmd.exe
+installer/.rnd
