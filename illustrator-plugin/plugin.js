@@ -1094,7 +1094,7 @@ function isTopLevelItem(item) {
 }
 
 // ─── Main Export ─────────────────────────────────────────────────────────────
-async function exportArtboards(selectedIndices, options) {
+async function exportArtboards(selectedIndices, options, selectedTiles) {
   const app = getIllustratorApp();
   if (!app) throw new Error("Illustrator app not available");
   const doc = app.activeDocument;
@@ -1110,6 +1110,18 @@ async function exportArtboards(selectedIndices, options) {
     const els = extractElements(items, rect);
     allEls.push(...els);
     results.push({ artboard: abInfo, elements: els });
+  }
+
+  if (selectedTiles && selectedTiles.length > 0) {
+    for (const tile of selectedTiles) {
+      const rect = [tile.x, tile.y, tile.x + tile.width, tile.y - tile.height];
+      const abInfo = { name: tile.name, width: tile.width, height: tile.height, x: tile.x, y: tile.y };
+      const items = [];
+      try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || it.hidden) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
+      const els = extractElements(items, rect);
+      allEls.push(...els);
+      results.push({ artboard: abInfo, elements: els });
+    }
   }
 
   // Try to enrich with project file data from ai-parser
@@ -1206,8 +1218,8 @@ if (typeof window !== 'undefined' && window.addEventListener) {
     }
   }
   if (type === "CHECK_AI_PARSER") { window.postMessage({ type: "AI_PARSER_STATUS", available: aiParserAvailable }); }
-  if (type === "EXPORT") { try { const ed = event.data; const selectedIndices = ed.selectedIndices || ed.artboardIndices; const options = ed.options || {}; const r = await exportArtboards(selectedIndices || [], options); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
-  if (type === "EXPORT_SINGLE") { try { const ed = event.data; const artboardIndex = ed.artboardIndex; const options = ed.options || {}; const r = await exportArtboards([artboardIndex], options); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
+  if (type === "EXPORT") { try { const ed = event.data; const selectedIndices = ed.selectedIndices || ed.artboardIndices; const selectedTiles = ed.selectedTiles || []; const options = ed.options || {}; const r = await exportArtboards(selectedIndices || [], options, selectedTiles); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
+  if (type === "EXPORT_SINGLE") { try { const ed = event.data; const artboardIndex = ed.artboardIndex; const selectedTiles = ed.selectedTiles || []; const options = ed.options || {}; const r = await exportArtboards([artboardIndex], options, selectedTiles); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
     if (type === "EXPAND_AND_EXTRACT") {
       // Duplicate the artboard, expand all appearances, extract, then delete duplicate
       // This gives more accurate data at the cost of being destructive to the duplicate
@@ -1247,7 +1259,7 @@ if (typeof window !== 'undefined' && window.addEventListener) {
         }
 
         // Export from duplicate
-        const r = await exportArtboards([artboardIndex], options || {});
+        const r = await exportArtboards([artboardIndex], options || {}, payload.selectedTiles || []);
 
         // Delete the duplicate artboard
         try {
@@ -1275,16 +1287,24 @@ function getArtboardsJSON() {
   try { return JSON.stringify(getArtboards()); } catch(e) { return "[]"; }
 }
 
-function exportSelected(selectedIndicesJSON, optionsJSON) {
+function exportSelected(exportPayloadJSON, optionsJSON) {
   try {
-    const indices = JSON.parse(selectedIndicesJSON || "[]");
+    const payload = JSON.parse(exportPayloadJSON || "{}");
+    let indices = [];
+    let tiles = [];
+    if (Array.isArray(payload)) {
+      indices = payload;
+    } else {
+      indices = payload.selected || [];
+      tiles = payload.selectedTiles || [];
+    }
     const opts = JSON.parse(optionsJSON || "{}");
-    const result = exportArtboardsSync(indices, opts);
+    const result = exportArtboardsSync(indices, opts, tiles);
     return JSON.stringify(result);
   } catch(e) { return JSON.stringify({ error: e.message }); }
 }
 
-function exportArtboardsSync(selectedIndices, options) {
+function exportArtboardsSync(selectedIndices, options, selectedTiles) {
   const app = getIllustratorApp();
   if (!app) return { error: "Illustrator app not available" };
   const doc = app.activeDocument;
@@ -1298,6 +1318,17 @@ function exportArtboardsSync(selectedIndices, options) {
     const els = extractElements(items, rect);
     allEls.push(...els);
     results.push({ artboard: abInfo, elements: els });
+  }
+  if (selectedTiles && selectedTiles.length > 0) {
+    for (const tile of selectedTiles) {
+      const rect = [tile.x, tile.y, tile.x + tile.width, tile.y - tile.height];
+      const abInfo = { name: tile.name, width: tile.width, height: tile.height, x: tile.x, y: tile.y };
+      const items = [];
+      try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || it.hidden) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
+      const els = extractElements(items, rect);
+      allEls.push(...els);
+      results.push({ artboard: abInfo, elements: els });
+    }
   }
   const { colorMap, constants } = extractAndNameColors(allEls);
   const comps = findReusableComponents(allEls);

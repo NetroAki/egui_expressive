@@ -96,6 +96,28 @@ function getDocumentInfoJSON() {
                     // Estimate page count from artboard size
                     // This is approximate — actual parsing via ai_parser is more accurate
                     info.pageCount = Math.max(1, Math.round((w * h) / (595 * 842)));
+                    
+                    info.pageTiles = [];
+                    var cols = Math.ceil(w / 595);
+                    var rows = Math.ceil(h / 842);
+                    var tileIdx = 1;
+                    for (var row = 0; row < rows; row++) {
+                        for (var col = 0; col < cols; col++) {
+                            var tx = r[0] + col * 595;
+                            var ty = r[1] - row * 842;
+                            var tw = Math.min(595, r[2] - tx);
+                            var th = Math.min(842, ty - r[3]);
+                            if (tw > 0 && th > 0) {
+                                info.pageTiles.push({
+                                    name: "Tile " + tileIdx++,
+                                    x: tx,
+                                    y: ty,
+                                    width: tw,
+                                    height: th
+                                });
+                            }
+                        }
+                    }
                 }
             } catch(e) {}
         }
@@ -152,14 +174,24 @@ function getDocumentName() {
     }
 }
 
-function extractArtboardDataJSON(selectedIndicesJSON) {
+function extractArtboardDataJSON(exportPayloadJSON) {
     try {
         var appExists = false;
         try { appExists = (typeof app !== 'undefined'); } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
         if (!appExists || app.documents.length === 0) return "[]";
         var doc = app.activeDocument;
         if (!doc) return "[]";
-        var selectedIndices = JSON.parse(selectedIndicesJSON);
+        
+        var payload = JSON.parse(exportPayloadJSON);
+        var selectedIndices = [];
+        var selectedTiles = [];
+        if (Object.prototype.toString.call(payload) === '[object Array]') {
+            selectedIndices = payload;
+        } else {
+            selectedIndices = payload.selected || [];
+            selectedTiles = payload.selectedTiles || [];
+        }
+        
         var results = [];
         
         function isTopLevelItem(item) {
@@ -415,6 +447,31 @@ function extractArtboardDataJSON(selectedIndicesJSON) {
             var ab = doc.artboards[idx];
             var rect = ab.artboardRect;
             var abInfo = { name: ab.name, width: Math.abs(rect[2] - rect[0]), height: Math.abs(rect[3] - rect[1]), x: rect[0], y: rect[1] };
+            
+            var items = [];
+            for (var j = 0; j < doc.pageItems.length; j++) {
+                var it = doc.pageItems[j];
+                try {
+                    if (it.locked || it.hidden) continue;
+                    var b = it.geometricBounds;
+                    if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) {
+                        items.push(it);
+                    }
+                } catch(e) {}
+            }
+            
+            var els = [];
+            for (var k = 0; k < items.length; k++) {
+                extractRecursive(items[k], rect, els, 0);
+            }
+            
+            results.push({ artboard: abInfo, elements: els });
+        }
+        
+        for (var i = 0; i < selectedTiles.length; i++) {
+            var tile = selectedTiles[i];
+            var rect = [tile.x, tile.y, tile.x + tile.width, tile.y - tile.height];
+            var abInfo = { name: tile.name, width: tile.width, height: tile.height, x: tile.x, y: tile.y };
             
             var items = [];
             for (var j = 0; j < doc.pageItems.length; j++) {

@@ -1003,7 +1003,7 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
     // (page tiles are more specific than a whole-canvas %%HiResBoundingBox)
     if !result.page_tiles.is_empty()
         && (result.artboards.is_empty()
-            || (result.artboards.len() == 1 && result.page_tiles.len() > 1))
+            || (result.artboards.len() == 1 && !result.page_tiles.is_empty()))
     {
         result.artboards.clear();
         for tile in &result.page_tiles {

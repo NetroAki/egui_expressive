@@ -389,20 +389,23 @@
     }
     
     function checkPageTiles() {
-      // Try ai-parser to get page tiles
-      if (typeof require !== 'undefined') {
-        try {
-          const { execFileSync } = require('child_process');
-          const path = require('path');
-          const binaryPath = path.join(__dirname, '..', 'target', 'debug', 'ai-parser');
-          // Not available in CEP — skip
-        } catch(e) {}
+      if (window.__adobe_cep__) {
+        window.__adobe_cep__.evalScript('getDocumentInfoJSON()', function(result) {
+          try {
+            var info = JSON.parse(result);
+            if (info && info.pageTiles && info.pageTiles.length > 0) {
+              loadPageTiles(info.pageTiles);
+              showArtboardError('Document uses page tiles instead of artboards.');
+            } else {
+              showArtboardError('No artboards or page tiles found.');
+            }
+          } catch(e) {
+            showArtboardError('Error parsing document info: ' + e.message);
+          }
+        });
+      } else {
+        showArtboardError('No artboards. The document may have page tiles — use File → Export via ai-parser for multi-page layouts.');
       }
-      
-      // In CEP mode, we can't run ai_parser directly.
-      // Instead, show a message suggesting to export the whole artboard
-      // Page tiles will be used when the file is parsed via ai-parser CLI
-      showArtboardError('No artboards. The document may have page tiles — use File → Export via ai-parser for multi-page layouts.');
     }
     
     // Request artboard list on load
@@ -503,11 +506,19 @@
       const selected = Array.from(document.querySelectorAll('#artboard-list input:checked'))
         .map(cb => parseInt(cb.id.replace('ab-', '')));
       const selectedTiles = Array.from(document.querySelectorAll('#tile-list input:checked'))
-        .map(cb => parseInt(cb.id.replace('tile-', '')));
+        .map(cb => {
+          const idx = parseInt(cb.id.replace('tile-', ''));
+          return currentTiles[idx];
+        });
       if (!selected.length && !selectedTiles.length) { setStatus('Select at least one artboard or page tile'); return; }
       
       document.getElementById('export-btn').disabled = true;
       setStatus('Exporting...');
+      
+      var exportPayload = {
+        selected: selected,
+        selectedTiles: selectedTiles
+      };
       
       try {
         if (window.__adobe_cep__) {
@@ -527,7 +538,7 @@
             }
             // In CEP, we can show artboards but export needs ExtendScript-side processing
             // Since full export pipeline is in ExtendScript host.jsx, call it per artboard
-            window.__adobe_cep__.evalScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(selected)) + ')', function(result) {
+            window.__adobe_cep__.evalScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(exportPayload)) + ')', function(result) {
               if (result === 'EvalScript error.') {
                 document.getElementById('export-btn').disabled = false;
                 setStatus('evalScript error — host.jsx may not be loaded. Check CEP debug mode.');
@@ -559,6 +570,7 @@
           window.postMessage({ 
             type: 'EXPORT', 
             selectedIndices: selected,
+            selectedTiles: selectedTiles,
             options 
           }, '*');
         }
