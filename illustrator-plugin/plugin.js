@@ -932,10 +932,22 @@ function mapGradientForSidecar(g) {
   return mapped;
 }
 
+function sidecarType(t) {
+  switch(t) {
+    case 'circle': case 'ellipse': case 'symbol': return 'shape';
+    case 'group': return 'group';
+    case 'path': return 'path';
+    case 'text': return 'text';
+    case 'image': return 'image';
+    case 'shape': case 'rect': return 'shape';
+    default: return 'shape';
+  }
+}
+
 function generateSidecar(ab, els, colorMap) {
   const mapElement = (el, childDepth) => {
     const result = {
-      id: el.id, type: el.type, x: Math.round(el.x), y: Math.round(el.y), w: Math.round(el.w), h: Math.round(el.h), depth: childDepth !== undefined ? childDepth : el.depth,
+      id: el.id, type: sidecarType(el.type), x: Math.round(el.x), y: Math.round(el.y), w: Math.round(el.w), h: Math.round(el.h), depth: childDepth !== undefined ? childDepth : el.depth,
       fill: colorToHex(el.fill),
       stroke: colorToHex(el.stroke),
       strokeWidth: el.stroke?.width || undefined,
