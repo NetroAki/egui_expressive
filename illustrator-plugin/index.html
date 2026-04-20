@@ -272,6 +272,7 @@
     }
     .empty-state .icon { font-size: 24px; }
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
   <div class="header">
@@ -674,9 +675,9 @@
     
     function downloadZip() {
       if (typeof JSZip === 'undefined') {
-        // Fallback: download each file individually
+        // fallback: download individually
         Object.keys(generatedFiles).forEach(name => downloadFile(name));
-        setStatus('Downloaded ' + Object.keys(generatedFiles).length + ' files individually (JSZip not available)');
+        setStatus('JSZip not available — files downloaded individually');
         return;
       }
       

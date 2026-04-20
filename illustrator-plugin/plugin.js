@@ -111,7 +111,7 @@ function extractElements(pageItems, artboardRect) {
 }
 
 function extractRecursive(item, artboardRect, elements, depth) {
-  try { if (item.locked || !item.visible) return; } catch (e) { return; }
+  try { if (item.locked || item.hidden) return; } catch (e) { return; }
 
   let x = 0, y = 0, w = 0, h = 0;
   try {
@@ -389,13 +389,22 @@ function getTextRuns(item) {
 }
 
 // ─── Color Deduplication ──────────────────────────────────────────────────────
+function stopColorToRgb(c) {
+  if (!c) return { r: 0, g: 0, b: 0 };
+  if (typeof c === 'string') {
+    const hex = c.replace('#', '');
+    return { r: parseInt(hex.slice(0,2),16)||0, g: parseInt(hex.slice(2,4),16)||0, b: parseInt(hex.slice(4,6),16)||0 };
+  }
+  return { r: c.r||0, g: c.g||0, b: c.b||0 };
+}
+
 function extractAndNameColors(allElements) {
   const usage = new Map();
   const walk = (els) => {
     for (const el of els) {
       if (el.fill) { const k = `${el.fill.r},${el.fill.g},${el.fill.b}`; const e = usage.get(k); e ? e.count++ : usage.set(k, { color: el.fill, count: 1 }); }
       if (el.stroke) { const k = `${el.stroke.r},${el.stroke.g},${el.stroke.b}`; const e = usage.get(k); e ? e.count++ : usage.set(k, { color: el.stroke, count: 1 }); }
-      if (el.gradient?.stops) for (const s of el.gradient.stops) { const k = `${s.color.r},${s.color.g},${s.color.b}`; const e = usage.get(k); e ? e.count++ : usage.set(k, { color: s.color, count: 1 }); }
+      if (el.gradient?.stops) for (const s of el.gradient.stops) { const c = stopColorToRgb(s.color); const k = `${c.r},${c.g},${c.b}`; const e = usage.get(k); e ? e.count++ : usage.set(k, { color: c, count: 1 }); }
       if (el.children) walk(el.children);
     }
   };
@@ -795,14 +804,16 @@ function generateElementCode(el, indent, colorMap, comps) {
     if (el.gradient) {
       const g = el.gradient;
       if (g.type === "linear") {
-        const stopsStr = (g.stops || []).map(s => `(${s.position.toFixed(3)}, egui::Color32::from_rgba_unmultiplied(${s.color.r}, ${s.color.g}, ${s.color.b}, ${Math.round((s.opacity !== undefined ? s.opacity : 1) * (el.opacity !== undefined ? el.opacity : 1) * 255)}))`).join(", ");
+        const stopsStr = (g.stops || []).map(s => { const c = stopColorToRgb(s.color); return `(${s.position.toFixed(3)}, egui::Color32::from_rgba_unmultiplied(${c.r}, ${c.g}, ${c.b}, ${Math.round((s.opacity !== undefined ? s.opacity : 1) * (el.opacity !== undefined ? el.opacity : 1) * 255)}))`; }).join(", ");
         c += `${pad}painter.add(egui_expressive::linear_gradient_rect(rect, &[${stopsStr}], egui_expressive::GradientDir::Angle(${(g.angle || 0).toFixed(1)})));\n`;
       } else if (g.type === "radial") {
         const stops = g.stops || [];
         const innerStop = stops[0] || { color: { r: 255, g: 255, b: 255 } };
         const outerStop = stops[stops.length - 1] || { color: { r: 0, g: 0, b: 0 } };
-        const innerColor = `egui::Color32::from_rgba_unmultiplied(${innerStop.color.r}, ${innerStop.color.g}, ${innerStop.color.b}, ${Math.round((innerStop.opacity !== undefined ? innerStop.opacity : 1) * (el.opacity !== undefined ? el.opacity : 1) * 255)})`;
-        const outerColor = `egui::Color32::from_rgba_unmultiplied(${outerStop.color.r}, ${outerStop.color.g}, ${outerStop.color.b}, ${Math.round((outerStop.opacity !== undefined ? outerStop.opacity : 1) * (el.opacity !== undefined ? el.opacity : 1) * 255)})`;
+        const innerC = stopColorToRgb(innerStop.color);
+        const outerC = stopColorToRgb(outerStop.color);
+        const innerColor = `egui::Color32::from_rgba_unmultiplied(${innerC.r}, ${innerC.g}, ${innerC.b}, ${Math.round((innerStop.opacity !== undefined ? innerStop.opacity : 1) * (el.opacity !== undefined ? el.opacity : 1) * 255)})`;
+        const outerColor = `egui::Color32::from_rgba_unmultiplied(${outerC.r}, ${outerC.g}, ${outerC.b}, ${Math.round((outerStop.opacity !== undefined ? outerStop.opacity : 1) * (el.opacity !== undefined ? el.opacity : 1) * 255)})`;
         c += `${pad}painter.add(egui_expressive::radial_gradient_rect(rect, ${innerColor}, ${outerColor}, 32));\n`;
       } else {
         // pattern or unknown gradient type
@@ -1083,7 +1094,7 @@ async function exportArtboards(selectedIndices, options) {
     const ab = doc.artboards[idx], rect = ab.artboardRect;
     const abInfo = { name: ab.name, width: Math.abs(rect[2] - rect[0]), height: Math.abs(rect[3] - rect[1]), x: rect[0], y: rect[1] };
     const items = [];
-    try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || !it.visible) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
+    try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || it.hidden) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
     const els = extractElements(items, rect);
     allEls.push(...els);
     results.push({ artboard: abInfo, elements: els });
@@ -1204,7 +1215,7 @@ if (typeof window !== 'undefined' && window.addEventListener) {
 
         // Copy items to duplicate artboard
         const items = [];
-        try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || !it.visible) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
+        try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || it.hidden) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
 
         // Expand appearance on items
         for (const item of items) {
@@ -1258,7 +1269,7 @@ function exportArtboardsSync(selectedIndices, options) {
     const ab = doc.artboards[idx], rect = ab.artboardRect;
     const abInfo = { name: ab.name, width: Math.abs(rect[2] - rect[0]), height: Math.abs(rect[3] - rect[1]), x: rect[0], y: rect[1] };
     const items = [];
-    try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || !it.visible) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
+    try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || it.hidden) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
     const els = extractElements(items, rect);
     allEls.push(...els);
     results.push({ artboard: abInfo, elements: els });

@@ -60,7 +60,7 @@ function getPageItemsJSON(artboardIndex) {
         for (var i = 0; i < doc.pageItems.length; i++) {
             var it = doc.pageItems[i];
             try {
-                if (it.locked || !it.visible) continue;
+                if (it.locked || it.hidden) continue;
                 var b = it.geometricBounds;
                 // Overlap check
                 if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1]) {
@@ -68,7 +68,7 @@ function getPageItemsJSON(artboardIndex) {
                         typename: it.typename,
                         name: it.name || ("item_" + i),
                         bounds: [b[0] - rect[0], rect[1] - b[1], Math.abs(b[2] - b[0]), Math.abs(b[1] - b[3])],
-                        visible: it.visible,
+                        visible: !it.hidden,
                         locked: it.locked
                     });
                 }
@@ -171,23 +171,12 @@ function extractArtboardDataJSON(selectedIndicesJSON) {
         function extractEffects(item) {
             var fx = [];
             try {
-                if (item.graphicStyles && item.graphicStyles[0] && item.graphicStyles[0].attributes) {
-                    var a = item.graphicStyles[0].attributes;
-                    var parseColor = function(c) {
-                        if (!c) return { r: 0, g: 0, b: 0, a: 1 };
-                        try {
-                            if (c.typename === "RGBColor") return { r: Math.round(c.red), g: Math.round(c.green), b: Math.round(c.blue), a: 1 };
-                            if (c.typename === "CMYKColor") { var k = c.black/100; return { r: Math.round(255*(1-c.cyan/100)*(1-k)), g: Math.round(255*(1-c.magenta/100)*(1-k)), b: Math.round(255*(1-c.yellow/100)*(1-k)), a: 1 }; }
-                        } catch(e) {}
-                        return { r: 0, g: 0, b: 0, a: 1 };
-                    };
-                    try { if (a.dropShadow && a.dropShadow.enabled !== false) { var d = a.dropShadow.distance||0, ang = (a.dropShadow.angle||0) * Math.PI / 180; fx.push({ type: "dropShadow", x: Math.round(d * Math.cos(ang)), y: -Math.round(d * Math.sin(ang)), blur: a.dropShadow.blur||0, spread: a.dropShadow.spread||0, color: parseColor(a.dropShadow.color) }); } } catch(e) {}
-                    try { if (a.innerShadow && a.innerShadow.enabled !== false) { var d2 = a.innerShadow.distance||0, ang2 = (a.innerShadow.angle||0) * Math.PI / 180; fx.push({ type: "innerShadow", x: Math.round(d2 * Math.cos(ang2)), y: -Math.round(d2 * Math.sin(ang2)), blur: a.innerShadow.blur||0, color: parseColor(a.innerShadow.color) }); } } catch(e) {}
-                    try { if (a.outerGlow && a.outerGlow.enabled !== false) fx.push({ type: "outerGlow", blur: a.outerGlow.blur||0, color: parseColor(a.outerGlow.color) }); } catch(e) {}
-                    try { if (a.innerGlow && a.innerGlow.enabled !== false) fx.push({ type: "innerGlow", blur: a.innerGlow.blur||0, color: parseColor(a.innerGlow.color) }); } catch(e) {}
-                    try { if (a.gaussianBlur && a.gaussianBlur.enabled !== false) fx.push({ type: "gaussianBlur", radius: a.gaussianBlur.radius||0 }); } catch(e) {}
-                    try { if (a.feather && a.feather.enabled !== false) fx.push({ type: "feather", radius: a.feather.radius||0 }); } catch(e) {}
+                // dropShadow via appearance items (CS6+)
+                if (item.strokeWidth !== undefined) {
+                    // item has stroke — not an effect indicator
                 }
+                // Live effects not reliably accessible via ExtendScript
+                // Return empty — effects will be absent from generated code
             } catch(e) {}
             return fx;
         }
@@ -269,7 +258,7 @@ function extractArtboardDataJSON(selectedIndicesJSON) {
         }
         
         function extractRecursive(item, artboardRect, elements, depth) {
-            try { if (item.locked || !item.visible) return; } catch (e) { return; }
+            try { if (item.locked || item.hidden) return; } catch (e) { return; }
             
             var x = 0, y = 0, w = 0, h = 0;
             try {
@@ -371,7 +360,7 @@ function extractArtboardDataJSON(selectedIndicesJSON) {
             for (var j = 0; j < doc.pageItems.length; j++) {
                 var it = doc.pageItems[j];
                 try {
-                    if (it.locked || !it.visible) continue;
+                    if (it.locked || it.hidden) continue;
                     var b = it.geometricBounds;
                     if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) {
                         items.push(it);
