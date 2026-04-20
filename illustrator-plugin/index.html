@@ -350,6 +350,7 @@
     const options = { naming: true, gaps: true, sidecar: true, native: true };
     let generatedFiles = {};
     let activeFile = null;
+    let currentTiles = [];
     
     function toggleOption(key) {
       options[key] = !options[key];
@@ -369,6 +370,7 @@
       const section = document.getElementById('page-tiles-section');
       const list = document.getElementById('tile-list');
       if (!tiles || !tiles.length) { section.style.display = 'none'; return; }
+      currentTiles = tiles;
       section.style.display = 'block';
       document.getElementById('tile-count').textContent = `(${tiles.length})`;
       list.innerHTML = tiles.map((t, i) => `
@@ -427,10 +429,18 @@
                         setStatus('Open an Illustrator document first');
                         return;
                     }
-                    if (diag.artboardCount === 0) {
-                        // No artboards — try page tiles from ai_parser
-                        setStatus('No artboards, checking for page tiles...');
+                    if (diag.artboardCount === 0 || (diag.artboardCount === 1 && diag.hasPageTiles)) {
+                        // No artboards or single artboard with page tiles — check for tiles
+                        setStatus('Checking for page tiles...');
                         checkPageTiles();
+                        if (diag.artboardCount === 1) {
+                            // Also load the single artboard alongside tiles
+                            window.__adobe_cep__.evalScript('getArtboardsJSON()', function(result2) {
+                                if (result2 && result2 !== 'EvalScript error.' && result2 !== 'undefined') {
+                                    try { renderArtboardList(JSON.parse(result2)); } catch(e) {}
+                                }
+                            });
+                        }
                         return;
                     }
                     // Proceed to load artboards
