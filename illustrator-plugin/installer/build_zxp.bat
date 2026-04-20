@@ -160,9 +160,26 @@ if exist "%STAGE%" rmdir /s /q "%STAGE%"
 echo.
 echo [INFO] Done! Package: %OUTPUT_DIR%\%ZXP_NAME%
 echo.
-echo Install with:
-echo   UPIA:  "%%ProgramFiles%%\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" /install "%OUTPUT_DIR%\%ZXP_NAME%"
-echo   Or:    Anastasiy's Extension Manager (https://install.anastasiy.com)
+set "UPIA_PATH="
+if exist "%ProgramFiles%\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
+    set "UPIA_PATH=%ProgramFiles%\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+) else if exist "%ProgramFiles(x86)%\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
+    set "UPIA_PATH=%ProgramFiles(x86)%\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+) else if exist "%LOCALAPPDATA%\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
+    set "UPIA_PATH=%LOCALAPPDATA%\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+)
+
+if defined UPIA_PATH (
+    echo Install with:
+    echo   UPIA:  "!UPIA_PATH!" /install "%OUTPUT_DIR%\%ZXP_NAME%"
+) else (
+    echo Install manually:
+    echo   1. Extract .zxp ^(it's a ZIP^) to:
+    echo      %%APPDATA%%\Adobe\CEP\extensions\com.egui-expressive.illustrator-exporter\
+    echo   2. Restart Illustrator
+)
+echo.
+echo Or use Anastasiy's Extension Manager ^(https://install.anastasiy.com^)
 echo.
 goto :done
 
