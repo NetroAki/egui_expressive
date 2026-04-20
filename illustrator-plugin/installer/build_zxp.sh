@@ -27,7 +27,7 @@ CERT_COUNTRY="US"
 CERT_STATE="NA"
 CERT_ORG="egui_expressive"
 CERT_NAME="egui_expressive Exporter"
-CERT_PASSWORD="egui_expressive_sign"
+CERT_PASSWORD="${ZXP_SIGN_PASSWORD:-}"
 CERT_FILE="$OUTPUT_DIR/cert.p12"
 
 # Timestamp authority
@@ -42,6 +42,12 @@ NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+
+# Ephemeral password warning (must be after warn() is defined)
+if [ -z "$CERT_PASSWORD" ]; then
+    CERT_PASSWORD="selfsign_$(date +%s)"
+    warn "No ZXP_SIGN_PASSWORD env var set — using ephemeral password. Set ZXP_SIGN_PASSWORD for reproducible builds."
+fi
 
 # ─── Find ZXPSignCmd ────────────────────────────────────────────────────────
 find_signer() {
@@ -108,20 +114,19 @@ prepare_staging() {
     cp "$PLUGIN_DIR/index.html"  "$stage/index.html"
     cp "$PLUGIN_DIR/plugin.js"   "$stage/plugin.js"
 
+    # ExtendScript host for CEP mode
+    if [ -f "$PLUGIN_DIR/host.jsx" ]; then
+        cp "$PLUGIN_DIR/host.jsx" "$stage/host.jsx"
+    fi
+
     # UXP manifest (included for developer reference / hybrid mode)
     cp "$PLUGIN_DIR/manifest.json" "$stage/manifest.json"
 
-    # .debug file for development mode (optional)
-    cat > "$stage/.debug" << 'DEBUGEOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<ExtensionList>
-  <Extension Id="com.egui-expressive.illustrator-exporter.panel">
-    <HostList>
-      <Host Name="ILST" Port="8088" />
-    </HostList>
-  </Extension>
-</ExtensionList>
-DEBUGEOF
+    # NOTE: .debug file is excluded from production builds.
+    # For development, create it manually:
+    #   cat > .debug << 'EOF'
+    #   <?xml version="1.0"?><ExtensionList><Extension Id="com.egui-expressive.illustrator-exporter.panel"><HostList><Host Name="ILST" Port="8088"/></HostList></Extension></ExtensionList>
+    #   EOF
 
     echo "$stage"
 }
@@ -175,6 +180,9 @@ sign_and_package() {
 
     mkdir -p "$OUTPUT_DIR"
 
+    # Remove old ZXP before signing to avoid Wine file-locking issues
+    rm -f "$output"
+
     info "Signing and packaging..."
     info "  Input:  $stage"
     info "  Output: $output"
@@ -190,7 +198,12 @@ sign_and_package() {
 
     # Verify
     info "Verifying package..."
-    run_signer "$signer" -verify "$output" 2>/dev/null || true
+    if ! run_signer "$signer" -verify "$output" 2>/dev/null; then
+        warn "Signature verification failed — package may not be accepted by all Creative Cloud versions"
+        warn "This is common with self-signed certificates. The package will still install manually."
+    else
+        info "Signature verified successfully"
+    fi
 
     local size
     size=$(du -sh "$output" | cut -f1)
@@ -243,12 +256,19 @@ main() {
         # Determine cert path
         local cert="${1:-$CERT_FILE}"
 
-        # Generate cert if needed
-        if [ ! -f "$cert" ]; then
-            warn "No certificate found at $cert"
-            generate_cert "$signer" "$cert"
+        if [ -n "${1:-}" ]; then
+            # User provided explicit cert path — use as-is
+            if [ ! -f "$cert" ]; then
+                error "Specified certificate not found: $cert"
+            fi
+            info "Using provided certificate: $cert"
         else
-            info "Using existing certificate: $cert"
+            # Default self-signed cert — always regenerate to avoid password mismatch
+            if [ -f "$cert" ]; then
+                info "Removing old self-signed cert to regenerate with current password..."
+                rm -f "$cert"
+            fi
+            generate_cert "$signer" "$cert"
         fi
 
         # Sign and package

@@ -334,6 +334,8 @@
   <div class="status-bar" id="status-bar">Ready</div>
   <div class="ai-parser-status" id="ai-parser-status" title="Project file analysis via ai-parser"></div>
 
+  <!-- Plugin codegen library loaded for both UXP and CEP panel contexts -->
+  <script src="plugin.js"></script>
   <script>
     const options = { naming: true, gaps: true, sidecar: true, native: true };
     let generatedFiles = {};
@@ -356,15 +358,32 @@
     // Request artboard list on load
     window.addEventListener('load', () => {
       try {
-        window.__adobe_cep__ ?
-          window.__adobe_cep__.evalScript('getArtboards()', loadArtboards) :
-          window.uxpHost?.postMessage({ type: 'GET_ARTBOARDS' });
+        if (window.__adobe_cep__) {
+          // CEP: use evalScript to call ExtendScript functions in host.jsx
+          try {
+            window.__adobe_cep__.evalScript('getArtboardsJSON()', function(result) {
+              if (result && result !== 'undefined' && result !== 'EvalScript error.') {
+                try { loadArtboards(JSON.parse(result)); } catch(e) { loadArtboards([]); }
+              } else {
+                loadArtboards([]);
+              }
+            });
+          } catch(ce) {
+            loadArtboards([]);
+          }
+        } else if (window.uxpHost) {
+          window.uxpHost.postMessage({ type: 'GET_ARTBOARDS' });
+        } else {
+          // Development/preview mode - show empty state
+          loadArtboards([]);
+        }
       } catch(e) {
         setStatus('Connect to Illustrator to load artboards');
       }
-      // Check ai-parser availability
       checkAiParser();
     });
+    
+    function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
     
     function loadArtboards(data) {
       const list = document.getElementById('artboard-list');
@@ -377,7 +396,7 @@
       list.innerHTML = artboards.map((ab, i) => `
         <div class="artboard-item">
           <input type="checkbox" id="ab-${i}" checked>
-          <label for="ab-${i}">${ab.name} <span style="color:var(--on-surface-variant)">${ab.width}×${ab.height}</span></label>
+          <label for="ab-${i}">${escapeHtml(ab.name)} <span style="color:var(--on-surface-variant)">${Math.round(ab.width)}×${Math.round(ab.height)}</span></label>
         </div>
       `).join('');
     }
@@ -391,11 +410,45 @@
       setStatus('Exporting...');
       
       try {
-        window.uxpHost?.postMessage({ 
-          type: 'EXPORT', 
-          artboardIndices: selected,
-          options 
-        });
+        if (window.__adobe_cep__) {
+          // CEP panel mode: artboard discovery works via evalScript (host.jsx),
+          // but full export requires the Illustrator DOM API which is only available
+          // in ExtendScript or UXP contexts. Attempt client-side codegen with
+          // data fetched from host.jsx via evalScript.
+          window.__adobe_cep__.evalScript('getArtboardsJSON()', function(abResult) {
+            if (!abResult || abResult === 'EvalScript error.') {
+              document.getElementById('export-btn').disabled = false;
+              setStatus('Could not access Illustrator document');
+              return;
+            }
+            // In CEP, we can show artboards but export needs ExtendScript-side processing
+            // Since full export pipeline is in ExtendScript host.jsx, call it per artboard
+            window.__adobe_cep__.evalScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(selected)) + ')', function(result) {
+              if (!result || result === 'EvalScript error.') {
+                document.getElementById('export-btn').disabled = false;
+                setStatus('Could not extract artboard data');
+                return;
+              }
+              try {
+                const rawData = JSON.parse(result);
+                const exportResult = exportFromRawData(rawData, options);
+                handleExportResult({ payload: { files: exportResult.files, filesArray: Object.entries(exportResult.files).map(([filename, content]) => ({filename, content})), colorMap: exportResult.colorMap, warnings: exportResult.warnings || [] } });
+                document.getElementById('export-btn').disabled = false;
+                setStatus('Exported ' + Object.keys(exportResult.files).length + ' files');
+              } catch(e) {
+                document.getElementById('export-btn').disabled = false;
+                setStatus('Error processing export: ' + e.message);
+              }
+            });
+          });
+        } else {
+          // UXP path: postMessage
+          window.uxpHost?.postMessage({ 
+            type: 'EXPORT', 
+            selectedIndices: selected,
+            options 
+          });
+        }
       } catch(e) {
         setStatus('Error: ' + e.message);
         document.getElementById('export-btn').disabled = false;
@@ -413,6 +466,9 @@
         handleExportResult(msg);
       } else if (msg.type === 'AI_PARSER_STATUS') {
         updateAiParserStatus(msg.available);
+      } else if (msg.type === 'ERROR') {
+        document.getElementById('export-btn').disabled = false;
+        setStatus('Error: ' + (msg.message || 'Unknown error'));
       }
     });
 
@@ -432,9 +488,10 @@
       el.innerHTML = `<span class="dot"></span>Project file analysis: ${available ? 'Available' : 'Not available'}`;
     }
     
-    function handleExportResult(result) {
+    function handleExportResult(msg) {
       document.getElementById('export-btn').disabled = false;
       
+      const result = msg.payload || msg;
       if (result.error) {
         setStatus('Error: ' + result.error);
         return;
@@ -443,15 +500,28 @@
       // Build file map
       generatedFiles = {};
       if (result.files) {
-        result.files.forEach(f => { generatedFiles[f.filename] = f.content; });
+        if (Array.isArray(result.files)) {
+          result.files.forEach(f => { generatedFiles[f.filename] = f.content; });
+        } else {
+          // files is an object map { filename: content, ... }
+          generatedFiles = result.files;
+        }
+      } else if (result.filesArray) {
+        result.filesArray.forEach(f => { generatedFiles[f.filename] = f.content; });
       }
       
       // Show warnings
       const warnings = result.warnings || [];
       if (warnings.length > 0) {
         document.getElementById('warnings-panel').style.display = 'block';
-        document.getElementById('warnings-list').innerHTML = warnings
-          .map(w => `<div class="warn-item">• ${w.id}: ${w.note}</div>`).join('');
+        const wl = document.getElementById('warnings-list');
+        wl.innerHTML = '';
+        for (const w of warnings) {
+          const div = document.createElement('div');
+          div.className = 'warn-item';
+          div.textContent = `• ${w.id}: ${w.note}`;
+          wl.appendChild(div);
+        }
       }
       
       // Build file tree

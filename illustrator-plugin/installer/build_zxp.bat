@@ -26,7 +26,12 @@ set "CERT_COUNTRY=US"
 set "CERT_STATE=NA"
 set "CERT_ORG=egui_expressive"
 set "CERT_NAME=egui_expressive Exporter"
-set "CERT_PASSWORD=egui_expressive_sign"
+if defined ZXP_SIGN_PASSWORD (
+    set "CERT_PASSWORD=%ZXP_SIGN_PASSWORD%"
+) else (
+    set "CERT_PASSWORD=selfsign_temp"
+    echo [WARN] No ZXP_SIGN_PASSWORD env var set - using ephemeral password.
+)
 set "CERT_FILE=%OUTPUT_DIR%\cert.p12"
 
 set "TSA_URL=http://timestamp.digicert.com"
@@ -92,35 +97,40 @@ echo [INFO] Staging extension files...
 copy "%PLUGIN_DIR%\CSXS\manifest.xml" "%STAGE%\CSXS\manifest.xml" >nul
 copy "%PLUGIN_DIR%\index.html" "%STAGE%\index.html" >nul
 copy "%PLUGIN_DIR%\plugin.js" "%STAGE%\plugin.js" >nul
+if exist "%PLUGIN_DIR%\host.jsx" copy "%PLUGIN_DIR%\host.jsx" "%STAGE%\host.jsx" >nul
 copy "%PLUGIN_DIR%\manifest.json" "%STAGE%\manifest.json" >nul
 
-REM .debug file for development
-(
-echo ^<?xml version="1.0" encoding="UTF-8"?^>
-echo ^<ExtensionList^>
-echo   ^<Extension Id="com.egui-expressive.illustrator-exporter.panel"^>
-echo     ^<HostList^>
-echo       ^<Host Name="ILST" Port="8088" /^>
-echo     ^</HostList^>
-echo   ^</Extension^>
-echo ^</ExtensionList^>
-) > "%STAGE%\.debug"
+REM NOTE: .debug file excluded from production builds.
+REM For development, create manually with appropriate Port.
 
 REM ─── Certificate ─────────────────────────────────────────────────────────
 set "CERT_PATH=%CERT_FILE%"
-if not "%~1"=="" set "CERT_PATH=%~1"
+set "USER_PROVIDED_CERT=0"
+if not "%~1"=="" (
+    set "CERT_PATH=%~1"
+    set "USER_PROVIDED_CERT=1"
+)
 
-if not exist "%CERT_PATH%" (
-    echo [WARN] No certificate found at %CERT_PATH%
+if "%USER_PROVIDED_CERT%"=="1" (
+    REM User provided explicit cert path — use as-is
+    if not exist "%CERT_PATH%" (
+        echo [ERROR] Specified certificate not found: %CERT_PATH%
+        goto :error
+    )
+    echo [INFO] Using provided certificate: %CERT_PATH%
+) else (
+    REM Default self-signed cert — regenerate to avoid password mismatch
+    if exist "%CERT_PATH%" (
+        echo [INFO] Removing old self-signed cert to regenerate with current password...
+        del /f /q "%CERT_PATH%"
+    )
     echo [INFO] Generating self-signed certificate...
-    "%SIGNER%" -selfSignedCert %CERT_COUNTRY% %CERT_STATE% %CERT_ORG% "%CERT_NAME%" %CERT_PASSWORD% "%CERT_PATH%"
+    "%SIGNER%" -selfSignedCert %CERT_COUNTRY% %CERT_STATE% %CERT_ORG% "%CERT_NAME%" "%CERT_PASSWORD%" "%CERT_PATH%"
     if errorlevel 1 (
         echo [ERROR] Failed to generate certificate
         goto :error
     )
     echo [INFO] Certificate created: %CERT_PATH%
-) else (
-    echo [INFO] Using existing certificate: %CERT_PATH%
 )
 
 REM ─── Sign and package ────────────────────────────────────────────────────
@@ -128,7 +138,7 @@ echo [INFO] Signing and packaging...
 echo   Input:  %STAGE%
 echo   Output: %OUTPUT_DIR%\%ZXP_NAME%
 
-"%SIGNER%" -sign "%STAGE%" "%OUTPUT_DIR%\%ZXP_NAME%" "%CERT_PATH%" %CERT_PASSWORD% -tsa %TSA_URL%
+"%SIGNER%" -sign "%STAGE%" "%OUTPUT_DIR%\%ZXP_NAME%" "%CERT_PATH%" "%CERT_PASSWORD%" -tsa %TSA_URL%
 if errorlevel 1 (
     echo [ERROR] Failed to sign package
     goto :error
@@ -137,6 +147,12 @@ if errorlevel 1 (
 REM Verify
 echo [INFO] Verifying package...
 "%SIGNER%" -verify "%OUTPUT_DIR%\%ZXP_NAME%" 2>nul
+if errorlevel 1 (
+    echo [WARN] Signature verification failed - package may not install via Creative Cloud
+    echo [WARN] Common with self-signed certificates. Manual install will still work.
+) else (
+    echo [INFO] Signature verified successfully
+)
 
 REM Cleanup
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
