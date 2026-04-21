@@ -7,3 +7,4 @@ SPEC.md
 *.zxp
 tools/ZXPSignCmd.exe
 installer/.rnd
+*.rnd
