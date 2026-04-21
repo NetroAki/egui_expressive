@@ -705,9 +705,11 @@ function generateElementCode(el, indent, colorMap, comps) {
     const textAlign = el.textAlign || el.textStyle?.align || "left";
     const align2 = textAlign === "center" ? "CENTER_TOP" : textAlign === "right" ? "RIGHT_TOP" : "LEFT_TOP";
     if (el.textRuns && el.textRuns.length > 1) {
-      // Multi-run text — emit each run at absolute position (x-advance approximated)
+      // Multi-run text — compute total width, apply alignment offset to starting x, then advance left-to-right
+      const totalWidth = el.textRuns.reduce((sum, r) => sum + (r.text?.length || 0) * (r.style?.size || el.textStyle?.size || 14) * 0.55, 0);
+      const startXAdj = textAlign === "center" ? -totalWidth / 2 : textAlign === "right" ? -totalWidth : 0;
       c += `${pad}{\n`;
-      c += `${pad}    let _text_origin = origin + egui::vec2(${tx}, ${ty});\n`;
+      c += `${pad}    let _text_origin = origin + egui::vec2(${tx} + ${fmtF32(startXAdj)}, ${ty});\n`;
       let xOffset = 0;
       for (const run of el.textRuns) {
         if (!run.text) continue;
@@ -717,8 +719,7 @@ function generateElementCode(el, indent, colorMap, comps) {
         const runColor = run.style?.color;
         const runCn = runColor ? (colorMap.get(`${runColor.r},${runColor.g},${runColor.b}`) || "ON_SURFACE") : "ON_SURFACE";
         const fontFamily = runWt >= 600 ? `egui::FontFamily::Name("Bold".into())` : `egui::FontFamily::Proportional`;
-        c += `${pad}    // weight: ${runWt}\n`;
-        c += `${pad}    painter.text(_text_origin + egui::vec2(${fmtF32(xOffset)}, 0.0), egui::Align2::${align2}, "${runTxt}", egui::FontId::new(${fmtF32(runSz)}, ${fontFamily}), tokens::${runCn});\n`;
+        c += `${pad}    painter.text(_text_origin + egui::vec2(${fmtF32(xOffset)}, 0.0), egui::Align2::LEFT_TOP, "${runTxt}", egui::FontId::new(${fmtF32(runSz)}, ${fontFamily}), tokens::${runCn});\n`;
         xOffset += run.text.length * runSz * 0.55; // approximate advance width
       }
       c += `${pad}}\n`;
