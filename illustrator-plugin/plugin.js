@@ -649,7 +649,7 @@ function generateElementCode(el, indent, colorMap, comps) {
   if (el.symbolName) {
     c += `${pad}{\n`;
     c += `${pad}    // Symbol instance: "${sanitizeComment(el.symbolName)}"\n`;
-    c += `${pad}    let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(Math.round(el.x))}, ${fmtF32(Math.round(el.y))}), egui::vec2(${fmtF32(Math.round(el.w))}, ${fmtF32(Math.round(el.h))}));\n`;
+    c += `${pad}    let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(el.x)}, ${fmtF32(el.y)}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)}));\n`;
     c += `${pad}    painter.rect_stroke(rect, 2u8, egui::Stroke::new(1.0, egui::Color32::from_gray(150)), egui::StrokeKind::Outside);\n`;
     c += `${pad}}\n`;
     return c;
@@ -658,21 +658,21 @@ function generateElementCode(el, indent, colorMap, comps) {
   if (el.type === "circle") {
     const cn = el.fill ? (colorMap.get(`${el.fill.r},${el.fill.g},${el.fill.b}`) || "SURFACE") : "SURFACE";
     const fc = el.opacity < 1.0 ? `with_alpha(tokens::${cn}, ${el.opacity})` : `tokens::${cn}`;
-    const cx = fmtF32(Math.round(el.x + el.w / 2));
-    const cy = fmtF32(Math.round(el.y + el.h / 2));
-    const radius = fmtF32(Math.round(Math.min(el.w, el.h) / 2));
+    const cx = fmtF32(el.x + el.w / 2);
+    const cy = fmtF32(el.y + el.h / 2);
+    const radius = fmtF32(Math.min(el.w, el.h) / 2);
     
     // Shadow before fill
     const shadowFxList = el.effects?.filter(e => e.type === "dropShadow") || [];
     if (shadowFxList.length > 0) {
-      c += `${pad}let _circle_rect = egui::Rect::from_center_size(origin + egui::vec2(${cx}, ${cy}), egui::vec2(${fmtF32(Math.round(el.w))}, ${fmtF32(Math.round(el.h))}));\n`;
+      c += `${pad}let _circle_rect = egui::Rect::from_center_size(origin + egui::vec2(${cx}, ${cy}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)}));\n`;
       for (const shadowFx of shadowFxList) {
         c += `${pad}for s in egui_expressive::box_shadow(_circle_rect, egui::Color32::from_rgba_unmultiplied(${shadowFx.color?.r||0}, ${shadowFx.color?.g||0}, ${shadowFx.color?.b||0}, ${Math.round((shadowFx.color?.a||0.5)*255)}), ${fmtF32(shadowFx.blur||0)}, 0.0, egui_expressive::ShadowOffset::new(${fmtF32(shadowFx.x||0)}, ${fmtF32(shadowFx.y||0)})) { painter.add(s); }\n`;
       }
     }
     if (hasBlur) {
       const bl = el.effects.find(e => e.type === "gaussianBlur");
-      c += `${pad}for s in egui_expressive::soft_shadow(egui::Rect::from_center_size(origin + egui::vec2(${cx}, ${cy}), egui::vec2(${fmtF32(Math.round(el.w))}, ${fmtF32(Math.round(el.h))})), egui::Color32::from_rgba_unmultiplied(0, 0, 0, 60), ${fmtF32(bl?.radius||4)}, 0.0, egui_expressive::ShadowOffset::zero(), egui_expressive::BlurQuality::Medium) { painter.add(s); }\n`;
+      c += `${pad}for s in egui_expressive::soft_shadow(egui::Rect::from_center_size(origin + egui::vec2(${cx}, ${cy}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)})), egui::Color32::from_rgba_unmultiplied(0, 0, 0, 60), ${fmtF32(bl?.radius||4)}, 0.0, egui_expressive::ShadowOffset::zero(), egui_expressive::BlurQuality::Medium) { painter.add(s); }\n`;
     }
     if (el.fill) {
       c += `${pad}painter.circle_filled(origin + egui::vec2(${cx}, ${cy}), ${radius}, ${fc});\n`;
@@ -737,11 +737,11 @@ function generateElementCode(el, indent, colorMap, comps) {
         // Simple line segment
         const p0 = el.pathPoints[0].anchor;
         const p1 = el.pathPoints[el.pathPoints.length - 1].anchor;
-        c += `${pad}painter.line_segment([origin + egui::vec2(${fmtF32(Math.round(p0[0]))}, ${fmtF32(Math.round(p0[1]))}), origin + egui::vec2(${fmtF32(Math.round(p1[0]))}, ${fmtF32(Math.round(p1[1]))})], egui::Stroke::new(${fmtF32(sw)}, tokens::${scn}));\n`;
+        c += `${pad}painter.line_segment([origin + egui::vec2(${fmtF32(p0[0])}, ${fmtF32(p0[1])}), origin + egui::vec2(${fmtF32(p1[0])}, ${fmtF32(p1[1])})], egui::Stroke::new(${fmtF32(sw)}, tokens::${scn}));\n`;
       } else {
         // Polyline — emit as multiple line segments
         c += `${pad}{\n`;
-        c += `${pad}    let path_pts = vec![${el.pathPoints.map(p => `origin + egui::vec2(${fmtF32(Math.round(p.anchor[0]))}, ${fmtF32(Math.round(p.anchor[1]))})`).join(", ")}];\n`;
+        c += `${pad}    let path_pts = vec![${el.pathPoints.map(p => `origin + egui::vec2(${fmtF32(p.anchor[0])}, ${fmtF32(p.anchor[1])})`).join(", ")}];\n`;
         c += `${pad}    for i in 0..path_pts.len()-1 { painter.line_segment([path_pts[i], path_pts[i+1]], egui::Stroke::new(${fmtF32(sw)}, tokens::${scn})); }\n`;
         c += `${pad}}\n`;
       }
@@ -749,7 +749,7 @@ function generateElementCode(el, indent, colorMap, comps) {
       // No path points — fall back to rect stroke on bounding box
       const scn = el.stroke ? (colorMap.get(`${el.stroke.r},${el.stroke.g},${el.stroke.b}`) || "OUTLINE") : "OUTLINE";
       const sw = el.stroke?.width || 1;
-      c += `${pad}painter.line_segment([origin + egui::vec2(${fmtF32(Math.round(el.x))}, ${fmtF32(Math.round(el.y + el.h/2))}), origin + egui::vec2(${fmtF32(Math.round(el.x + el.w))}, ${fmtF32(Math.round(el.y + el.h/2))})], egui::Stroke::new(${fmtF32(sw)}, tokens::${scn}));\n`;
+      c += `${pad}painter.line_segment([origin + egui::vec2(${fmtF32(el.x)}, ${fmtF32(el.y + el.h/2)}), origin + egui::vec2(${fmtF32(el.x + el.w)}, ${fmtF32(el.y + el.h/2)})], egui::Stroke::new(${fmtF32(sw)}, tokens::${scn}));\n`;
     }
     return c;
   }
@@ -764,7 +764,7 @@ function generateElementCode(el, indent, colorMap, comps) {
     // Use actual path geometry if available and non-rectangular
     const isRectangular = !el.pathPoints || el.pathPoints.length < 3;
     if (!isRectangular && el.pathPoints.length > 2) {
-      const pts = el.pathPoints.map(p => `origin + egui::vec2(${fmtF32(Math.round(p.anchor[0]))}, ${fmtF32(Math.round(p.anchor[1]))})`).join(", ");
+      const pts = el.pathPoints.map(p => `origin + egui::vec2(${fmtF32(p.anchor[0])}, ${fmtF32(p.anchor[1])})`).join(", ");
       const ptsVec = `vec![${pts}]`;
       if (el.fill) {
         c += `${pad}painter.add(egui::Shape::convex_polygon(${ptsVec}, ${fc}, egui::Stroke::NONE));\n`;
@@ -854,7 +854,7 @@ function generateElementCode(el, indent, colorMap, comps) {
   if (el.type === "image") {
     const imgPath = el.imagePath ? el.imagePath : `assets/${el.id}.png`;
     c += `${pad}{\n`;
-    c += `${pad}    let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(Math.round(el.x))}, ${fmtF32(Math.round(el.y))}), egui::vec2(${fmtF32(Math.round(el.w))}, ${fmtF32(Math.round(el.h))}));\n`;
+    c += `${pad}    let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(el.x)}, ${fmtF32(el.y)}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)}));\n`;
     c += `${pad}    // Image: "${imgPath}" — load with egui_extras::RetainedImage or ctx.load_texture()\n`;
     c += `${pad}    // painter.image(texture_id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);\n`;
     c += `${pad}    // Fallback until texture is loaded:\n`;
@@ -1223,50 +1223,11 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   if (type === "EXPORT") { try { const ed = event.data; const selectedIndices = ed.selectedIndices || ed.artboardIndices; const selectedTiles = ed.selectedTiles || []; const options = ed.options || {}; const r = await exportArtboards(selectedIndices || [], options, selectedTiles); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
   if (type === "EXPORT_SINGLE") { try { const ed = event.data; const artboardIndex = ed.artboardIndex; const selectedTiles = ed.selectedTiles || []; const options = ed.options || {}; const r = await exportArtboards([artboardIndex], options, selectedTiles); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
     if (type === "EXPAND_AND_EXTRACT") {
-      // Duplicate the artboard, expand all appearances, extract, then delete duplicate
-      // This gives more accurate data at the cost of being destructive to the duplicate
-      // Returns the same format as EXPORT but with expanded elements
       try {
         const { artboardIndex, options } = payload || {};
-        const app = getIllustratorApp();
-        if (!app) throw new Error("Illustrator app not available");
-        const doc = app.activeDocument;
-        if (!doc) throw new Error("No active document");
-
-        // Duplicate artboard for expansion
-        const ab = doc.artboards[artboardIndex];
-        const duplicateName = `__expand_temp_${Date.now()}`;
-        const rect = ab.artboardRect;
-        let duplicate;
-        try {
-          // doc.artboards.add takes a rect array, not a name
-          duplicate = doc.artboards.add(rect);
-        } catch (e) {}
-
-        // Copy items to duplicate artboard
-        const items = [];
-        try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || it.hidden) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
-
-        // Note: item.expand() is not available in ExtendScript.
-        // Appearance expansion requires manual use of Object > Expand Appearance in Illustrator.
-        // We export items as-is from the duplicate artboard.
-
-        // Export from duplicate
+        // Export artboard directly (appearance expansion requires Illustrator's Object > Expand Appearance)
         const r = await exportArtboards([artboardIndex], options || {}, payload.selectedTiles || []);
-
-        // Delete the duplicate artboard
-        try {
-          // doc.artboards.remove takes an index, not an object
-          if (duplicate) {
-            let dupIndex = -1;
-            for (let i = 0; i < doc.artboards.length; i++) {
-              if (doc.artboards[i] === duplicate) { dupIndex = i; break; }
-            }
-            if (dupIndex !== -1) doc.artboards.remove(dupIndex);
-          }
-        } catch(e) {}
-
-        window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } });
+        window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, warnings: r.warnings || [] } });
       } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); }
     }
   });

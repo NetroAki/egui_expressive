@@ -263,22 +263,6 @@ function extractArtboardDataJSON(exportPayloadJSON) {
         function extractEffects(item) {
             var fx = [];
             try {
-                // Try to read opacity as a proxy for effects
-                var opacity = 1.0;
-                try { opacity = (item.opacity !== undefined ? item.opacity / 100.0 : 1.0); } catch(e) {}
-                
-                // Check for drop shadow via note field (some workflows store effect data here)
-                // Primary: check if item has a non-default blending mode
-                var blendMode = "normal";
-                try {
-                    if (item.blendingMode !== undefined) {
-                        var bm = String(item.blendingMode);
-                        if (bm.indexOf("MULTIPLY") !== -1) blendMode = "multiply";
-                        else if (bm.indexOf("SCREEN") !== -1) blendMode = "screen";
-                        else if (bm.indexOf("OVERLAY") !== -1) blendMode = "overlay";
-                    }
-                } catch(e) {}
-                
                 // Try to detect drop shadow via XMPString (CS5+)
                 try {
                     var xmp = item.XMPString;
