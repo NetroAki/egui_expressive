@@ -704,9 +704,13 @@ function generateElementCode(el, indent, colorMap, comps) {
   }
 
   if (el.type === "text" && el.text) {
+    // Use absolute painter position to preserve Illustrator coordinates
+    const tx = fmtF32(el.x), ty = fmtF32(el.y);
     if (el.textRuns && el.textRuns.length > 1) {
-      // Multi-run text — emit as horizontal layout with per-run styling
-      c += `${pad}ui.horizontal(|ui| {\n`;
+      // Multi-run text — emit at absolute position with per-run styling
+      c += `${pad}{\n`;
+      c += `${pad}    let _text_pos = origin + egui::vec2(${tx}, ${ty});\n`;
+      let xOffset = 0;
       for (const run of el.textRuns) {
         if (!run.text) continue;
         const runTxt = run.text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/\0/g, "\\0");
@@ -714,16 +718,16 @@ function generateElementCode(el, indent, colorMap, comps) {
         const runWt = run.style?.weight || el.textStyle?.weight || 400;
         const runColor = run.style?.color;
         const runCn = runColor ? (colorMap.get(`${runColor.r},${runColor.g},${runColor.b}`) || "ON_SURFACE") : "ON_SURFACE";
-        c += `${pad}    ui.label(egui::RichText::new("${runTxt}").size(${fmtF32(runSz)}).color(tokens::${runCn})${runWt >= 600 ? ".strong()" : ""});\n`;
+        c += `${pad}    painter.text(_text_pos + egui::vec2(${fmtF32(xOffset)}, 0.0), egui::Align2::LEFT_TOP, "${runTxt}", egui::FontId::proportional(${fmtF32(runSz)}), tokens::${runCn});\n`;
+        xOffset += run.text.length * runSz * 0.6; // approximate advance
       }
-      c += `${pad}});\n`;
+      c += `${pad}}\n`;
     } else {
-      // Single-style text
+      // Single-style text at absolute position
       const cn = el.fill ? (colorMap.get(`${el.fill.r},${el.fill.g},${el.fill.b}`) || "ON_SURFACE") : "ON_SURFACE";
-      const sz = el.textStyle?.size || 14, wt = el.textStyle?.weight || 400;
-      const td = el.textDecoration === "underline" ? ".underline()" : el.textDecoration === "strikethrough" ? ".strikethrough()" : "";
+      const sz = el.textStyle?.size || 14;
       const txt = el.text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/\0/g, "\\0");
-      c += `${pad}ui.label(egui::RichText::new("${txt}").size(${fmtF32(sz)}).color(tokens::${cn})${wt !== 400 ? ".strong()" : ""}${td});\n`;
+      c += `${pad}painter.text(origin + egui::vec2(${tx}, ${ty}), egui::Align2::LEFT_TOP, "${txt}", egui::FontId::proportional(${fmtF32(sz)}), tokens::${cn});\n`;
     }
     return c;
   }
@@ -865,10 +869,11 @@ function generateElementCode(el, indent, colorMap, comps) {
   }
 
   if (el.type === "group" && el.children?.length > 0) {
-    const isRow = isHorizontal(el.children), gap = 8, lf = isRow ? "hstack" : "vstack", ax = isRow ? "x" : "y";
-    c += `${pad}// Group: ${el.id}\n${pad}${lf}!(ui, gap: ${gap}, {\n`;
+    // Render children at their absolute positions (preserves Illustrator layout)
+    c += `${pad}// Group: ${el.id}\n`;
+    c += `${pad}{\n`;
     for (const ch of el.children) c += generateElementCode(ch, indent + 1, colorMap, comps);
-    c += `${pad}});\n`;
+    c += `${pad}}\n`;
     return c;
   }
 
@@ -970,13 +975,9 @@ function generateSidecar(ab, els, colorMap) {
       pathPoints: el.pathPoints || undefined, pathClosed: el.pathClosed || undefined,
       imagePath: el.imagePath || undefined,
     };
-    // Flatten to single-level children (crate parser only handles one level, no grandchildren)
+    // Preserve full nesting — recursively map children
     if (el.type === "group" && el.children?.length > 0) {
-      result.children = el.children.map(ch => {
-        const child = { ...mapElement(ch, (childDepth !== undefined ? childDepth : el.depth) + 1) };
-        delete child.children; // no grandchildren
-        return child;
-      });
+      result.children = el.children.map(ch => mapElement(ch, (childDepth !== undefined ? childDepth : el.depth) + 1));
     }
     return result;
   };
