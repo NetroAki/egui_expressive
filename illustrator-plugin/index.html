@@ -342,7 +342,6 @@
     const options = { naming: true, gaps: true, sidecar: true, native: true };
     let generatedFiles = {};
     let activeFile = null;
-    let currentTiles = [];
     
     function toggleOption(key) {
       options[key] = !options[key];
@@ -352,10 +351,6 @@
     
     function selectAll(val) {
       document.querySelectorAll('#artboard-list input[type=checkbox]').forEach(cb => cb.checked = val);
-    }
-    
-    function toggleAllTiles(val) {
-      document.querySelectorAll('#tile-list input[type=checkbox]').forEach(cb => cb.checked = val);
     }
 
     function setStatus(msg) {
