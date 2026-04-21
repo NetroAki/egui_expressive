@@ -759,7 +759,7 @@ function generateElementCode(el, indent, colorMap, comps) {
     const fc = el.opacity < 1.0 ? `with_alpha(tokens::${cn}, ${el.opacity})` : `tokens::${cn}`;
     const cr = Math.min(255, Math.round(el.cornerRadius || 0)), rot = el.rotation || 0;
 
-    c += `${pad}let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(Math.round(el.x))}, ${fmtF32(Math.round(el.y))}), egui::vec2(${fmtF32(Math.round(el.w))}, ${fmtF32(Math.round(el.h))}));\n`;
+    c += `${pad}let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(el.x)}, ${fmtF32(el.y)}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)}));\n`;
     
     // Use actual path geometry if available and non-rectangular
     const isRectangular = !el.pathPoints || el.pathPoints.length < 3;
@@ -949,7 +949,7 @@ function sidecarType(t) {
 function generateSidecar(ab, els, colorMap) {
   const mapElement = (el, childDepth) => {
     const result = {
-      id: el.id, type: sidecarType(el.type), x: Math.round(el.x), y: Math.round(el.y), w: Math.round(el.w), h: Math.round(el.h), depth: childDepth !== undefined ? childDepth : el.depth,
+      id: el.id, type: sidecarType(el.type), x: el.x, y: el.y, w: el.w, h: el.h, depth: childDepth !== undefined ? childDepth : el.depth,
       fill: colorToHex(el.fill),
       stroke: colorToHex(el.stroke),
       strokeWidth: el.stroke?.width || undefined,
