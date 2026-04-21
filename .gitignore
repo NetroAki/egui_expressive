@@ -10,3 +10,5 @@ SPEC.md
 tools/ZXPSignCmd.exe
 installer/.rnd
 *.rnd
+fix_plugin.js
+test-results/
