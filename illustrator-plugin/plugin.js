@@ -716,13 +716,18 @@ function generateElementCode(el, indent, colorMap, comps) {
       // For center/right alignment, compute total first-line width and shift the
       // block start so the composed line aligns correctly within the bounding box.
       const defaultSz = el.textStyle?.size || 14;
-      // Estimate total width of first line across all runs (for alignment offset)
+      // Estimate total width of the first line across all runs (for alignment offset).
+      // Stop accumulating as soon as any run contains a newline — subsequent runs
+      // are on line 2+ and should not contribute to the first-line width.
       let firstLineWidth = 0;
+      let firstLineDone = false;
       for (const run of el.textRuns) {
-        if (!run.text) continue;
-        const firstLine = run.text.split("\n")[0];
+        if (!run.text || firstLineDone) continue;
+        const newlineIdx = run.text.indexOf("\n");
+        const firstLinePart = newlineIdx >= 0 ? run.text.slice(0, newlineIdx) : run.text;
         const runSz = run.style?.size || defaultSz;
-        firstLineWidth += firstLine.length * runSz * 0.55;
+        firstLineWidth += firstLinePart.length * runSz * 0.55;
+        if (newlineIdx >= 0) firstLineDone = true;
       }
       // blockStartX: left edge of the composed text block, adjusted for alignment
       const blockStartX = textAlign === "center" ? el.x + (el.w || 0) / 2 - firstLineWidth / 2
