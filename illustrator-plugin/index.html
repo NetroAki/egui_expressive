@@ -367,21 +367,6 @@
       document.querySelectorAll('#tile-list input[type=checkbox]').forEach(cb => cb.checked = val);
     }
 
-    function loadPageTiles(tiles) {
-      const section = document.getElementById('page-tiles-section');
-      const list = document.getElementById('tile-list');
-      if (!tiles || !tiles.length) { section.style.display = 'none'; return; }
-      currentTiles = tiles;
-      section.style.display = 'block';
-      document.getElementById('tile-count').textContent = `(${tiles.length})`;
-      list.innerHTML = tiles.map((t, i) => `
-        <div class="artboard-item">
-          <input type="checkbox" id="tile-${i}" checked>
-          <label for="tile-${i}">${escapeHtml(t.name)} <span style="color:var(--on-surface-variant)">${Math.round(t.width)}×${Math.round(t.height)}</span></label>
-        </div>
-      `).join('');
-    }
-    
     function setStatus(msg) {
       document.getElementById('status-bar').textContent = msg;
     }
@@ -514,7 +499,7 @@
             }
             // In CEP, we can show artboards but export needs ExtendScript-side processing
             // Since full export pipeline is in ExtendScript host.jsx, call it per artboard
-            window.__adobe_cep__.evalScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(exportPayload)) + ')', async function(result) {
+            window.__adobe_cep__.evalScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(exportPayload)) + ')', function(result) {
               if (result === 'EvalScript error.') {
                 document.getElementById('export-btn').disabled = false;
                 setStatus('evalScript error — host.jsx may not be loaded. Check CEP debug mode.');
@@ -531,8 +516,8 @@
                   setStatus('Illustrator error: ' + rawData.error);
                   return;
                 }
-                // CEP path: use exportArtboards for full pipeline including ai-parser enrichment
-                const exportResult = await exportArtboards(selected, options, selectedTiles);
+                // CEP path: use exportFromRawData with ExtendScript-extracted data
+                const exportResult = exportFromRawData(rawData, options);
                 handleExportResult({ payload: { files: exportResult.files, filesArray: Object.entries(exportResult.files).map(([filename, content]) => ({filename, content})), colorMap: exportResult.colorMap, warnings: exportResult.warnings || [] } });
                 document.getElementById('export-btn').disabled = false;
                 setStatus('Exported ' + Object.keys(exportResult.files).length + ' files');

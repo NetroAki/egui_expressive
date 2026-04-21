@@ -51,35 +51,6 @@ function getArtboardsJSON() {
     }
 }
 
-function getDocumentInfoJSON() {
-    try {
-        var appExists = false;
-        try { appExists = (typeof app !== 'undefined'); } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
-        if (!appExists || app.documents.length === 0) return JSON.stringify({ error: "No document" });
-        var doc = app.activeDocument;
-        if (!doc) return JSON.stringify({ error: "No active document" });
-        
-        var info = {
-            name: doc.name,
-            artboardCount: doc.artboards.length,
-            pageCount: 1,
-            hasPageTiles: false,
-            filePath: ""
-        };
-        
-        try { info.filePath = doc.fullName ? doc.fullName.fsName : ""; } catch(e) {}
-        
-        // Page tile detection is done by ai_parser (Rust binary), not by size heuristics.
-        // Return the file path so the panel can invoke ai_parser if needed.
-        info.hasPageTiles = false;
-        info.pageTiles = [];
-        
-        return JSON.stringify(info);
-    } catch (e) {
-        return JSON.stringify({ error: String(e) });
-    }
-}
-
 
 
 

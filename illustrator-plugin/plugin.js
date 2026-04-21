@@ -1,9 +1,6 @@
 // egui_expressive Illustrator Exporter — UXP Plugin for Adobe Illustrator 2021+
 "use strict";
 
-const BLEND_MODES = { NORMAL: "normal", MULTIPLY: "multiply", SCREEN: "screen", OVERLAY: "overlay", DARKEN: "darken", LIGHTEN: "lighten", COLORDODGE: "color_dodge", COLORBURN: "color_burn", HARDLIGHT: "hard_light", SOFTLIGHT: "soft_light", DIFFERENCE: "difference", EXCLUSION: "exclusion", HUE: "hue", SATURATION: "saturation", COLOR: "color", LUMINOSITY: "luminosity" };
-const BLEND_MODES_BY_NUM = { 0: "normal", 1: "multiply", 2: "screen", 3: "overlay", 4: "darken", 5: "lighten", 6: "color_dodge", 7: "color_burn", 8: "hard_light", 9: "soft_light", 10: "difference", 11: "exclusion", 12: "hue", 13: "saturation", 14: "color", 15: "luminosity" };
-
 // ─── Artboard Discovery ───────────────────────────────────────────────────────
 function getIllustratorApp() {
   try {
@@ -1201,7 +1198,7 @@ function exportFromRawData(results, options) {
 
   for (const r of results) {
     const sn = toSnakeName(r.artboard.name), st = toStructName(r.artboard.name);
-    files[`${sn}.rs`] = generateArtboardFile(r.artboard, r.elements, colorMap, st, comps);
+    files[`${sn}.rs`] = generateArtboardFile(r.artboard, r.elements, colorMap, st, comps, options);
     if (options?.sidecar || options?.includeSidecar) files[`${sn}.json`] = generateSidecar(r.artboard, r.elements, colorMap);
   }
 
