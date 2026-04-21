@@ -813,6 +813,11 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
         errors: Vec::new(),
     };
 
+    static AI_ARTBOARD_RECT_RE: OnceLock<Regex> = OnceLock::new();
+    let ai_artboard_rect_re = AI_ARTBOARD_RECT_RE.get_or_init(|| {
+        Regex::new(r"%%AI_ArtboardRect\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)").unwrap()
+    });
+
     for (object_id, object) in doc.objects.iter() {
         let content = if let Ok(stream) = object.as_stream() {
             match stream.decompressed_content() {
@@ -901,11 +906,7 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
 
         // Fallback: %%AI_ArtboardRect x1 y1 x2 y2
         if result.artboards.is_empty() {
-            static AI_ARTBOARD_RECT_RE: OnceLock<Regex> = OnceLock::new();
-            let re = AI_ARTBOARD_RECT_RE.get_or_init(|| {
-                Regex::new(r"%%AI_ArtboardRect\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)").unwrap()
-            });
-            for caps in re.captures_iter(content_str) {
+            for caps in ai_artboard_rect_re.captures_iter(content_str) {
                 if let (Some(x1), Some(y1), Some(x2), Some(y2)) = (caps.get(1), caps.get(2), caps.get(3), caps.get(4)) {
                     let x1: f64 = x1.as_str().parse().unwrap_or(0.0);
                     let y1: f64 = y1.as_str().parse().unwrap_or(0.0);
