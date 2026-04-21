@@ -8,8 +8,8 @@ echo ""
 
 UPIA="/Library/Application Support/Adobe/Adobe Desktop Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent.app/Contents/MacOS/UnifiedPluginInstallerAgent"
 
-ZXP_FILE=$(ls "$(dirname "$0")/../dist/"*.zxp 2>/dev/null | head -1)
-if [ -z "$ZXP_FILE" ]; then
+ZXP_FILE="$(dirname "$0")/../dist/egui_expressive_export-1.0.0.zxp"
+if [ ! -f "$ZXP_FILE" ]; then
   echo "ERROR: No .zxp found in dist/. Run installer/build_zxp.sh first."
   exit 1
 fi

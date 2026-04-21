@@ -7,7 +7,7 @@
 
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 OutFile "egui_expressive_plugin_installer.exe"
-InstallDir "$APPDATA\Adobe\CEP\extensions\${PLUGIN_FOLDER_NAME}"
+InstallDir "$APPDATA\Adobe\CEP\extensions\com.egui-expressive.illustrator-exporter"
 RequestExecutionLevel user
 
 Page directory
@@ -27,7 +27,7 @@ Section "Plugin Files"
     ; Write registry entry
     WriteRegStr HKCU "Software\egui_expressive\IllustratorPlugin" "InstallDir" "$INSTDIR"
 
-    MessageBox MB_OK "Plugin installed successfully!$\n$\nPlease restart Adobe Illustrator and enable the plugin in:$\nPlugins > Plugin Manager"
+    MessageBox MB_OK "Plugin installed successfully!$\n$\nPlease restart Adobe Illustrator and enable the plugin in:$\nWindow → Extensions → egui_expressive Export"
 SectionEnd
 
 Section "Uninstall"

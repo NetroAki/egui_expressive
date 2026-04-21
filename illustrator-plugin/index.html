@@ -272,13 +272,14 @@
     }
     .empty-state .icon { font-size: 24px; }
   </style>
+  <!-- JSZip is loaded from CDN for online use; CEP panels without internet will fall back to individual file downloads -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
-  <div class="header">
+  <header class="header" role="banner">
     <h1>egui_expressive Export</h1>
     <p>Illustrator → Rust scaffold generator</p>
-  </div>
+  </header>
   
   <div class="artboard-section">
     <div class="section-label">Artboards <span id="artboard-count"></span></div>
@@ -303,19 +304,19 @@
   <div class="options-section">
     <div class="option-row">
       <label>Use naming conventions</label>
-      <div class="toggle on" id="toggle-naming" role="button" tabindex="0" onclick="toggleOption('naming')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('naming')}"></div>
+      <div class="toggle on" id="toggle-naming" role="button" tabindex="0" aria-label="Use naming conventions" onclick="toggleOption('naming')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('naming')}"></div>
     </div>
     <div class="option-row">
       <label>Infer gaps</label>
-      <div class="toggle on" id="toggle-gaps" role="button" tabindex="0" onclick="toggleOption('gaps')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('gaps')}"></div>
+      <div class="toggle on" id="toggle-gaps" role="button" tabindex="0" aria-label="Infer gaps between elements" onclick="toggleOption('gaps')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('gaps')}"></div>
     </div>
     <div class="option-row">
       <label>JSON sidecar</label>
-      <div class="toggle on" id="toggle-sidecar" role="button" tabindex="0" onclick="toggleOption('sidecar')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('sidecar')}"></div>
+      <div class="toggle on" id="toggle-sidecar" role="button" tabindex="0" aria-label="Include sidecar JSON" onclick="toggleOption('sidecar')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('sidecar')}"></div>
     </div>
     <div class="option-row">
       <label>Library-native emit</label>
-      <div class="toggle on" id="toggle-native" role="button" tabindex="0" onclick="toggleOption('native')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('native')}"></div>
+      <div class="toggle on" id="toggle-native" role="button" tabindex="0" aria-label="Use library-native emit" onclick="toggleOption('native')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('native')}"></div>
     </div>
   </div>
   
@@ -336,13 +337,13 @@
     </div>
   </main>
   
-  <div class="warnings-panel" id="warnings-panel" style="display:none;">
+  <section class="warnings-panel" id="warnings-panel" style="display:none;" aria-label="Warnings">
     <div class="warn-title">⚠️ Elements requiring manual attention</div>
     <div id="warnings-list"></div>
-  </div>
+  </section>
   
-  <div class="status-bar" id="status-bar">Ready</div>
-  <div class="ai-parser-status" id="ai-parser-status" title="Project file analysis via ai-parser"></div>
+  <section class="status-bar" id="status-bar" aria-label="Status">Ready</section>
+  <section class="ai-parser-status" id="ai-parser-status" title="Project file analysis via ai-parser" aria-label="Parser"></section>
 
   <!-- Plugin codegen library loaded for both UXP and CEP panel contexts -->
   <script src="plugin.js"></script>
@@ -388,26 +389,6 @@
     function showArtboardError(msg) {
       const list = document.getElementById('artboard-list');
       list.innerHTML = `<div style="color:var(--error);font-size:11px;padding:4px 0;">${escapeHtml(msg)}</div>`;
-    }
-    
-    function checkPageTiles() {
-      if (window.__adobe_cep__) {
-        window.__adobe_cep__.evalScript('getDocumentInfoJSON()', function(result) {
-          try {
-            var info = JSON.parse(result);
-            if (info && info.pageTiles && info.pageTiles.length > 0) {
-              loadPageTiles(info.pageTiles);
-              showArtboardError('Document uses page tiles instead of artboards.');
-            } else {
-              showArtboardError('No artboards or page tiles found.');
-            }
-          } catch(e) {
-            showArtboardError('Error parsing document info: ' + e.message);
-          }
-        });
-      } else {
-        showArtboardError('No artboards. The document may have page tiles — use File → Export via ai-parser for multi-page layouts.');
-      }
     }
     
     // Request artboard list on load
@@ -533,7 +514,7 @@
             }
             // In CEP, we can show artboards but export needs ExtendScript-side processing
             // Since full export pipeline is in ExtendScript host.jsx, call it per artboard
-            window.__adobe_cep__.evalScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(exportPayload)) + ')', function(result) {
+            window.__adobe_cep__.evalScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(exportPayload)) + ')', async function(result) {
               if (result === 'EvalScript error.') {
                 document.getElementById('export-btn').disabled = false;
                 setStatus('evalScript error — host.jsx may not be loaded. Check CEP debug mode.');
@@ -550,7 +531,8 @@
                   setStatus('Illustrator error: ' + rawData.error);
                   return;
                 }
-                const exportResult = exportFromRawData(rawData, options);
+                // CEP path: use exportArtboards for full pipeline including ai-parser enrichment
+                const exportResult = await exportArtboards(selected, options, selectedTiles);
                 handleExportResult({ payload: { files: exportResult.files, filesArray: Object.entries(exportResult.files).map(([filename, content]) => ({filename, content})), colorMap: exportResult.colorMap, warnings: exportResult.warnings || [] } });
                 document.getElementById('export-btn').disabled = false;
                 setStatus('Exported ' + Object.keys(exportResult.files).length + ' files');

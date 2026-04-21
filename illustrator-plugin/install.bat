@@ -8,8 +8,8 @@ echo.
 
 set UPIA="C:\Program Files\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
 
-for %%f in ("%~dp0..\dist\*.zxp") do set ZXP_FILE=%%f
-if not defined ZXP_FILE (
+set "ZXP_FILE=%~dp0..\dist\egui_expressive_export-1.0.0.zxp"
+if not exist "%ZXP_FILE%" (
   echo ERROR: No .zxp found in dist\. Run installer\build_zxp.bat first.
   exit /b 1
 )

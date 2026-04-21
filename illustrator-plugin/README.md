@@ -43,4 +43,4 @@ Name your Illustrator layers to get better code output:
 
 ## Output format
 
-Each artboard generates a `draw_<name>(ui: &mut egui::Ui)` function. Add it to your project and call it from your egui update loop.
+Each artboard generates a `draw_<name>(ui: &mut Ui, state: &mut <Name>State) -> Option<<Name>Action>` function. Add it to your project and call it from your egui update loop.
