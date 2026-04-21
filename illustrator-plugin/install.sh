@@ -14,6 +14,15 @@ if [ ! -f "$ZXP_FILE" ]; then
   exit 1
 fi
 
+echo "Removing any previous version..."
+if [ -f "$UPIA" ]; then
+    "$UPIA" /remove "com.egui-expressive.illustrator-exporter" >/dev/null 2>&1 || true
+    echo "Previous version removed (if present)."
+else
+    rm -rf "$HOME/Library/Application Support/Adobe/CEP/extensions/com.egui-expressive.illustrator-exporter"
+    echo "Previous version removed (if present)."
+fi
+
 if [ -f "$UPIA" ]; then
     echo "Found UPIA. Installing ZXP..."
     "$UPIA" /install "$ZXP_FILE"

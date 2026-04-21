@@ -14,6 +14,15 @@ if not exist "%ZXP_FILE%" (
   exit /b 1
 )
 
+echo Removing any previous version...
+if exist %UPIA% (
+    %UPIA% /remove "com.egui-expressive.illustrator-exporter" >nul 2>&1
+    echo Previous version removed (if present).
+) else (
+    rmdir /s /q "%LOCALAPPDATA%\Adobe\CEP\extensions\com.egui-expressive.illustrator-exporter" >nul 2>&1
+    echo Previous version removed (if present).
+)
+
 if exist %UPIA% (
     echo Found UPIA. Installing ZXP...
     %UPIA% /install "%ZXP_FILE%"
