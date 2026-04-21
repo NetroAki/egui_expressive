@@ -1,6 +1,7 @@
 # egui_expressive Illustrator Exporter
 
 This is a **CEP extension** (not UXP) that exports Illustrator artboards to egui Rust code. It installs as a `.zxp` file.
+This plugin uses CEP (Common Extensibility Platform). The `manifest.json` file is included for reference but the active runtime is CEP via the `.zxp` installer.
 
 ## Installation
 

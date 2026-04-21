@@ -921,14 +921,6 @@ function generateElementCode(el, indent, colorMap, comps) {
   return `${pad}// ${el.id} (${el.type})\n`;
 }
 
-function isHorizontal(children) {
-  if (children.length < 2) return true;
-  let xs = 0, ys = 0;
-  const s = [...children].sort((a, b) => a.x - b.x);
-  for (let i = 1; i < s.length; i++) { xs += Math.abs(s[i].x - s[i-1].x); ys += Math.abs(s[i].y - s[i-1].y); }
-  return xs > ys;
-}
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function fmtF32(n) { const v = Number(n) || 0; return Number.isInteger(v) ? v + ".0" : String(v); }
 function toSnakeName(n) {
@@ -943,7 +935,6 @@ function toStructName(n) {
   if (/^[0-9]/.test(s)) s = "S" + s;
   return s;
 }
-function toPascalCase(s) { return s.split(/[_\- ]+/).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(""); }
 function toActionName(t) { const RUST_KEYWORDS = new Set(["Self","Some","None","Ok","Err","True","False","Box","Vec","String","Option","Result","Async","Await","Dyn","Move","Impl","Where","Type"]); let s = (t || "Action").trim().replace(/[^a-zA-Z0-9]+/g, "_").split("_").map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(""); if (/^[0-9]/.test(s)) s = "A" + s; if (RUST_KEYWORDS.has(s)) s = s + "Action"; return s || "Action"; }
 function sanitize(n) {
   const RUST_KEYWORDS = new Set(["as","break","const","continue","crate","else","enum","extern","false","fn","for","if","impl","in","let","loop","match","mod","move","mut","pub","ref","return","self","static","struct","super","trait","true","type","unsafe","use","where","while","async","await","dyn"]);
@@ -1054,11 +1045,9 @@ async function runAiParser(filePath) {
                 const { shell } = require('uxp');
                 // Try to execute via shell.openExternal would require URL scheme
                 // Instead, just log and return null
-                console.warn('ai-parser not available via execSync:', e.message);
                 aiParserAvailable = false;
                 return null;
             } catch (e2) {
-                console.warn('ai-parser not available:', e.message);
                 aiParserAvailable = false;
                 return null;
             }
@@ -1067,7 +1056,6 @@ async function runAiParser(filePath) {
         aiParserAvailable = true;
         return JSON.parse(output);
     } catch (e) {
-        console.warn('ai-parser execution failed:', e.message);
         aiParserAvailable = false;
         return null;
     }
@@ -1106,7 +1094,6 @@ async function extractFromProjectFile(artboardsData) {
 
         const docPath = doc.fullName?.fsName || (doc.path && doc.name ? doc.path + '/' + doc.name : null);
         if (!docPath) {
-            console.warn('Could not get document path for ai-parser');
             return artboardsData;
         }
 
@@ -1120,14 +1107,8 @@ async function extractFromProjectFile(artboardsData) {
 
         return artboardsData;
     } catch (e) {
-        console.warn('extractFromProjectFile failed:', e.message);
         return artboardsData;
     }
-}
-
-// Expose availability check for UI
-function isAiParserAvailable() {
-    return aiParserAvailable;
 }
 
 function isTopLevelItem(item) {
@@ -1173,7 +1154,6 @@ async function exportArtboards(selectedIndices, options, selectedTiles) {
     await extractFromProjectFile(results);
   } catch (e) {
     // Gracefully degrade if ai-parser integration fails
-    console.warn('ai-parser enrichment skipped:', e.message);
   }
 
   // Re-collect all elements after potential enrichment
@@ -1283,60 +1263,4 @@ function getArtboardsJSON() {
   try { return JSON.stringify(getArtboards()); } catch(e) { return "[]"; }
 }
 
-function exportSelected(exportPayloadJSON, optionsJSON) {
-  try {
-    const payload = JSON.parse(exportPayloadJSON || "{}");
-    let indices = [];
-    let tiles = [];
-    if (Array.isArray(payload)) {
-      indices = payload;
-    } else {
-      indices = payload.selected || [];
-      tiles = payload.selectedTiles || [];
-    }
-    const opts = JSON.parse(optionsJSON || "{}");
-    const result = exportArtboardsSync(indices, opts, tiles);
-    return JSON.stringify(result);
-  } catch(e) { return JSON.stringify({ error: e.message }); }
-}
 
-function exportArtboardsSync(selectedIndices, options, selectedTiles) {
-  const app = getIllustratorApp();
-  if (!app) return { error: "Illustrator app not available" };
-  const doc = app.activeDocument;
-  if (!doc) return { error: "No active document" };
-  const allEls = [], results = [];
-  for (const idx of selectedIndices) {
-    const ab = doc.artboards[idx], rect = ab.artboardRect;
-    const abInfo = { name: ab.name, width: Math.abs(rect[2] - rect[0]), height: Math.abs(rect[3] - rect[1]), x: rect[0], y: rect[1] };
-    const items = [];
-    try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || it.hidden) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
-    const els = extractElements(items, rect);
-    allEls.push(...els);
-    results.push({ artboard: abInfo, elements: els });
-  }
-  if (selectedTiles && selectedTiles.length > 0) {
-    for (const tile of selectedTiles) {
-      const rect = [tile.x, tile.y, tile.x + tile.width, tile.y - tile.height];
-      const abInfo = { name: tile.name, width: tile.width, height: tile.height, x: tile.x, y: tile.y };
-      const items = [];
-      try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || it.hidden) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
-      const els = extractElements(items, rect);
-      allEls.push(...els);
-      results.push({ artboard: abInfo, elements: els });
-    }
-  }
-  const { colorMap, constants } = extractAndNameColors(allEls);
-  const comps = findReusableComponents(allEls);
-  const files = {};
-  files["mod.rs"] = generateModFile(results);
-  files["tokens.rs"] = generateTokensFile(constants);
-  files["state.rs"] = generateStateFile(results);
-  files["components.rs"] = generateComponentsFile(comps, colorMap);
-  for (const r of results) {
-    const sn = toSnakeName(r.artboard.name), st = toStructName(r.artboard.name);
-    files[`${sn}.rs`] = generateArtboardFile(r.artboard, r.elements, colorMap, st, comps);
-    if (options?.sidecar || options?.includeSidecar) files[`${sn}.json`] = generateSidecar(r.artboard, r.elements, colorMap);
-  }
-  return { files, colorMap: Object.fromEntries(colorMap) };
-}

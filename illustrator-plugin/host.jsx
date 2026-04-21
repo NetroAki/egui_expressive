@@ -21,7 +21,7 @@ function getDiagnosticsJSON() {
                 result.estimatedPageCount = 1;
             }
         }
-    } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
+    } catch(e) { return JSON.stringify({ error: String(e) }); }
     return JSON.stringify(result);
 }
 
@@ -47,7 +47,7 @@ function getArtboardsJSON() {
         }
         return JSON.stringify(boards);
     } catch (e) {
-        return JSON.stringify({ error: e.message || String(e) });
+        return JSON.stringify({ error: String(e) });
     }
 }
 
@@ -76,55 +76,12 @@ function getDocumentInfoJSON() {
         
         return JSON.stringify(info);
     } catch (e) {
-        return JSON.stringify({ error: e.message || String(e) });
+        return JSON.stringify({ error: String(e) });
     }
 }
 
-function getPageItemsJSON(artboardIndex) {
-    try {
-        var appExists = false;
-        try { appExists = (typeof app !== 'undefined'); } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
-        if (!appExists || app.documents.length === 0) return "[]";
-        var doc = app.activeDocument;
-        if (!doc) return "[]";
-        var ab = doc.artboards[artboardIndex];
-        if (!ab) return "[]";
-        var rect = ab.artboardRect;
-        var items = [];
-        for (var i = 0; i < doc.pageItems.length; i++) {
-            var it = doc.pageItems[i];
-            try {
-                if (it.locked || it.hidden) continue;
-                var b = it.geometricBounds;
-                // Overlap check
-                if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1]) {
-                    items.push({
-                        typename: it.typename,
-                        name: it.name || ("item_" + i),
-                        bounds: [b[0] - rect[0], rect[1] - b[1], Math.abs(b[2] - b[0]), Math.abs(b[1] - b[3])],
-                        visible: !it.hidden,
-                        locked: it.locked
-                    });
-                }
-            } catch (e) {}
-        }
-        return JSON.stringify(items);
-    } catch (e) {
-        return JSON.stringify({ error: e.message || String(e) });
-    }
-}
 
-function getDocumentName() {
-    try {
-        var appExists = false;
-        try { appExists = (typeof app !== 'undefined'); } catch(e) { return ""; }
-        if (!appExists || app.documents.length === 0) return "";
-        var doc = app.activeDocument;
-        return doc ? doc.name : "";
-    } catch (e) {
-        return "";
-    }
-}
+
 
 function extractArtboardDataJSON(exportPayloadJSON) {
     try {
@@ -449,6 +406,6 @@ function extractArtboardDataJSON(exportPayloadJSON) {
         
         return JSON.stringify(results);
     } catch (e) {
-        return JSON.stringify({ error: e.message || String(e) });
+        return JSON.stringify({ error: String(e) });
     }
 }

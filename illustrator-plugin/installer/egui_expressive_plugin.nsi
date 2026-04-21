@@ -7,15 +7,17 @@
 
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 OutFile "egui_expressive_plugin_installer.exe"
-InstallDir "$APPDATA\Adobe\UXP\PluginsStorage\ILST\28\develop\${PLUGIN_FOLDER_NAME}"
+InstallDir "$APPDATA\Adobe\CEP\extensions\${PLUGIN_FOLDER_NAME}"
 RequestExecutionLevel user
 
 Page directory
 Page instfiles
 
 Section "Plugin Files"
+    SetOutPath "$INSTDIR\CSXS"
+    File "..\CSXS\manifest.xml"
     SetOutPath "$INSTDIR"
-    File "..\manifest.json"
+    File "..\host.jsx"
     File "..\plugin.js"
     File "..\index.html"
 
@@ -29,7 +31,9 @@ Section "Plugin Files"
 SectionEnd
 
 Section "Uninstall"
-    Delete "$INSTDIR\manifest.json"
+    Delete "$INSTDIR\CSXS\manifest.xml"
+    RMDir "$INSTDIR\CSXS"
+    Delete "$INSTDIR\host.jsx"
     Delete "$INSTDIR\plugin.js"
     Delete "$INSTDIR\index.html"
     Delete "$INSTDIR\uninstall.exe"

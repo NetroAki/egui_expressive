@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>egui_expressive Export</title>
@@ -303,25 +303,25 @@
   <div class="options-section">
     <div class="option-row">
       <label>Use naming conventions</label>
-      <div class="toggle on" id="toggle-naming" onclick="toggleOption('naming')"></div>
+      <div class="toggle on" id="toggle-naming" role="button" tabindex="0" onclick="toggleOption('naming')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('naming')}"></div>
     </div>
     <div class="option-row">
       <label>Infer gaps</label>
-      <div class="toggle on" id="toggle-gaps" onclick="toggleOption('gaps')"></div>
+      <div class="toggle on" id="toggle-gaps" role="button" tabindex="0" onclick="toggleOption('gaps')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('gaps')}"></div>
     </div>
     <div class="option-row">
       <label>JSON sidecar</label>
-      <div class="toggle on" id="toggle-sidecar" onclick="toggleOption('sidecar')"></div>
+      <div class="toggle on" id="toggle-sidecar" role="button" tabindex="0" onclick="toggleOption('sidecar')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('sidecar')}"></div>
     </div>
     <div class="option-row">
       <label>Library-native emit</label>
-      <div class="toggle on" id="toggle-native" onclick="toggleOption('native')"></div>
+      <div class="toggle on" id="toggle-native" role="button" tabindex="0" onclick="toggleOption('native')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('native')}"></div>
     </div>
   </div>
   
   <button class="export-btn" id="export-btn" onclick="doExport()">Export Selected Artboards</button>
   
-  <div class="content-area">
+  <main class="content-area">
     <div class="file-tree" id="file-tree">
       <div class="empty-state">
         <div class="icon">📁</div>
@@ -334,7 +334,7 @@
         <div>Select a file to preview</div>
       </div>
     </div>
-  </div>
+  </main>
   
   <div class="warnings-panel" id="warnings-panel" style="display:none;">
     <div class="warn-title">⚠️ Elements requiring manual attention</div>
@@ -586,6 +586,7 @@
           setStatus('No artboards found');
         } else {
           loadArtboards(msg.artboards);
+          setStatus('Artboards loaded');
         }
       } else if (msg.type === 'EXPORT_RESULT') {
         handleExportResult(msg);
@@ -605,7 +606,7 @@
           window.postMessage({ type: 'CHECK_AI_PARSER' }, '*');
         }
       } catch(e) {
-        // Not in UXP context or host not available
+        setStatus('ai-parser check failed: ' + e.message);
       }
     }
 
