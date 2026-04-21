@@ -15,9 +15,8 @@ static ARTBOARD_NAME_RE: OnceLock<Regex> = OnceLock::new();
 
 fn artboard_re() -> &'static Regex {
     ARTBOARD_RE.get_or_init(|| {
-        Regex::new(
-            r"%AI9_Artboard\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)"
-        ).expect("valid artboard regex")
+        Regex::new(r"%AI9_Artboard\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)")
+            .expect("valid artboard regex")
     })
 }
 
@@ -27,7 +26,7 @@ fn artboard_name_re() -> &'static Regex {
     })
 }
 
-use egui_expressive::codegen::{generate_artboard_file, LayoutElement, ElementType};
+use egui_expressive::codegen::{generate_artboard_file, ElementType, LayoutElement};
 
 /// RGBA Color representation
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -714,8 +713,14 @@ fn detect_corner_radius(points: &[PathPoint]) -> f64 {
     }
     let mean = radii.iter().sum::<f64>() / radii.len() as f64;
     // Check consistency: all radii within 5% of mean
-    let consistent = radii.iter().all(|&r| (r - mean).abs() / mean.max(0.001) < 0.05);
-    if consistent { mean } else { 0.0 }
+    let consistent = radii
+        .iter()
+        .all(|&r| (r - mean).abs() / mean.max(0.001) < 0.05);
+    if consistent {
+        mean
+    } else {
+        0.0
+    }
 }
 
 /// Parse AIPrivateData stream content
@@ -815,7 +820,10 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
 
     static AI_ARTBOARD_RECT_RE: OnceLock<Regex> = OnceLock::new();
     let ai_artboard_rect_re = AI_ARTBOARD_RECT_RE.get_or_init(|| {
-        Regex::new(r"%%AI_ArtboardRect\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)").unwrap()
+        Regex::new(
+            r"%%AI_ArtboardRect\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)",
+        )
+        .unwrap()
     });
 
     for (object_id, object) in doc.objects.iter() {
@@ -887,7 +895,8 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
                         let y1: f64 = y1.as_str().parse().unwrap_or(0.0);
                         let x2: f64 = x2.as_str().parse().unwrap_or(0.0);
                         let y2: f64 = y2.as_str().parse().unwrap_or(0.0);
-                        let name = names.next()
+                        let name = names
+                            .next()
                             .filter(|n| !n.is_empty())
                             .unwrap_or_else(|| format!("Artboard_{}", result.artboards.len() + 1));
                         if !result.artboards.iter().any(|a: &Artboard| a.name == name) {
@@ -907,14 +916,22 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
         // Fallback: %%AI_ArtboardRect x1 y1 x2 y2
         if result.artboards.is_empty() {
             for caps in ai_artboard_rect_re.captures_iter(content_str) {
-                if let (Some(x1), Some(y1), Some(x2), Some(y2)) = (caps.get(1), caps.get(2), caps.get(3), caps.get(4)) {
+                if let (Some(x1), Some(y1), Some(x2), Some(y2)) =
+                    (caps.get(1), caps.get(2), caps.get(3), caps.get(4))
+                {
                     let x1: f64 = x1.as_str().parse().unwrap_or(0.0);
                     let y1: f64 = y1.as_str().parse().unwrap_or(0.0);
                     let x2: f64 = x2.as_str().parse().unwrap_or(0.0);
                     let y2: f64 = y2.as_str().parse().unwrap_or(0.0);
                     let name = format!("Artboard_{}", result.artboards.len() + 1);
                     if !result.artboards.iter().any(|a: &Artboard| a.name == name) {
-                        result.artboards.push(Artboard { name, x: x1, y: y1, width: (x2 - x1).abs(), height: (y2 - y1).abs() });
+                        result.artboards.push(Artboard {
+                            name,
+                            x: x1,
+                            y: y1,
+                            width: (x2 - x1).abs(),
+                            height: (y2 - y1).abs(),
+                        });
                     }
                 }
             }
@@ -937,12 +954,20 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
                 Regex::new(r"%%(?:HiRes)?BoundingBox:\s*(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)").unwrap()
             });
             if let Some(caps) = re.captures(&full_content) {
-                if let (Some(x1), Some(y1), Some(x2), Some(y2)) = (caps.get(1), caps.get(2), caps.get(3), caps.get(4)) {
+                if let (Some(x1), Some(y1), Some(x2), Some(y2)) =
+                    (caps.get(1), caps.get(2), caps.get(3), caps.get(4))
+                {
                     let x1: f64 = x1.as_str().parse().unwrap_or(0.0);
                     let y1: f64 = y1.as_str().parse().unwrap_or(0.0);
                     let x2: f64 = x2.as_str().parse().unwrap_or(0.0);
                     let y2: f64 = y2.as_str().parse().unwrap_or(0.0);
-                    result.artboards.push(Artboard { name: "Artboard_1".to_string(), x: x1, y: y1, width: (x2 - x1).abs(), height: (y2 - y1).abs() });
+                    result.artboards.push(Artboard {
+                        name: "Artboard_1".to_string(),
+                        x: x1,
+                        y: y1,
+                        width: (x2 - x1).abs(),
+                        height: (y2 - y1).abs(),
+                    });
                 }
             }
         }
@@ -954,10 +979,15 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
             let full_content = String::from_utf8_lossy(&bytes);
             static ARTBOX_RE: OnceLock<Regex> = OnceLock::new();
             let re = ARTBOX_RE.get_or_init(|| {
-                Regex::new(r"ArtBox\[(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\]").unwrap()
+                Regex::new(
+                    r"ArtBox\[(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\]",
+                )
+                .unwrap()
             });
             for (i, caps) in re.captures_iter(&full_content).enumerate() {
-                if let (Some(x1), Some(y1), Some(x2), Some(y2)) = (caps.get(1), caps.get(2), caps.get(3), caps.get(4)) {
+                if let (Some(x1), Some(y1), Some(x2), Some(y2)) =
+                    (caps.get(1), caps.get(2), caps.get(3), caps.get(4))
+                {
                     let x1: f64 = x1.as_str().parse().unwrap_or(0.0);
                     let y1: f64 = y1.as_str().parse().unwrap_or(0.0);
                     let x2: f64 = x2.as_str().parse().unwrap_or(0.0);
@@ -983,7 +1013,9 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
                 Regex::new(r"%AI3_TileBox:\s*(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)").unwrap()
             });
             if let Some(caps) = re.captures(&full_content) {
-                if let (Some(x1), Some(y1), Some(x2), Some(y2)) = (caps.get(1), caps.get(2), caps.get(3), caps.get(4)) {
+                if let (Some(x1), Some(y1), Some(x2), Some(y2)) =
+                    (caps.get(1), caps.get(2), caps.get(3), caps.get(4))
+                {
                     let x1: f64 = x1.as_str().parse().unwrap_or(0.0);
                     let y1: f64 = y1.as_str().parse().unwrap_or(0.0);
                     let x2: f64 = x2.as_str().parse().unwrap_or(0.0);
@@ -1054,21 +1086,45 @@ fn element_to_layout(elem: &Element, idx: usize) -> LayoutElement {
         elem.id.clone()
     };
     // Use fill color from appearance_fills if available
-    let fill_color = elem.appearance_fills.first().map(|c| {
-        egui::Color32::from_rgba_unmultiplied(c.r, c.g, c.b, c.a)
-    }).unwrap_or(egui::Color32::TRANSPARENT);
-    let stroke_color = elem.appearance_strokes.first().map(|s| {
-        egui::Color32::from_rgba_unmultiplied(s.r, s.g, s.b, s.a)
-    }).unwrap_or(egui::Color32::TRANSPARENT);
-    let stroke_width = elem.appearance_strokes.first().map(|s| s.width as f32).unwrap_or(0.0);
+    let fill_color = elem
+        .appearance_fills
+        .first()
+        .map(|c| egui::Color32::from_rgba_unmultiplied(c.r, c.g, c.b, c.a))
+        .unwrap_or(egui::Color32::TRANSPARENT);
+    let stroke_color = elem
+        .appearance_strokes
+        .first()
+        .map(|s| egui::Color32::from_rgba_unmultiplied(s.r, s.g, s.b, s.a))
+        .unwrap_or(egui::Color32::TRANSPARENT);
+    let stroke_width = elem
+        .appearance_strokes
+        .first()
+        .map(|s| s.width as f32)
+        .unwrap_or(0.0);
 
     // Derive position and size from path_points bounding box when available,
     // otherwise fall back to CTM translate_x/translate_y with a default size.
     let (x, y, w, h) = if !elem.path_points.is_empty() {
-        let min_x = elem.path_points.iter().map(|p| p.anchor[0]).fold(f64::INFINITY, f64::min);
-        let min_y = elem.path_points.iter().map(|p| p.anchor[1]).fold(f64::INFINITY, f64::min);
-        let max_x = elem.path_points.iter().map(|p| p.anchor[0]).fold(f64::NEG_INFINITY, f64::max);
-        let max_y = elem.path_points.iter().map(|p| p.anchor[1]).fold(f64::NEG_INFINITY, f64::max);
+        let min_x = elem
+            .path_points
+            .iter()
+            .map(|p| p.anchor[0])
+            .fold(f64::INFINITY, f64::min);
+        let min_y = elem
+            .path_points
+            .iter()
+            .map(|p| p.anchor[1])
+            .fold(f64::INFINITY, f64::min);
+        let max_x = elem
+            .path_points
+            .iter()
+            .map(|p| p.anchor[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let max_y = elem
+            .path_points
+            .iter()
+            .map(|p| p.anchor[1])
+            .fold(f64::NEG_INFINITY, f64::max);
         let w = (max_x - min_x).max(1.0);
         let h = (max_y - min_y).max(1.0);
         (min_x as f32, min_y as f32, w as f32, h as f32)
@@ -1126,16 +1182,24 @@ fn main() {
         let artboards = if result.artboards.is_empty() {
             vec![("default".to_string(), 0.0f64, 0.0f64, f64::MAX, f64::MAX)]
         } else {
-            result.artboards.iter().map(|a| {
-                (a.name.clone(), a.x, a.y, a.x + a.width, a.y + a.height)
-            }).collect::<Vec<_>>()
+            result
+                .artboards
+                .iter()
+                .map(|a| (a.name.clone(), a.x, a.y, a.x + a.width, a.y + a.height))
+                .collect::<Vec<_>>()
         };
 
         let mut entries: Vec<serde_json::Value> = Vec::new();
         for (artboard_idx, (name, _x1, _y1, _x2, _y2)) in artboards.iter().enumerate() {
             let sanitized = name
                 .chars()
-                .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+                .map(|c| {
+                    if c.is_alphanumeric() {
+                        c.to_ascii_lowercase()
+                    } else {
+                        '_'
+                    }
+                })
                 .collect::<String>();
             let sanitized = if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
                 format!("ab_{}", sanitized)
@@ -1145,21 +1209,35 @@ fn main() {
                 sanitized
             };
             let filename = format!("{}.rs", sanitized);
-            let element_count = result.elements.iter()
-                .filter(|e| e.artboard_name.as_deref() == Some(name.as_str())
-                    || (e.artboard_name.is_none() && artboard_idx == 0))
+            let element_count = result
+                .elements
+                .iter()
+                .filter(|e| {
+                    e.artboard_name.as_deref() == Some(name.as_str())
+                        || (e.artboard_name.is_none() && artboard_idx == 0)
+                })
                 .count();
             let artboard_info = artboards.iter().find(|(n, _, _, _, _)| n == name);
             let (ab_w, ab_h) = artboard_info
                 .map(|(_, x1, y1, x2, y2)| ((x2 - x1).abs(), (y2 - y1).abs()))
                 .unwrap_or((375.0, 812.0));
-            let layout_elements: Vec<LayoutElement> = result.elements.iter()
-                .filter(|e| e.artboard_name.as_deref() == Some(name.as_str())
-                    || (e.artboard_name.is_none() && artboard_idx == 0))
+            let layout_elements: Vec<LayoutElement> = result
+                .elements
+                .iter()
+                .filter(|e| {
+                    e.artboard_name.as_deref() == Some(name.as_str())
+                        || (e.artboard_name.is_none() && artboard_idx == 0)
+                })
                 .enumerate()
                 .map(|(i, e)| element_to_layout(e, i))
                 .collect();
-            let code = generate_artboard_file(name, ab_w as f32, ab_h as f32, &layout_elements, &std::collections::HashMap::new());
+            let code = generate_artboard_file(
+                name,
+                ab_w as f32,
+                ab_h as f32,
+                &layout_elements,
+                &std::collections::HashMap::new(),
+            );
             entries.push(serde_json::json!({
                 "artboard": name,
                 "filename": filename,
@@ -1269,7 +1347,11 @@ mod tests {
         let result = parse_ctm_from_stream(content);
         assert!(result.is_some());
         let (rot, sx, sy, tx, ty) = result.unwrap();
-        assert!((rot).abs() < 0.001, "identity rotation should be 0, got {}", rot);
+        assert!(
+            (rot).abs() < 0.001,
+            "identity rotation should be 0, got {}",
+            rot
+        );
         assert!((sx - 1.0).abs() < 0.001);
         assert!((sy - 1.0).abs() < 0.001);
         assert!((tx).abs() < 0.001);
@@ -1290,10 +1372,26 @@ mod tests {
     fn test_detect_corner_radius_zero() {
         // A simple square has no control handles → radius 0
         let points = vec![
-            PathPoint { anchor: [0.0, 0.0], left_ctrl: [0.0, 0.0], right_ctrl: [0.0, 0.0] },
-            PathPoint { anchor: [100.0, 0.0], left_ctrl: [100.0, 0.0], right_ctrl: [100.0, 0.0] },
-            PathPoint { anchor: [100.0, 100.0], left_ctrl: [100.0, 100.0], right_ctrl: [100.0, 100.0] },
-            PathPoint { anchor: [0.0, 100.0], left_ctrl: [0.0, 100.0], right_ctrl: [0.0, 100.0] },
+            PathPoint {
+                anchor: [0.0, 0.0],
+                left_ctrl: [0.0, 0.0],
+                right_ctrl: [0.0, 0.0],
+            },
+            PathPoint {
+                anchor: [100.0, 0.0],
+                left_ctrl: [100.0, 0.0],
+                right_ctrl: [100.0, 0.0],
+            },
+            PathPoint {
+                anchor: [100.0, 100.0],
+                left_ctrl: [100.0, 100.0],
+                right_ctrl: [100.0, 100.0],
+            },
+            PathPoint {
+                anchor: [0.0, 100.0],
+                left_ctrl: [0.0, 100.0],
+                right_ctrl: [0.0, 100.0],
+            },
         ];
         assert_eq!(detect_corner_radius(&points), 0.0);
     }
@@ -1306,16 +1404,53 @@ mod tests {
         let h = r * KAPPA;
         // Top edge: TL-right, TR-left
         let points = vec![
-            PathPoint { anchor: [r, 0.0],       left_ctrl: [r - h, 0.0],   right_ctrl: [r + h, 0.0] },   // top-left corner right
-            PathPoint { anchor: [100.0 - r, 0.0], left_ctrl: [100.0 - r - h, 0.0], right_ctrl: [100.0 - r + h, 0.0] }, // top-right corner left
-            PathPoint { anchor: [100.0, r],      left_ctrl: [100.0, r - h], right_ctrl: [100.0, r + h] }, // right-top corner
-            PathPoint { anchor: [100.0, 100.0 - r], left_ctrl: [100.0, 100.0 - r - h], right_ctrl: [100.0, 100.0 - r + h] },
-            PathPoint { anchor: [100.0 - r, 100.0], left_ctrl: [100.0 - r + h, 100.0], right_ctrl: [100.0 - r - h, 100.0] },
-            PathPoint { anchor: [r, 100.0],      left_ctrl: [r + h, 100.0], right_ctrl: [r - h, 100.0] },
-            PathPoint { anchor: [0.0, 100.0 - r], left_ctrl: [0.0, 100.0 - r + h], right_ctrl: [0.0, 100.0 - r - h] },
-            PathPoint { anchor: [0.0, r],        left_ctrl: [0.0, r + h],   right_ctrl: [0.0, r - h] },
+            PathPoint {
+                anchor: [r, 0.0],
+                left_ctrl: [r - h, 0.0],
+                right_ctrl: [r + h, 0.0],
+            }, // top-left corner right
+            PathPoint {
+                anchor: [100.0 - r, 0.0],
+                left_ctrl: [100.0 - r - h, 0.0],
+                right_ctrl: [100.0 - r + h, 0.0],
+            }, // top-right corner left
+            PathPoint {
+                anchor: [100.0, r],
+                left_ctrl: [100.0, r - h],
+                right_ctrl: [100.0, r + h],
+            }, // right-top corner
+            PathPoint {
+                anchor: [100.0, 100.0 - r],
+                left_ctrl: [100.0, 100.0 - r - h],
+                right_ctrl: [100.0, 100.0 - r + h],
+            },
+            PathPoint {
+                anchor: [100.0 - r, 100.0],
+                left_ctrl: [100.0 - r + h, 100.0],
+                right_ctrl: [100.0 - r - h, 100.0],
+            },
+            PathPoint {
+                anchor: [r, 100.0],
+                left_ctrl: [r + h, 100.0],
+                right_ctrl: [r - h, 100.0],
+            },
+            PathPoint {
+                anchor: [0.0, 100.0 - r],
+                left_ctrl: [0.0, 100.0 - r + h],
+                right_ctrl: [0.0, 100.0 - r - h],
+            },
+            PathPoint {
+                anchor: [0.0, r],
+                left_ctrl: [0.0, r + h],
+                right_ctrl: [0.0, r - h],
+            },
         ];
         let detected = detect_corner_radius(&points);
-        assert!((detected - r).abs() < 2.0, "expected radius ~{}, got {}", r, detected);
+        assert!(
+            (detected - r).abs() < 2.0,
+            "expected radius ~{}, got {}",
+            r,
+            detected
+        );
     }
 }

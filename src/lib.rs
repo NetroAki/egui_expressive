@@ -79,12 +79,12 @@ pub use devtools::{DevToolsPanel, Prop, PropRegistry, PropValue};
 pub use draw::clipped_shape_cpu;
 pub use draw::composite_layers_gpu;
 pub use draw::{
-    blend_color, box_shadow, clip_to, clipped_rounded_rect, clipped_shape, dashed_path, dot_matrix, glow,
-    gradient_rect, icon, icon_loop, icon_play, icon_record, icon_stop, inner_shadow,
-    linear_gradient_rect, radial_gradient, radial_gradient_rect, scan_lines, transform_shape,
-    vignette, with_opacity, zstack, zstack_layers, BlendLayer, ClipShape, DashPattern, GradientDir,
-    LayeredPainter, RadialGradientDir, RichStroke, ShadowOffset, ShapeBuilder, StackAlign, StrokeCap,
-    StrokeJoin, Transform2D, composite_layers,
+    blend_color, box_shadow, clip_to, clipped_rounded_rect, clipped_shape, composite_layers,
+    dashed_path, dot_matrix, glow, gradient_rect, icon, icon_loop, icon_play, icon_record,
+    icon_stop, inner_shadow, linear_gradient_rect, radial_gradient, radial_gradient_rect,
+    scan_lines, transform_shape, vignette, with_opacity, zstack, zstack_layers, BlendLayer,
+    ClipShape, DashPattern, GradientDir, LayeredPainter, RadialGradientDir, RichStroke,
+    ShadowOffset, ShapeBuilder, StackAlign, StrokeCap, StrokeJoin, Transform2D,
 };
 pub use figma::design_tokens_from_json;
 pub use icons::chars as icon_constants;

@@ -473,12 +473,17 @@ fn generate_from_figma_styles(styles: &[FigmaStyleEntry]) -> Result<String, Figm
     // Default spacing and rounding (no data from REST API)
     out.push_str("        spacing: SpacingScale {\n");
     for name in &SPACING_NAMES {
-        out.push_str(&format!("            {}: 0.0, // Replace with actual spacing value from design tokens\n", name));
+        out.push_str(&format!(
+            "            {}: 0.0, // Replace with actual spacing value from design tokens\n",
+            name
+        ));
     }
     out.push_str("        },\n");
 
     out.push_str("        rounding: 4.0, // Replace with actual rounding from design tokens\n");
-    out.push_str("        panel_rounding: 8.0, // Replace with actual panel rounding from design tokens\n");
+    out.push_str(
+        "        panel_rounding: 8.0, // Replace with actual panel rounding from design tokens\n",
+    );
 
     out.push_str("    }\n");
     out.push_str("}\n");

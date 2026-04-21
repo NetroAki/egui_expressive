@@ -380,7 +380,8 @@ impl LayoutElement {
             third_party_effects: vec![],
             notes: vec![],
             appearance_fills: vec![],
-            appearance_strokes: vec![], artboard_name: None,
+            appearance_strokes: vec![],
+            artboard_name: None,
         }
     }
 }
@@ -2593,7 +2594,8 @@ pub fn parse_svg_elements(svg: &str) -> Vec<LayoutElement> {
                         third_party_effects: vec![],
                         notes: vec![],
                         appearance_fills: vec![],
-                        appearance_strokes: vec![], artboard_name: None,
+                        appearance_strokes: vec![],
+                        artboard_name: None,
                     });
                 }
             }
@@ -2664,7 +2666,8 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 third_party_effects: vec![],
                 notes: vec![],
                 appearance_fills: vec![],
-                appearance_strokes: vec![], artboard_name: None,
+                appearance_strokes: vec![],
+                artboard_name: None,
             });
 
             rect_start = tag_end + 1;
@@ -2735,7 +2738,8 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                     third_party_effects: vec![],
                     notes: vec![],
                     appearance_fills: vec![],
-                    appearance_strokes: vec![], artboard_name: None,
+                    appearance_strokes: vec![],
+                    artboard_name: None,
                 });
             }
 
@@ -2805,7 +2809,8 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 third_party_effects: vec![],
                 notes: vec![],
                 appearance_fills: vec![],
-                appearance_strokes: vec![], artboard_name: None,
+                appearance_strokes: vec![],
+                artboard_name: None,
             });
 
             path_start = tag_end + 1;
@@ -2865,7 +2870,8 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 third_party_effects: vec![],
                 notes: vec![],
                 appearance_fills: vec![],
-                appearance_strokes: vec![], artboard_name: None,
+                appearance_strokes: vec![],
+                artboard_name: None,
             });
 
             img_start = tag_end + 1;
@@ -2935,7 +2941,8 @@ fn parse_top_level_elements(svg: &str) -> Vec<LayoutElement> {
                     third_party_effects: vec![],
                     notes: vec![],
                     appearance_fills: vec![],
-                    appearance_strokes: vec![], artboard_name: None,
+                    appearance_strokes: vec![],
+                    artboard_name: None,
                 });
             }
 
@@ -3009,7 +3016,8 @@ fn parse_top_level_elements(svg: &str) -> Vec<LayoutElement> {
                         third_party_effects: vec![],
                         notes: vec![],
                         appearance_fills: vec![],
-                        appearance_strokes: vec![], artboard_name: None,
+                        appearance_strokes: vec![],
+                        artboard_name: None,
                     });
                 }
             }
@@ -3846,7 +3854,8 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
                                 third_party_effects: vec![],
                                 notes: vec![],
                                 appearance_fills: vec![],
-                                appearance_strokes: vec![], artboard_name: None,
+                                appearance_strokes: vec![],
+                                artboard_name: None,
                             })
                         })
                         .collect()
@@ -3893,7 +3902,8 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
             third_party_effects,
             notes,
             appearance_fills,
-            appearance_strokes, artboard_name: None,
+            appearance_strokes,
+            artboard_name: None,
         });
     }
 
@@ -4044,11 +4054,23 @@ pub fn generate_artboard_file(
     token_map: &HashMap<String, Color32>,
 ) -> String {
     let fn_name = sanitize_fn_name(artboard_name);
-    let fn_name = if fn_name.is_empty() { "artboard".to_string() } else { fn_name };
+    let fn_name = if fn_name.is_empty() {
+        "artboard".to_string()
+    } else {
+        fn_name
+    };
     let options = InferenceOptions::default();
     let layout = infer_layout(elements, &options);
     // generate_rust already produces a complete file (imports + pub fn draw_X)
-    generate_rust(&fn_name, artboard_w, artboard_h, &layout, None, None, Some(token_map))
+    generate_rust(
+        &fn_name,
+        artboard_w,
+        artboard_h,
+        &layout,
+        None,
+        None,
+        Some(token_map),
+    )
 }
 
 /// Generate one Rust file per artboard.
@@ -4068,7 +4090,11 @@ pub fn generate_all_artboards(
         .map(|(artboard_idx, &(name, w, h))| {
             let sanitized = {
                 let s = sanitize_fn_name(name);
-                if s.is_empty() { "artboard".to_string() } else { s }
+                if s.is_empty() {
+                    "artboard".to_string()
+                } else {
+                    s
+                }
             };
             let filename = format!("{}.rs", sanitized);
             // Filter elements belonging to this artboard.
@@ -4660,16 +4686,31 @@ mod tests {
 
     #[test]
     fn test_generate_artboard_file_produces_valid_rust() {
-        let elements = vec![LayoutElement::new("btn".to_string(), ElementType::Shape, 10.0, 20.0, 80.0, 40.0)];
+        let elements = vec![LayoutElement::new(
+            "btn".to_string(),
+            ElementType::Shape,
+            10.0,
+            20.0,
+            80.0,
+            40.0,
+        )];
         let token_map = HashMap::new();
         let code = generate_artboard_file("My Artboard", 375.0, 812.0, &elements, &token_map);
         // Must contain a pub fn with a valid Rust identifier
-        assert!(code.contains("pub fn draw_"), "missing pub fn draw_: {}", &code[..200.min(code.len())]);
+        assert!(
+            code.contains("pub fn draw_"),
+            "missing pub fn draw_: {}",
+            &code[..200.min(code.len())]
+        );
         // Must contain egui imports
         assert!(code.contains("use egui"));
         // Must not contain nested pub fn (double-wrapping bug)
         let fn_count = code.matches("pub fn draw_").count();
-        assert_eq!(fn_count, 1, "expected exactly 1 pub fn draw_, found {}", fn_count);
+        assert_eq!(
+            fn_count, 1,
+            "expected exactly 1 pub fn draw_, found {}",
+            fn_count
+        );
     }
 
     #[test]

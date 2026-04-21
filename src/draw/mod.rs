@@ -484,7 +484,11 @@ fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
         return (0.0, 0.0, l);
     }
     let d = max - min;
-    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
     let h = if (max - r).abs() < 1e-6 {
         (g - b) / d + if g < b { 6.0 } else { 0.0 }
     } else if (max - g).abs() < 1e-6 {
@@ -500,14 +504,28 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
     if s < 1e-6 {
         return (l, l, l);
     }
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let p = 2.0 * l - q;
     let hue_to_rgb = |p: f32, q: f32, mut t: f32| -> f32 {
-        if t < 0.0 { t += 1.0; }
-        if t > 1.0 { t -= 1.0; }
-        if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
-        if t < 0.5 { return q; }
-        if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+        if t < 0.0 {
+            t += 1.0;
+        }
+        if t > 1.0 {
+            t -= 1.0;
+        }
+        if t < 1.0 / 6.0 {
+            return p + (q - p) * 6.0 * t;
+        }
+        if t < 0.5 {
+            return q;
+        }
+        if t < 2.0 / 3.0 {
+            return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+        }
         p
     };
     let h = h / 360.0;
@@ -563,19 +581,47 @@ pub fn blend_color(
         crate::codegen::BlendMode::Lighten => (bg.0.max(fg.0), bg.1.max(fg.1), bg.2.max(fg.2)),
         // Advanced blend modes
         crate::codegen::BlendMode::ColorDodge => (
-            if fg.0 >= 1.0 { 1.0 } else { (bg.0 / (1.0 - fg.0)).min(1.0) },
-            if fg.1 >= 1.0 { 1.0 } else { (bg.1 / (1.0 - fg.1)).min(1.0) },
-            if fg.2 >= 1.0 { 1.0 } else { (bg.2 / (1.0 - fg.2)).min(1.0) },
+            if fg.0 >= 1.0 {
+                1.0
+            } else {
+                (bg.0 / (1.0 - fg.0)).min(1.0)
+            },
+            if fg.1 >= 1.0 {
+                1.0
+            } else {
+                (bg.1 / (1.0 - fg.1)).min(1.0)
+            },
+            if fg.2 >= 1.0 {
+                1.0
+            } else {
+                (bg.2 / (1.0 - fg.2)).min(1.0)
+            },
         ),
         crate::codegen::BlendMode::ColorBurn => (
-            if fg.0 <= 0.0 { 0.0 } else { 1.0 - ((1.0 - bg.0) / fg.0).min(1.0) },
-            if fg.1 <= 0.0 { 0.0 } else { 1.0 - ((1.0 - bg.1) / fg.1).min(1.0) },
-            if fg.2 <= 0.0 { 0.0 } else { 1.0 - ((1.0 - bg.2) / fg.2).min(1.0) },
+            if fg.0 <= 0.0 {
+                0.0
+            } else {
+                1.0 - ((1.0 - bg.0) / fg.0).min(1.0)
+            },
+            if fg.1 <= 0.0 {
+                0.0
+            } else {
+                1.0 - ((1.0 - bg.1) / fg.1).min(1.0)
+            },
+            if fg.2 <= 0.0 {
+                0.0
+            } else {
+                1.0 - ((1.0 - bg.2) / fg.2).min(1.0)
+            },
         ),
         crate::codegen::BlendMode::HardLight => {
             // HardLight = Overlay with fg and bg swapped
             let blend = |fg: f32, bg: f32| {
-                if fg < 0.5 { 2.0 * fg * bg } else { 1.0 - 2.0 * (1.0 - fg) * (1.0 - bg) }
+                if fg < 0.5 {
+                    2.0 * fg * bg
+                } else {
+                    1.0 - 2.0 * (1.0 - fg) * (1.0 - bg)
+                }
             };
             (blend(fg.0, bg.0), blend(fg.1, bg.1), blend(fg.2, bg.2))
         }
@@ -1462,20 +1508,23 @@ fn apply_blend_to_shape(
             t.fallback_color = blend_and_fade(t.fallback_color, bg, mode, opacity);
             egui::Shape::Text(t)
         }
-        egui::Shape::Vec(shapes) => {
-            egui::Shape::Vec(
-                shapes
-                    .into_iter()
-                    .map(|s| apply_blend_to_shape(s, bg, mode, opacity))
-                    .collect(),
-            )
-        }
+        egui::Shape::Vec(shapes) => egui::Shape::Vec(
+            shapes
+                .into_iter()
+                .map(|s| apply_blend_to_shape(s, bg, mode, opacity))
+                .collect(),
+        ),
         other => other,
     }
 }
 
 /// Blend a foreground color against a background using the given blend mode and opacity.
-fn blend_and_fade(fg: egui::Color32, bg: egui::Color32, mode: &crate::codegen::BlendMode, opacity: f32) -> egui::Color32 {
+fn blend_and_fade(
+    fg: egui::Color32,
+    bg: egui::Color32,
+    mode: &crate::codegen::BlendMode,
+    opacity: f32,
+) -> egui::Color32 {
     if fg == egui::Color32::TRANSPARENT {
         return fg;
     }
@@ -1520,19 +1569,28 @@ pub fn clipped_shape(
     }
 
     // Compute bounding box of the clip polygon
-    let min_x = clip_polygon.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
-    let min_y = clip_polygon.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
-    let max_x = clip_polygon.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
-    let max_y = clip_polygon.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+    let min_x = clip_polygon
+        .iter()
+        .map(|p| p.x)
+        .fold(f32::INFINITY, f32::min);
+    let min_y = clip_polygon
+        .iter()
+        .map(|p| p.y)
+        .fold(f32::INFINITY, f32::min);
+    let max_x = clip_polygon
+        .iter()
+        .map(|p| p.x)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let max_y = clip_polygon
+        .iter()
+        .map(|p| p.y)
+        .fold(f32::NEG_INFINITY, f32::max);
 
     if min_x >= max_x || min_y >= max_y {
         return;
     }
 
-    let clip_rect = egui::Rect::from_min_max(
-        egui::pos2(min_x, min_y),
-        egui::pos2(max_x, max_y),
-    );
+    let clip_rect = egui::Rect::from_min_max(egui::pos2(min_x, min_y), egui::pos2(max_x, max_y));
 
     // Use rectangular scissor for the bounding box
     let painter = ui.painter().with_clip_rect(clip_rect);
@@ -1584,10 +1642,22 @@ pub fn clipped_shape_cpu(
         return;
     }
 
-    let min_x = clip_polygon.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
-    let min_y = clip_polygon.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
-    let max_x = clip_polygon.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
-    let max_y = clip_polygon.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+    let min_x = clip_polygon
+        .iter()
+        .map(|p| p.x)
+        .fold(f32::INFINITY, f32::min);
+    let min_y = clip_polygon
+        .iter()
+        .map(|p| p.y)
+        .fold(f32::INFINITY, f32::min);
+    let max_x = clip_polygon
+        .iter()
+        .map(|p| p.x)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let max_y = clip_polygon
+        .iter()
+        .map(|p| p.y)
+        .fold(f32::NEG_INFINITY, f32::max);
 
     if min_x >= max_x || min_y >= max_y {
         return;
@@ -1629,10 +1699,7 @@ pub fn clipped_shape_cpu(
     }
 
     // Paint content clipped to bbox
-    let clip_rect = egui::Rect::from_min_max(
-        egui::pos2(min_x, min_y),
-        egui::pos2(max_x, max_y),
-    );
+    let clip_rect = egui::Rect::from_min_max(egui::pos2(min_x, min_y), egui::pos2(max_x, max_y));
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(clip_rect));
     child_ui.set_clip_rect(clip_rect);
     content(&mut child_ui);
@@ -1685,11 +1752,7 @@ pub fn clipped_shape_cpu(
 ///
 /// Until that integration is complete, this function falls back to the CPU
 /// approximation via [`composite_layers`].
-pub fn composite_layers_gpu(
-    ui: &mut egui::Ui,
-    _rect: egui::Rect,
-    layers: Vec<BlendLayer>,
-) {
+pub fn composite_layers_gpu(ui: &mut egui::Ui, _rect: egui::Rect, layers: Vec<BlendLayer>) {
     // CPU fallback: blend_shader.wgsl is ready for host-app wgpu integration.
     // See doc comment above for wiring instructions.
     composite_layers(ui, layers);
@@ -1727,22 +1790,28 @@ fn nearest_bbox_corner(a: egui::Pos2, b: egui::Pos2, bbox: egui::Rect) -> Option
 /// Alignment for stacked/layered content within a bounding rect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StackAlign {
-    TopLeft, TopCenter, TopRight,
-    CenterLeft, Center, CenterRight,
-    BottomLeft, BottomCenter, BottomRight,
+    TopLeft,
+    TopCenter,
+    TopRight,
+    CenterLeft,
+    Center,
+    CenterRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
 }
 
 impl StackAlign {
     /// Convert to egui's `Align2`.
     pub fn to_align2(self) -> egui::Align2 {
         match self {
-            Self::TopLeft     => egui::Align2::LEFT_TOP,
-            Self::TopCenter   => egui::Align2::CENTER_TOP,
-            Self::TopRight    => egui::Align2::RIGHT_TOP,
-            Self::CenterLeft  => egui::Align2::LEFT_CENTER,
-            Self::Center      => egui::Align2::CENTER_CENTER,
+            Self::TopLeft => egui::Align2::LEFT_TOP,
+            Self::TopCenter => egui::Align2::CENTER_TOP,
+            Self::TopRight => egui::Align2::RIGHT_TOP,
+            Self::CenterLeft => egui::Align2::LEFT_CENTER,
+            Self::Center => egui::Align2::CENTER_CENTER,
             Self::CenterRight => egui::Align2::RIGHT_CENTER,
-            Self::BottomLeft  => egui::Align2::LEFT_BOTTOM,
+            Self::BottomLeft => egui::Align2::LEFT_BOTTOM,
             Self::BottomCenter => egui::Align2::CENTER_BOTTOM,
             Self::BottomRight => egui::Align2::RIGHT_BOTTOM,
         }
@@ -1771,7 +1840,11 @@ mod tests {
     #[test]
     fn test_blend_color_multiply() {
         // Multiply: white * white = white
-        let result = blend_color(opaque(255, 255, 255), opaque(255, 255, 255), BlendMode::Multiply);
+        let result = blend_color(
+            opaque(255, 255, 255),
+            opaque(255, 255, 255),
+            BlendMode::Multiply,
+        );
         let [r, _g, _b, _] = result.to_srgba_unmultiplied();
         assert_eq!(r, 255);
         // Multiply: black * anything = black
@@ -1790,7 +1863,11 @@ mod tests {
         assert!((r as i32 - 200).abs() <= 2, "r={}", r);
         assert!((g as i32 - 100).abs() <= 2, "g={}", g);
         // Screen: white screen anything = white
-        let result2 = blend_color(opaque(255, 255, 255), opaque(100, 100, 100), BlendMode::Screen);
+        let result2 = blend_color(
+            opaque(255, 255, 255),
+            opaque(100, 100, 100),
+            BlendMode::Screen,
+        );
         let [r2, _, _, _] = result2.to_srgba_unmultiplied();
         assert_eq!(r2, 255);
     }
@@ -1798,15 +1875,29 @@ mod tests {
     #[test]
     fn test_blend_color_difference() {
         // Difference: same color = black
-        let result = blend_color(opaque(100, 100, 100), opaque(100, 100, 100), BlendMode::Difference);
+        let result = blend_color(
+            opaque(100, 100, 100),
+            opaque(100, 100, 100),
+            BlendMode::Difference,
+        );
         let [r, g, b, _] = result.to_srgba_unmultiplied();
-        assert!(r <= 2 && g <= 2 && b <= 2, "expected near-black, got ({},{},{})", r, g, b);
+        assert!(
+            r <= 2 && g <= 2 && b <= 2,
+            "expected near-black, got ({},{},{})",
+            r,
+            g,
+            b
+        );
     }
 
     #[test]
     fn test_blend_color_exclusion() {
         // Exclusion: same color = near-black (2*c*(1-c) subtracted)
-        let result = blend_color(opaque(128, 128, 128), opaque(128, 128, 128), BlendMode::Exclusion);
+        let result = blend_color(
+            opaque(128, 128, 128),
+            opaque(128, 128, 128),
+            BlendMode::Exclusion,
+        );
         let [r, _, _, _] = result.to_srgba_unmultiplied();
         // 0.5 + 0.5 - 2*0.5*0.5 = 0.5 → ~128
         assert!((r as i32 - 128).abs() <= 3, "r={}", r);
@@ -1815,7 +1906,12 @@ mod tests {
     #[test]
     fn test_blend_color_hsl_modes_no_panic() {
         // HSL modes should not panic for any input
-        for mode in [BlendMode::Hue, BlendMode::Saturation, BlendMode::Color, BlendMode::Luminosity] {
+        for mode in [
+            BlendMode::Hue,
+            BlendMode::Saturation,
+            BlendMode::Color,
+            BlendMode::Luminosity,
+        ] {
             let _ = blend_color(opaque(200, 100, 50), opaque(50, 150, 200), mode);
         }
     }
@@ -1823,7 +1919,11 @@ mod tests {
     #[test]
     fn test_blend_color_color_dodge_white_fg() {
         // ColorDodge: white fg → white result
-        let result = blend_color(opaque(255, 255, 255), opaque(100, 100, 100), BlendMode::ColorDodge);
+        let result = blend_color(
+            opaque(255, 255, 255),
+            opaque(100, 100, 100),
+            BlendMode::ColorDodge,
+        );
         let [r, g, b, _] = result.to_srgba_unmultiplied();
         assert_eq!(r, 255);
         assert_eq!(g, 255);
@@ -1835,6 +1935,12 @@ mod tests {
         // HardLight with black fg → black result (2*0*bg = 0)
         let result = blend_color(opaque(0, 0, 0), opaque(200, 100, 50), BlendMode::HardLight);
         let [r, g, b, _] = result.to_srgba_unmultiplied();
-        assert!(r <= 2 && g <= 2 && b <= 2, "expected near-black, got ({},{},{})", r, g, b);
+        assert!(
+            r <= 2 && g <= 2 && b <= 2,
+            "expected near-black, got ({},{},{})",
+            r,
+            g,
+            b
+        );
     }
 }
