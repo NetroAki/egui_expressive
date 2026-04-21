@@ -646,7 +646,14 @@ function generateElementCode(el, indent, colorMap, comps) {
   if (hasFeather) { const ft = el.effects.find(e => e.type === "feather"); c += `${pad}// Feather (${ft?.radius || 0}px)\n`; }
   if (el.blendMode && el.blendMode !== "normal") c += `${pad}// blend_mode: ${el.blendMode}\n`;
   if (el.opacity !== undefined && el.opacity < 1.0) c += `${pad}// opacity: ${el.opacity}\n`;
-  if (el.symbolName) return `${pad}// Symbol: ${sanitizeComment(el.symbolName)}\n`;
+  if (el.symbolName) {
+    c += `${pad}{\n`;
+    c += `${pad}    // Symbol instance: "${sanitizeComment(el.symbolName)}"\n`;
+    c += `${pad}    let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(Math.round(el.x))}, ${fmtF32(Math.round(el.y))}), egui::vec2(${fmtF32(Math.round(el.w))}, ${fmtF32(Math.round(el.h))}));\n`;
+    c += `${pad}    painter.rect_stroke(rect, 2u8, egui::Stroke::new(1.0, egui::Color32::from_gray(150)), egui::StrokeKind::Outside);\n`;
+    c += `${pad}}\n`;
+    return c;
+  }
 
   if (el.type === "circle") {
     const cn = el.fill ? (colorMap.get(`${el.fill.r},${el.fill.g},${el.fill.b}`) || "SURFACE") : "SURFACE";
@@ -846,17 +853,12 @@ function generateElementCode(el, indent, colorMap, comps) {
 
   if (el.type === "image") {
     const imgPath = el.imagePath ? el.imagePath : `assets/${el.id}.png`;
-    const isLinked = el.imagePath && !el.imagePath.startsWith("raster_");
     c += `${pad}{\n`;
     c += `${pad}    let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(Math.round(el.x))}, ${fmtF32(Math.round(el.y))}), egui::vec2(${fmtF32(Math.round(el.w))}, ${fmtF32(Math.round(el.h))}));\n`;
-    if (isLinked) {
-      c += `${pad}    // Linked image: "${imgPath}"\n`;
-      c += `${pad}    // ui.painter().image(texture_id, rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);\n`;
-      c += `${pad}    painter.rect_filled(rect, 0u8, egui::Color32::from_rgba_premultiplied(80, 80, 80, 180)); // placeholder\n`;
-    } else {
-      c += `${pad}    // Embedded raster image (${Math.round(el.w)}×${Math.round(el.h)}px)\n`;
-      c += `${pad}    painter.rect_filled(rect, 0u8, egui::Color32::from_rgba_premultiplied(80, 80, 80, 180)); // placeholder\n`;
-    }
+    c += `${pad}    // Image: "${imgPath}" — load with egui_extras::RetainedImage or ctx.load_texture()\n`;
+    c += `${pad}    // painter.image(texture_id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);\n`;
+    c += `${pad}    // Fallback until texture is loaded:\n`;
+    c += `${pad}    painter.rect_filled(rect, 0u8, egui::Color32::from_rgba_premultiplied(80, 80, 80, 180));\n`;
     c += `${pad}    painter.rect_stroke(rect, 0u8, egui::Stroke::new(1.0, egui::Color32::from_gray(120)), egui::StrokeKind::Outside);\n`;
     c += `${pad}}\n`;
     return c;
@@ -1245,18 +1247,9 @@ if (typeof window !== 'undefined' && window.addEventListener) {
         const items = [];
         try { for (let i = 0; i < doc.pageItems.length; i++) { const it = doc.pageItems[i]; try { if (it.locked || it.hidden) continue; const b = it.geometricBounds; if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) items.push(it); } catch(e) {} } } catch(e) {}
 
-        // Expand appearance on items
-        for (const item of items) {
-          try {
-            if (item.typename === 'PathItem' || item.typename === 'GroupItem') {
-              // Attempt to expand the appearance
-              const expanded = item.expand();
-              if (expanded) {
-                // Continue processing the expanded item
-              }
-            }
-          } catch(e) { /* expansion may not be supported for all items */ }
-        }
+        // Note: item.expand() is not available in ExtendScript.
+        // Appearance expansion requires manual use of Object > Expand Appearance in Illustrator.
+        // We export items as-is from the duplicate artboard.
 
         // Export from duplicate
         const r = await exportArtboards([artboardIndex], options || {}, payload.selectedTiles || []);

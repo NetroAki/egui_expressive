@@ -263,12 +263,30 @@ function extractArtboardDataJSON(exportPayloadJSON) {
         function extractEffects(item) {
             var fx = [];
             try {
-                // dropShadow via appearance items (CS6+)
-                if (item.strokeWidth !== undefined) {
-                    // item has stroke — not an effect indicator
-                }
-                // Live effects not reliably accessible via ExtendScript
-                // Return empty — effects will be absent from generated code
+                // Try to read opacity as a proxy for effects
+                var opacity = 1.0;
+                try { opacity = (item.opacity !== undefined ? item.opacity / 100.0 : 1.0); } catch(e) {}
+                
+                // Check for drop shadow via note field (some workflows store effect data here)
+                // Primary: check if item has a non-default blending mode
+                var blendMode = "normal";
+                try {
+                    if (item.blendingMode !== undefined) {
+                        var bm = String(item.blendingMode);
+                        if (bm.indexOf("MULTIPLY") !== -1) blendMode = "multiply";
+                        else if (bm.indexOf("SCREEN") !== -1) blendMode = "screen";
+                        else if (bm.indexOf("OVERLAY") !== -1) blendMode = "overlay";
+                    }
+                } catch(e) {}
+                
+                // Try to detect drop shadow via XMPString (CS5+)
+                try {
+                    var xmp = item.XMPString;
+                    if (xmp && xmp.indexOf("dropShadow") !== -1) {
+                        // XMP has shadow data but parsing it is complex — emit a generic shadow
+                        fx.push({ type: "dropShadow", x: 4, y: 4, blur: 8, color: { r: 0, g: 0, b: 0, a: 0.3 } });
+                    }
+                } catch(e) {}
             } catch(e) {}
             return fx;
         }
