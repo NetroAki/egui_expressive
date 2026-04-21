@@ -608,8 +608,9 @@
       
       // Show warnings
       const warnings = result.warnings || [];
+      const wp = document.getElementById('warnings-panel');
       if (warnings.length > 0) {
-        document.getElementById('warnings-panel').style.display = 'block';
+        wp.style.display = 'block';
         const wl = document.getElementById('warnings-list');
         wl.innerHTML = '';
         for (const w of warnings) {
@@ -618,6 +619,8 @@
           div.textContent = `• ${w.id}: ${w.note}`;
           wl.appendChild(div);
         }
+      } else {
+        wp.style.display = 'none';
       }
       
       // Build file tree

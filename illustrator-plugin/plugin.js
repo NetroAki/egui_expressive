@@ -1224,6 +1224,7 @@ function collectWarnings(elements) {
 // ─── Message Handler (UXP mode) ──────────────────────────────────────────
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener("message", async (event) => {
+    if (!event.data) return;
     const { type, payload } = event.data;
   if (type === "GET_ARTBOARDS") {
     try {
@@ -1244,20 +1245,20 @@ if (typeof window !== 'undefined' && window.addEventListener) {
       window.postMessage({ type: "ERROR", message: e.message }, '*');
     }
   }
-  if (type === "CHECK_AI_PARSER") { window.postMessage({ type: "AI_PARSER_STATUS", available: aiParserAvailable }); }
-  if (type === "EXPORT") { try { const ed = event.data; const selectedIndices = ed.selectedIndices || ed.artboardIndices; const selectedTiles = ed.selectedTiles || []; const options = ed.options || {}; const r = await exportArtboards(selectedIndices || [], options, selectedTiles); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
-  if (type === "EXPORT_SINGLE") { try { const ed = event.data; const artboardIndex = ed.artboardIndex; const selectedTiles = ed.selectedTiles || []; const options = ed.options || {}; const r = await exportArtboards([artboardIndex], options, selectedTiles); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); } }
+  if (type === "CHECK_AI_PARSER") { window.postMessage({ type: "AI_PARSER_STATUS", available: aiParserAvailable }, '*'); }
+  if (type === "EXPORT") { try { const ed = event.data; const selectedIndices = ed.selectedIndices || ed.artboardIndices; const selectedTiles = ed.selectedTiles || []; const options = ed.options || {}; const r = await exportArtboards(selectedIndices || [], options, selectedTiles); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }, '*'); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }, '*'); } }
+  if (type === "EXPORT_SINGLE") { try { const ed = event.data; const artboardIndex = ed.artboardIndex; const selectedTiles = ed.selectedTiles || []; const options = ed.options || {}; const r = await exportArtboards([artboardIndex], options, selectedTiles); window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, zipBlob: r.zipBlob, warnings: r.warnings || [] } }, '*'); } catch (e) { window.postMessage({ type: "ERROR", message: e.message }, '*'); } }
     if (type === "EXPAND_AND_EXTRACT") {
       try {
         const { artboardIndex, options } = payload || {};
         // Export artboard directly (appearance expansion requires Illustrator's Object > Expand Appearance)
         const r = await exportArtboards([artboardIndex], options || {}, payload.selectedTiles || []);
-        window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, warnings: r.warnings || [] } });
-      } catch (e) { window.postMessage({ type: "ERROR", message: e.message }); }
+        window.postMessage({ type: "EXPORT_RESULT", payload: { files: r.files, filesArray: Object.entries(r.files || {}).map(([filename, content]) => ({filename, content})), colorMap: r.colorMap, warnings: r.warnings || [] } }, '*');
+      } catch (e) { window.postMessage({ type: "ERROR", message: e.message }, '*'); }
     }
   });
 
-  window.postMessage({ type: "READY" });
+  window.postMessage({ type: "READY" }, '*');
 }
 
 // ─── CEP ExtendScript Entry Points ──────────────────────────────────────
