@@ -712,14 +712,27 @@ function generateElementCode(el, indent, colorMap, comps) {
     const align2 = textAlign === "center" ? "CENTER_TOP" : textAlign === "right" ? "RIGHT_TOP" : "LEFT_TOP";
 
     if (el.textRuns && el.textRuns.length > 1) {
-      // Multi-run text — lay out runs left-to-right, with line-break support.
-      // All runs share the same baseline; newlines advance y by line height.
+      // Multi-run text — lay out runs left-to-right with line-break support.
+      // For center/right alignment, compute total first-line width and shift the
+      // block start so the composed line aligns correctly within the bounding box.
+      const defaultSz = el.textStyle?.size || 14;
+      // Estimate total width of first line across all runs (for alignment offset)
+      let firstLineWidth = 0;
+      for (const run of el.textRuns) {
+        if (!run.text) continue;
+        const firstLine = run.text.split("\n")[0];
+        const runSz = run.style?.size || defaultSz;
+        firstLineWidth += firstLine.length * runSz * 0.55;
+      }
+      // blockStartX: left edge of the composed text block, adjusted for alignment
+      const blockStartX = textAlign === "center" ? el.x + (el.w || 0) / 2 - firstLineWidth / 2
+                        : textAlign === "right"  ? el.x + (el.w || 0) - firstLineWidth
+                        : el.x;
       c += `${pad}{\n`;
-      c += `${pad}    let _text_x0 = ${tx}f32;\n`;
-      c += `${pad}    let _text_y0 = ${ty}f32;\n`;
+      c += `${pad}    let _text_x0 = ${fmtF32(blockStartX)}f32;\n`;
+      c += `${pad}    let _text_y0 = ${fmtF32(el.y)}f32;\n`;
       let xOffset = 0;
       let yOffset = 0;
-      const defaultSz = el.textStyle?.size || 14;
       for (const run of el.textRuns) {
         if (!run.text) continue;
         // Split on newlines to handle multi-line runs
@@ -732,7 +745,7 @@ function generateElementCode(el, indent, colorMap, comps) {
         for (let li = 0; li < lines.length; li++) {
           const lineText = lines[li];
           if (li > 0) {
-            // Newline: advance y, reset x
+            // Newline: advance y, reset x to block start
             yOffset += runSz * 1.2;
             xOffset = 0;
           }
