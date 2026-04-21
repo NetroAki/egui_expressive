@@ -27,5 +27,8 @@ echo "Enabling CEP debug mode for self-signed extensions..."
 defaults write com.adobe.CSXS.10 PlayerDebugMode 1 2>/dev/null || true
 defaults write com.adobe.CSXS.11 PlayerDebugMode 1 2>/dev/null || true
 defaults write com.adobe.CSXS.12 PlayerDebugMode 1 2>/dev/null || true
-echo "CEP debug mode enabled."
+defaults write com.adobe.CSXS.13 PlayerDebugMode 1 2>/dev/null || true
+defaults write com.adobe.CSXS.14 PlayerDebugMode 1 2>/dev/null || true
+defaults write com.adobe.CSXS.15 PlayerDebugMode 1 2>/dev/null || true
+echo "CEP debug mode enabled (CSXS.10 through CSXS.15)."
 

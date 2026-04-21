@@ -429,25 +429,16 @@
                         setStatus('Open an Illustrator document first');
                         return;
                     }
-                    if (diag.artboardCount === 0 || (diag.artboardCount === 1 && diag.hasPageTiles)) {
-                        // No artboards or single artboard with page tiles — check for tiles
-                        setStatus('Checking for page tiles...');
-                        checkPageTiles();
-                        if (diag.artboardCount === 1) {
-                            // Also load the single artboard alongside tiles
-                            window.__adobe_cep__.evalScript('getArtboardsJSON()', function(result2) {
-                                if (result2 && result2 !== 'EvalScript error.' && result2 !== 'undefined') {
-                                    try { loadArtboards(JSON.parse(result2)); } catch(e) {}
-                                }
-                            });
-                        }
+                    if (diag.artboardCount === 0) {
+                        showArtboardError('No artboards found in this document. Add at least one artboard in Illustrator.');
+                        setStatus('No artboards in document');
                         return;
                     }
-                    // Proceed to load artboards
+                    // Proceed to load artboards — single serialized call, no race
                     window.__adobe_cep__.evalScript('getArtboardsJSON()', function(result) {
                         if (result === 'EvalScript error.') {
-                            showArtboardError('evalScript error — host.jsx may not be loaded. Check CEP debug mode.');
-                            setStatus('evalScript error — host.jsx may not be loaded. Check CEP debug mode.');
+                            showArtboardError('evalScript error — host.jsx may not be loaded. Check CEP debug mode and reinstall.');
+                            setStatus('evalScript error — reinstall plugin');
                         } else if (!result || result === 'undefined') {
                             showArtboardError('No document open in Illustrator');
                             setStatus('No document open in Illustrator');
@@ -460,14 +451,7 @@
                                     return;
                                 }
                                 loadArtboards(parsed);
-                                // Check if document might have page tiles (single large artboard)
-                                if (parsed.length === 1) {
-                                  var ab = parsed[0];
-                                  if (ab.width > 1200 || ab.height > 1200) {
-                                    // Large artboard — may contain page tiles
-                                    // Will be populated if ai_parser finds tiles
-                                  }
-                                }
+                                setStatus('Ready — ' + parsed.length + ' artboard(s) loaded');
                             } catch(e) {
                                 showArtboardError('Error parsing artboard data: ' + e.message);
                                 setStatus('Error parsing artboard data: ' + e.message);
@@ -489,7 +473,8 @@
           window.postMessage({ type: 'GET_ARTBOARDS' }, '*');
         }
       } catch(e) {
-        setStatus('Connect to Illustrator to load artboards');
+        showArtboardError('Plugin load error: ' + e.message);
+        setStatus('Plugin load error: ' + e.message);
       }
       checkAiParser();
     });

@@ -15,21 +15,10 @@ function getDiagnosticsJSON() {
                 result.docName = app.activeDocument.name;
                 result.artboardCount = app.activeDocument.artboards.length;
                 
-                // Check for potential page tiling
+                // Page tile detection is handled by ai_parser, not by size heuristics.
+                // Always report hasPageTiles = false here; the panel will check ai_parser separately.
                 result.hasPageTiles = false;
                 result.estimatedPageCount = 1;
-                if (result.artboardCount === 1) {
-                    try {
-                        var ab = app.activeDocument.artboards[0];
-                        var r = ab.artboardRect;
-                        var w = Math.abs(r[2] - r[0]);
-                        var h = Math.abs(r[1] - r[3]);
-                        if (w > 1200 || h > 1200) {
-                            result.hasPageTiles = true;
-                            result.estimatedPageCount = Math.max(1, Math.round((w * h) / (595 * 842)));
-                        }
-                    } catch(e) {}
-                }
             }
         }
     } catch(e) { return JSON.stringify({ error: e.message || String(e) }); }
@@ -80,47 +69,10 @@ function getDocumentInfoJSON() {
         
         try { info.filePath = doc.fullName ? doc.fullName.fsName : ""; } catch(e) {}
         
-        // If single artboard, check if content spans multiple "pages"
-        // by looking at content bounds vs typical page size
-        if (doc.artboards.length === 1) {
-            try {
-                var ab = doc.artboards[0];
-                var r = ab.artboardRect;
-                var w = Math.abs(r[2] - r[0]);
-                var h = Math.abs(r[1] - r[3]);
-                // Large canvas suggests page tiling
-                // Standard page: ~595x842 (A4), ~612x792 (Letter)
-                // If artboard much larger, likely tiled
-                if (w > 1200 || h > 1200) {
-                    info.hasPageTiles = true;
-                    // Estimate page count from artboard size
-                    // This is approximate — actual parsing via ai_parser is more accurate
-                    info.pageCount = Math.max(1, Math.round((w * h) / (595 * 842)));
-                    
-                    info.pageTiles = [];
-                    var cols = Math.ceil(w / 595);
-                    var rows = Math.ceil(h / 842);
-                    var tileIdx = 1;
-                    for (var row = 0; row < rows; row++) {
-                        for (var col = 0; col < cols; col++) {
-                            var tx = r[0] + col * 595;
-                            var ty = r[1] - row * 842;
-                            var tw = Math.min(595, r[2] - tx);
-                            var th = Math.min(842, ty - r[3]);
-                            if (tw > 0 && th > 0) {
-                                info.pageTiles.push({
-                                    name: "Tile " + tileIdx++,
-                                    x: tx,
-                                    y: ty,
-                                    width: tw,
-                                    height: th
-                                });
-                            }
-                        }
-                    }
-                }
-            } catch(e) {}
-        }
+        // Page tile detection is done by ai_parser (Rust binary), not by size heuristics.
+        // Return the file path so the panel can invoke ai_parser if needed.
+        info.hasPageTiles = false;
+        info.pageTiles = [];
         
         return JSON.stringify(info);
     } catch (e) {

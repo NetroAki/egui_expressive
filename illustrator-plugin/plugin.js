@@ -700,27 +700,47 @@ function generateElementCode(el, indent, colorMap, comps) {
   }
 
   if (el.type === "text" && el.text) {
-    // Use absolute painter position to preserve Illustrator coordinates
-    const tx = fmtF32(el.x), ty = fmtF32(el.y);
+    // Use absolute painter position to preserve Illustrator coordinates.
+    // el.x/el.y are the top-left of the bounding box from geometricBounds.
+    // Adjust anchor point based on text alignment so egui renders at the correct position.
     const textAlign = el.textAlign || el.textStyle?.align || "left";
+    // Compute the correct anchor x: left edge for LEFT, center for CENTER, right edge for RIGHT
+    const anchorX = textAlign === "center" ? el.x + (el.w || 0) / 2
+                  : textAlign === "right"  ? el.x + (el.w || 0)
+                  : el.x;
+    const tx = fmtF32(anchorX), ty = fmtF32(el.y);
     const align2 = textAlign === "center" ? "CENTER_TOP" : textAlign === "right" ? "RIGHT_TOP" : "LEFT_TOP";
+
     if (el.textRuns && el.textRuns.length > 1) {
-      // Multi-run text — compute total width, apply alignment offset to starting x, then advance left-to-right
-      const totalWidth = el.textRuns.reduce((sum, r) => sum + (r.text?.length || 0) * (r.style?.size || el.textStyle?.size || 14) * 0.55, 0);
-      const startXAdj = textAlign === "center" ? -totalWidth / 2 : textAlign === "right" ? -totalWidth : 0;
+      // Multi-run text — lay out runs left-to-right, with line-break support.
+      // All runs share the same baseline; newlines advance y by line height.
       c += `${pad}{\n`;
-      c += `${pad}    let _text_origin = origin + egui::vec2(${tx} + ${fmtF32(startXAdj)}, ${ty});\n`;
+      c += `${pad}    let _text_x0 = ${tx}f32;\n`;
+      c += `${pad}    let _text_y0 = ${ty}f32;\n`;
       let xOffset = 0;
+      let yOffset = 0;
+      const defaultSz = el.textStyle?.size || 14;
       for (const run of el.textRuns) {
         if (!run.text) continue;
-        const runTxt = run.text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/\0/g, "\\0");
-        const runSz = run.style?.size || el.textStyle?.size || 14;
+        // Split on newlines to handle multi-line runs
+        const lines = run.text.split("\n");
+        const runSz = run.style?.size || defaultSz;
         const runWt = run.style?.weight || el.textStyle?.weight || 400;
         const runColor = run.style?.color;
         const runCn = runColor ? (colorMap.get(`${runColor.r},${runColor.g},${runColor.b}`) || "ON_SURFACE") : "ON_SURFACE";
         const fontFamily = runWt >= 600 ? `egui::FontFamily::Name("Bold".into())` : `egui::FontFamily::Proportional`;
-        c += `${pad}    painter.text(_text_origin + egui::vec2(${fmtF32(xOffset)}, 0.0), egui::Align2::LEFT_TOP, "${runTxt}", egui::FontId::new(${fmtF32(runSz)}, ${fontFamily}), tokens::${runCn});\n`;
-        xOffset += run.text.length * runSz * 0.55; // approximate advance width
+        for (let li = 0; li < lines.length; li++) {
+          const lineText = lines[li];
+          if (li > 0) {
+            // Newline: advance y, reset x
+            yOffset += runSz * 1.2;
+            xOffset = 0;
+          }
+          if (!lineText) continue;
+          const runTxt = lineText.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/\0/g, "\\0");
+          c += `${pad}    painter.text(origin + egui::vec2(_text_x0 + ${fmtF32(xOffset)}, _text_y0 + ${fmtF32(yOffset)}), egui::Align2::LEFT_TOP, "${runTxt}", egui::FontId::new(${fmtF32(runSz)}, ${fontFamily}), tokens::${runCn});\n`;
+          xOffset += lineText.length * runSz * 0.55;
+        }
       }
       c += `${pad}}\n`;
     } else {
