@@ -6,12 +6,23 @@ echo  egui_expressive Illustrator Plugin Installer
 echo ============================================
 echo.
 
-set UPIA="C:\Program Files\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+set "UPIA=C:\Program Files\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
 
-set "ZXP_FILE=%~dp0egui_expressive_export-1.0.0.zxp"
-if not exist "%ZXP_FILE%" (
-  echo ERROR: egui_expressive_export-1.0.0.zxp not found in this folder.
-  exit /b 1
+echo Removing any previous version...
+if exist "%UPIA%" (
+    "%UPIA%" /remove "com.egui-expressive.illustrator-exporter" >nul 2>&1
+    echo Previous version removed (if present).
+) else (
+    rmdir /s /q "%LOCALAPPDATA%\Adobe\CEP\extensions\com.egui-expressive.illustrator-exporter" >nul 2>&1
+    echo Previous version removed (if present).
+)
+
+if exist "%UPIA%" (
+    echo Found UPIA. Installing ZXP...
+    "%UPIA%" /install "%ZXP_FILE%"
+) else (
+    echo ERROR: UPIA not found.
+    echo Please use the installer\install_zxp.bat script instead.
 )
 
 echo Removing any previous version...
