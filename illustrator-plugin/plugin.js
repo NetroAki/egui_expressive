@@ -1,4 +1,4 @@
-// egui_expressive Illustrator Exporter — UXP Plugin for Adobe Illustrator 2021+
+// egui_expressive Illustrator Exporter — CEP Extension for Adobe Illustrator 2022+
 "use strict";
 
 // ─── Artboard Discovery ───────────────────────────────────────────────────────

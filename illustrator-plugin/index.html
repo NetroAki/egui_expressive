@@ -292,15 +292,6 @@
     </div>
   </div>
   
-  <div class="artboard-section" id="page-tiles-section" style="display:none;">
-    <div class="section-label">Page Tiles <span id="tile-count"></span> <span style="font-size:10px;color:var(--on-surface-variant);">(from .ai file)</span></div>
-    <div style="display:flex;gap:4px;margin:2px 0 4px;">
-      <button onclick="toggleAllTiles(true)" style="font-size:10px;padding:2px 6px;background:var(--surface-container);border:1px solid var(--outline-variant);border-radius:4px;color:var(--on-surface);cursor:pointer;">Select All</button>
-      <button onclick="toggleAllTiles(false)" style="font-size:10px;padding:2px 6px;background:var(--surface-container);border:1px solid var(--outline-variant);border-radius:4px;color:var(--on-surface);cursor:pointer;">Deselect All</button>
-    </div>
-    <div class="artboard-list" id="tile-list"></div>
-  </div>
-  
   <div class="options-section">
     <div class="option-row">
       <label>Use naming conventions</label>
@@ -342,7 +333,7 @@
     <div id="warnings-list"></div>
   </section>
   
-  <section class="status-bar" id="status-bar" aria-label="Status">Ready</section>
+  <section class="status-bar" id="status-bar" aria-label="Status" role="status" aria-live="polite">Ready</section>
   <section class="ai-parser-status" id="ai-parser-status" title="Project file analysis via ai-parser" aria-label="Parser"></section>
 
   <!-- Plugin codegen library loaded for both UXP and CEP panel contexts -->
@@ -621,6 +612,7 @@
         }
       } else {
         wp.style.display = 'none';
+        document.getElementById('warnings-list').innerHTML = '';
       }
       
       // Build file tree
