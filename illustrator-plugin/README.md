@@ -7,8 +7,8 @@ This plugin uses CEP (Common Extensibility Platform). The `manifest.json` file i
 
 1. Build the `.zxp` file by running `cd installer && bash build_zxp.sh` (macOS) or `cd installer && build_zxp.bat` (Windows).
 2. Install the generated `.zxp` file:
-   - **Windows**: Double-click `install.bat` (looks in `dist\` if not found next to script)
-   - **macOS**: Run `chmod +x install.sh && ./install.sh` (looks in `dist/` if not found next to script)
+   - **Windows**: Double-click `install.bat` (looks next to the script, then in `..\dist\`)
+   - **macOS**: Run `chmod +x install.sh && ./install.sh` (looks next to the script, then in `../dist/`)
 3. Restart Adobe Illustrator.
 4. Go to **Window → Extensions → egui_expressive Export** to open the panel.
 

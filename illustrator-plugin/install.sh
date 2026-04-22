@@ -28,22 +28,36 @@ echo "[INFO] Found: $ZXP_FILE"
 echo "[INFO] Removing previous version..."
 FOUND_OLD=0
 
+USER_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/$EXT_ID"
+if [ -d "$USER_DIR" ]; then
+  echo "[INFO]   Found old per-user install at: $USER_DIR"
+  rm -rf "$USER_DIR"
+  if [ $? -ne 0 ]; then
+    echo "ERROR:   Failed to delete $USER_DIR"
+    echo "ERROR:   Close Illustrator and retry."
+    exit 1
+  fi
+  FOUND_OLD=1
+  echo "[INFO]   Deleted."
+fi
+
 for BASE in \
-  "$HOME/Library/Application Support/Adobe/CEP/extensions" \
+  "$HOME/Library/Application Support/Adobe/CEPServiceManager4/extensions" \
   "/Library/Application Support/Adobe/CEP/extensions" \
   "/Library/Application Support/Adobe/CEPServiceManager4/extensions"
 do
   OLD_DIR="$BASE/$EXT_ID"
   if [ -d "$OLD_DIR" ]; then
-    echo "[INFO]   Found old install at: $OLD_DIR"
-    rm -rf "$OLD_DIR"
-    if [ $? -ne 0 ]; then
-      echo "ERROR:   Failed to delete $OLD_DIR"
-      echo "ERROR:   Close Illustrator and retry."
-      exit 1
+    echo "[INFO]   Found old system install at: $OLD_DIR"
+    if rm -rf "$OLD_DIR" 2>/tmp/egui_expressive_install_err.log; then
+      FOUND_OLD=1
+      echo "[INFO]   Deleted."
+    else
+      echo "[WARN]   Could not delete $OLD_DIR"
+      cat /tmp/egui_expressive_install_err.log
+      echo "[WARN]   Continuing with per-user install."
     fi
-    FOUND_OLD=1
-    echo "[INFO]   Deleted."
+    rm -f /tmp/egui_expressive_install_err.log
   fi
 done
 
@@ -78,7 +92,7 @@ echo "[INFO] Extraction complete."
 # --- Enable CEP debug mode (per-user, no admin) ---
 echo "[INFO] Enabling CEP debug mode for self-signed extensions..."
 for V in 10 11 12 13 14 15; do
-  if defaults write "com.adobe.CSXS.$V" PlayerDebugMode 1 2>/dev/null; then
+  if defaults write "com.adobe.CSXS.$V" PlayerDebugMode 1; then
     echo "[INFO]   CSXS.$V debug mode enabled."
   else
     echo "[WARN]   CSXS.$V registry write failed."
