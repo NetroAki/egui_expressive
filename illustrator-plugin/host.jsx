@@ -84,6 +84,34 @@ function getArtboardsJSON() {
 
 
 
+function saveFilesToFolderJSON(payloadJSON) {
+    try {
+        var payload = JSON.parse(payloadJSON);
+        var files = payload.files;
+        
+        var folder = Folder.selectDialog("Select destination folder");
+        if (!folder) {
+            return JSON.stringify({ canceled: true });
+        }
+        
+        var saved = [];
+        for (var filename in files) {
+            if (Object.prototype.hasOwnProperty.call(files, filename)) {
+                var file = new File(folder.fsName + "/" + filename);
+                file.encoding = "UTF-8";
+                file.open("w");
+                file.write(files[filename]);
+                file.close();
+                saved.push(filename);
+            }
+        }
+        
+        return JSON.stringify({ success: true, folder: folder.fsName, saved: saved });
+    } catch (e) {
+        return JSON.stringify({ error: String(e) });
+    }
+}
+
 function extractArtboardDataJSON(exportPayloadJSON) {
     try {
         var appExists = false;

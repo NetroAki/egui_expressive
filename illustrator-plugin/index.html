@@ -931,12 +931,14 @@
         return;
       }
       
-      const zipBtn = `<button onclick="downloadZip()" title="Download all as ZIP">⬇ ZIP</button>`;
+      const saveBtn = window.__adobe_cep__ 
+        ? `<button onclick="saveToFolder()" title="Save all to folder">💾 Save to Folder</button>`
+        : `<button onclick="downloadZip()" title="Download all as ZIP">⬇ ZIP</button>`;
       
       tree.innerHTML = `
         <div class="file-tree-header">
           <span>generated/</span>
-          ${zipBtn}
+          ${saveBtn}
         </div>
         ${fileNames.map(name => `
           <div class="tree-file" id="tree-${name.replace(/[^a-z0-9]/gi,'_')}" onclick="showFile('${name}')">
@@ -1016,6 +1018,37 @@
         URL.revokeObjectURL(url);
         setStatus('Downloaded generated.zip');
       });
+    }
+
+    async function saveToFolder() {
+      if (!window.__adobe_cep__) {
+        setStatus('Save to folder is only available in Illustrator');
+        return;
+      }
+      
+      setStatus('Select a folder...');
+      const payload = { files: generatedFiles };
+      // Double stringify: once for the JSON payload, once to escape it as a string literal for evalScript
+      const script = 'saveFilesToFolderJSON(' + JSON.stringify(JSON.stringify(payload)) + ')';
+      const result = await evalCepScript(script);
+      
+      if (!result.ok) {
+        setStatus('Failed to save: ' + result.error);
+        return;
+      }
+      
+      try {
+        const parsed = JSON.parse(result.result);
+        if (parsed.canceled) {
+          setStatus('Save canceled');
+        } else if (parsed.error) {
+          setStatus('Save error: ' + parsed.error);
+        } else if (parsed.success) {
+          setStatus('Saved ' + parsed.saved.length + ' files to ' + parsed.folder);
+        }
+      } catch (e) {
+        setStatus('Error parsing save result');
+      }
     }
   </script>
 </body>
