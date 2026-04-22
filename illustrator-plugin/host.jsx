@@ -3,6 +3,36 @@
 // It provides the Illustrator DOM access that the CEP panel needs.
 // The code generation logic lives in plugin.js (browser-side).
 
+if (typeof JSON !== 'object') {
+    JSON = {};
+}
+if (typeof JSON.parse !== 'function') {
+    JSON.parse = function(str) {
+        try { return eval('(' + str + ')'); } catch(e) { return null; }
+    };
+}
+if (typeof JSON.stringify !== 'function') {
+    JSON.stringify = function(obj) {
+        var t = typeof obj;
+        if (t !== 'object' || obj === null) {
+            if (t === 'string') return '"' + obj.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t') + '"';
+            return String(obj);
+        }
+        var isArr = (Object.prototype.toString.call(obj) === '[object Array]');
+        var arr = [];
+        for (var k in obj) {
+            if (Object.prototype.hasOwnProperty.call(obj, k)) {
+                var v = obj[k];
+                if (v !== undefined && typeof v !== 'function') {
+                    if (isArr) arr.push(JSON.stringify(v));
+                    else arr.push('"' + k + '":' + JSON.stringify(v));
+                }
+            }
+        }
+        return isArr ? '[' + arr.join(',') + ']' : '{' + arr.join(',') + '}';
+    };
+}
+
 function getDiagnosticsJSON() {
     var result = { hasApp: false, hasDoc: false, artboardCount: 0, docName: "", error: "" };
     try {

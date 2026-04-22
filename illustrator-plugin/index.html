@@ -488,7 +488,8 @@
             return;
           }
           window.__adobe_cep__.evalScript(script, function(result) {
-            if (result === CEP_EVAL_ERROR) {
+            const resStr = String(result || '').trim().toLowerCase();
+            if (resStr === 'evalscript error.' || resStr === 'evalscript error') {
               resolve({ ok: false, error: CEP_EVAL_ERROR, result });
               return;
             }
@@ -658,7 +659,7 @@
       try {
         diag = JSON.parse(diagResponse.result);
       } catch (e) {
-        showArtboardError('Illustrator returned invalid diagnostics.', 'error', 'Unexpected diagnostics', e.message);
+        showArtboardError('Illustrator returned invalid diagnostics.\nRaw response: ' + String(diagResponse.result), 'error', 'Unexpected diagnostics', e.message);
         setStatus('Invalid Illustrator diagnostics');
         return;
       }
@@ -701,7 +702,7 @@
         loadArtboards(parsed);
         setStatus('Ready — ' + parsed.length + ' artboard(s) loaded');
       } catch (e) {
-        showArtboardError('Error parsing artboard data: ' + e.message, 'error', 'Artboard data could not be read');
+        showArtboardError('Error parsing artboard data.\nRaw response: ' + String(artboardsResponse.result), 'error', 'Artboard data could not be read', e.message);
         setStatus('Error parsing artboard data: ' + e.message);
       }
     }
