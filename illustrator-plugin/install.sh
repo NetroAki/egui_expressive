@@ -2,8 +2,6 @@
 # install.sh — Per-user CEP extension installer for macOS (no admin required)
 # Extracts .zxp to ~/Library/Application Support/Adobe/CEP/extensions/
 
-set -e
-
 EXT_ID="com.egui-expressive.illustrator-exporter"
 EXT_NAME="egui_expressive Exporter"
 
@@ -57,8 +55,11 @@ fi
 UPIA="/Library/Application Support/Adobe/Adobe Desktop Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent.app/Contents/MacOS/UnifiedPluginInstallerAgent"
 if [ -f "$UPIA" ]; then
   echo "[INFO] Unregistering from Adobe extension database..."
-  "$UPIA" /remove "$EXT_ID" 2>/dev/null || true
-  echo "[INFO] Unregister done."
+  if "$UPIA" /remove "$EXT_ID"; then
+    echo "[INFO] Unregister done."
+  else
+    echo "[WARN] UPIA unregister failed (non-critical, extension folder already deleted)."
+  fi
 fi
 
 # --- Install: per-user location ---
@@ -77,8 +78,11 @@ echo "[INFO] Extraction complete."
 # --- Enable CEP debug mode (per-user, no admin) ---
 echo "[INFO] Enabling CEP debug mode for self-signed extensions..."
 for V in 10 11 12 13 14 15; do
-  defaults write "com.adobe.CSXS.$V" PlayerDebugMode 1 2>/dev/null || true
-  echo "[INFO]   CSXS.$V debug mode enabled."
+  if defaults write "com.adobe.CSXS.$V" PlayerDebugMode 1 2>/dev/null; then
+    echo "[INFO]   CSXS.$V debug mode enabled."
+  else
+    echo "[WARN]   CSXS.$V registry write failed."
+  fi
 done
 
 echo ""

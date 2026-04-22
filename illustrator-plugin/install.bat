@@ -32,7 +32,7 @@ REM --- Uninstall: discover and remove from ALL known locations ---
 echo [INFO] Removing previous version...
 set "FOUND_OLD=0"
 
-REM Check all known CEP extension paths
+REM Check all known CEP extension paths — skip if no write permission
 for %%L in (
     "!APPDATA!\Adobe\CEP\extensions"
     "!ProgramData!\Adobe\CEP\extensions"
@@ -42,15 +42,13 @@ for %%L in (
     set "OLD_DIR=%%~L\!EXT_ID!"
     if exist "!OLD_DIR!" (
         echo [INFO]   Found old install at: !OLD_DIR!
-        rmdir /s /q "!OLD_DIR!"
+        rmdir /s /q "!OLD_DIR!" > nul 2>&1
         if !errorlevel! neq 0 (
-            echo [ERROR]   Failed to delete !OLD_DIR!
-            echo [ERROR]   Close Illustrator and retry.
-            pause
-            exit /b 1
+            echo [WARN]   Could not delete !OLD_DIR! (may need admin rights or Illustrator is running).
+        ) else (
+            set "FOUND_OLD=1"
+            echo [INFO]   Deleted.
         )
-        set "FOUND_OLD=1"
-        echo [INFO]   Deleted.
     )
 )
 
