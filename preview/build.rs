@@ -2,18 +2,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR set by Cargo"));
     let generated_src = Path::new("generated");
     let generated_out = out_dir.join("generated");
 
-    fs::create_dir_all(&generated_out).unwrap();
+    fs::create_dir_all(&generated_out).expect("create OUT_DIR/generated");
 
     // Clear stale files from previous builds
     if let Ok(entries) = fs::read_dir(&generated_out) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "rs") {
-                fs::remove_file(&path).unwrap_or(());
+                let _ = fs::remove_file(&path);
             }
         }
     }
@@ -21,51 +21,44 @@ fn main() {
     // Copy all .rs files from generated/ to OUT_DIR/generated/
     let mut has_files = false;
     if generated_src.exists() {
-        for entry in fs::read_dir(generated_src).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "rs") {
-                let dest = generated_out.join(path.file_name().unwrap());
-                fs::copy(&path, &dest).unwrap();
-                has_files = true;
+        if let Ok(entries) = fs::read_dir(generated_src) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "rs") {
+                    if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
+                        let dest = generated_out.join(fname);
+                        let _ = fs::copy(&path, &dest);
+                        has_files = true;
+                    }
+                }
             }
         }
     }
 
-    // Ensure minimal mod.rs exists so the crate always compiles
-    let mod_rs = generated_out.join("mod.rs");
-    if !mod_rs.exists() {
-        fs::write(&mod_rs, include_str!("generated/mod.rs")).unwrap();
-    }
-
-    // Ensure tokens.rs exists
-    let tokens_rs = generated_out.join("tokens.rs");
-    if !tokens_rs.exists() {
-        fs::write(&tokens_rs, include_str!("generated/tokens.rs")).unwrap();
-    }
-
-    // Ensure state.rs exists
-    let state_rs = generated_out.join("state.rs");
-    if !state_rs.exists() {
-        fs::write(&state_rs, include_str!("generated/state.rs")).unwrap();
-    }
-
-    // Ensure components.rs exists
-    let components_rs = generated_out.join("components.rs");
-    if !components_rs.exists() {
-        fs::write(&components_rs, include_str!("generated/components.rs")).unwrap();
-    }
+    // Ensure minimal placeholder files exist so the crate always compiles
+    let ensure_placeholder = |name: &str, content: &str| {
+        let p = generated_out.join(name);
+        if !p.exists() {
+            let _ = fs::write(&p, content);
+        }
+    };
+    ensure_placeholder("mod.rs", include_str!("generated/mod.rs"));
+    ensure_placeholder("tokens.rs", include_str!("generated/tokens.rs"));
+    ensure_placeholder("state.rs", include_str!("generated/state.rs"));
+    ensure_placeholder("components.rs", include_str!("generated/components.rs"));
 
     // Find artboard files (anything that's not mod/tokens/state/components)
     let mut artboards = Vec::new();
     if has_files {
-        for entry in fs::read_dir(&generated_out).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "rs") {
-                let name = path.file_stem().unwrap().to_str().unwrap();
-                if !["mod", "tokens", "state", "components"].contains(&name) {
-                    artboards.push(name.to_string());
+        if let Ok(entries) = fs::read_dir(&generated_out) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "rs") {
+                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                        if !["mod", "tokens", "state", "components"].contains(&name) {
+                            artboards.push(name.to_string());
+                        }
+                    }
                 }
             }
         }
@@ -108,7 +101,7 @@ fn main() {
         dispatch.push_str("}\n");
     }
 
-    fs::write(out_dir.join("dispatch.rs"), dispatch).unwrap();
+    let _ = fs::write(out_dir.join("dispatch.rs"), dispatch);
 
     println!("cargo:rerun-if-changed=generated");
 }

@@ -90,22 +90,31 @@ impl PreviewApp {
         let mut copied = 0;
         // Find artboard files (.rs that aren't the known ones)
         let mut artboard_files = Vec::new();
-        if let Ok(entries) = fs::read_dir(&src) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "rs") {
-                    let name = path.file_stem().unwrap().to_str().unwrap();
-                    if !["mod", "tokens", "state", "components"].contains(&name) {
-                        artboard_files.push(name.to_string());
+        match fs::read_dir(&src) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "rs") {
+                        if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                            if !["mod", "tokens", "state", "components"].contains(&name) {
+                                artboard_files.push(name.to_string());
+                            }
+                        }
+                        // Copy all .rs files
+                        if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
+                            let dest = generated_dir.join(fname);
+                            if let Err(e) = fs::copy(&path, &dest) {
+                                self.status = format!("Failed to copy {}: {}", path.display(), e);
+                                return;
+                            }
+                            copied += 1;
+                        }
                     }
-                    // Copy all .rs files
-                    let dest = generated_dir.join(path.file_name().unwrap());
-                    if let Err(e) = fs::copy(&path, &dest) {
-                        self.status = format!("Failed to copy {}: {}", path.display(), e);
-                        return;
-                    }
-                    copied += 1;
                 }
+            }
+            Err(e) => {
+                self.status = format!("Cannot read folder: {}", e);
+                return;
             }
         }
 
@@ -135,9 +144,17 @@ impl PreviewApp {
         };
 
         // Trigger rebuild in subprocess
+        let cwd = match std::env::current_dir() {
+            Ok(d) => d,
+            Err(e) => {
+                self.status = format!("Cannot detect working directory: {}", e);
+                self.mode = AppMode::Launcher;
+                return;
+            }
+        };
         match std::process::Command::new("cargo")
             .arg("run")
-            .current_dir(std::env::current_dir().unwrap())
+            .current_dir(cwd)
             .spawn()
         {
             Ok(_) => {
@@ -160,7 +177,9 @@ impl PreviewApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("[ Load Different Folder ]").clicked() {
                     // Clear generated files and go back to launcher
-                    let _ = self.clear_generated();
+                    if let Err(e) = self.clear_generated() {
+                        eprintln!("Warning: failed to clear generated files: {}", e);
+                    }
                     self.mode = AppMode::Launcher;
                     self.selected = None;
                     return;
@@ -222,9 +241,10 @@ impl PreviewApp {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().is_some_and(|e| e == "rs") {
-                    let stem = path.file_stem().unwrap().to_str().unwrap();
-                    if !["mod", "tokens", "state", "components"].contains(&stem) {
-                        fs::remove_file(&path)?;
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        if !["mod", "tokens", "state", "components"].contains(&stem) {
+                            let _ = fs::remove_file(&path);
+                        }
                     }
                 }
             }
