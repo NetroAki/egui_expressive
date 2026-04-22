@@ -11,9 +11,9 @@
       --surface-container-high: #36343b;
       --on-surface: #e6e1e5;
       --on-surface-variant: #cac4d0;
-      --primary: #a8c7fa;
-      --on-primary: #062e6f;
-      --primary-muted: rgba(168, 199, 250, 0.18);
+      --primary: #ffd54f;
+      --on-primary: #332600;
+      --primary-muted: rgba(255, 213, 79, 0.22);
       --outline: #938f99;
       --outline-variant: #49454f;
       --error: #f2b8b5;
@@ -442,6 +442,8 @@
     const CEP_EVAL_ERROR = 'EvalScript error.';
     const CEP_HOST_READY = '__HOST_READY__';
     const CEP_HOST_MISSING = '__HOST_MISSING__';
+    const CEP_HOST_FILE_MISSING = '__HOST_FILE_MISSING__';
+    const CEP_HOST_ERROR_PREFIX = '__HOST_ERROR__:';
     const CEP_HOST_INIT_ATTEMPTS = 6;
     const CEP_HOST_INIT_DELAY_MS = 250;
     let generatedFiles = {};
@@ -532,6 +534,39 @@
       return String(value || '').replace(/\\/g, '/').replace(/'/g, "\\'");
     }
 
+    function buildCepHostProbeScript() {
+      return `
+        (function(){
+          try {
+            var ready =
+              typeof getDiagnosticsJSON === 'function' &&
+              typeof getArtboardsJSON === 'function' &&
+              typeof extractArtboardDataJSON === 'function';
+            return ready ? '${CEP_HOST_READY}' : '${CEP_HOST_MISSING}';
+          } catch (e) {
+            return '${CEP_HOST_ERROR_PREFIX}' + String(e);
+          }
+        })()
+      `;
+    }
+
+    function getCepHostDetail(result, fallback) {
+      const text = String(result || '').trim();
+      if (!text || text === 'undefined') {
+        return fallback;
+      }
+      if (text === CEP_HOST_MISSING) {
+        return 'host.jsx loaded but did not expose the expected functions.';
+      }
+      if (text === CEP_HOST_FILE_MISSING) {
+        return 'host.jsx was not found in the installed extension folder.';
+      }
+      if (text.indexOf(CEP_HOST_ERROR_PREFIX) === 0) {
+        return text.slice(CEP_HOST_ERROR_PREFIX.length) || fallback;
+      }
+      return text;
+    }
+
     async function forceLoadCepHost() {
       const root = getExtensionRootPath();
       if (!root) {
@@ -539,35 +574,41 @@
       }
 
       const hostPath = escapeForExtendScriptPath(root.replace(/[\\/]+$/, '') + '/host.jsx');
-      const loadResult = await evalCepScript(`(function(){try{$.evalFile('${hostPath}');return JSON.stringify({ready:typeof getDiagnosticsJSON==='function'});}catch(e){return JSON.stringify({error:String(e)})}})()`);
+      const loadResult = await evalCepScript(`
+        (function(){
+          try {
+            var hostFile = File('${hostPath}');
+            if (!hostFile.exists) {
+              return '${CEP_HOST_FILE_MISSING}';
+            }
+            $.evalFile(hostFile);
+            return (${buildCepHostProbeScript()});
+          } catch (e) {
+            return '${CEP_HOST_ERROR_PREFIX}' + String(e);
+          }
+        })()
+      `);
       if (!loadResult.ok) {
         return { ok: false, detail: loadResult.error || 'ExtendScript rejected $.evalFile().' };
       }
 
-      try {
-        const parsed = JSON.parse(loadResult.result);
-        if (parsed.ready) {
-          return { ok: true };
-        }
-        return { ok: false, detail: parsed.error || 'host.jsx loaded but did not expose the expected functions.' };
-      } catch (e) {
-        return { ok: false, detail: 'Unexpected response while loading host.jsx.' };
+      const detail = getCepHostDetail(loadResult.result, 'Unexpected response while loading host.jsx.');
+      if (String(loadResult.result || '').trim() === CEP_HOST_READY) {
+        return { ok: true };
       }
+      return { ok: false, detail };
     }
 
     async function ensureCepHostReady() {
       let lastDetail = '';
       for (let attempt = 1; attempt <= CEP_HOST_INIT_ATTEMPTS; attempt += 1) {
-        const probe = await evalCepScript(`JSON.stringify({ready:typeof getDiagnosticsJSON==='function'?'${CEP_HOST_READY}':'${CEP_HOST_MISSING}'})`);
+        const probe = await evalCepScript(buildCepHostProbeScript());
         if (probe.ok) {
-          try {
-            const parsed = JSON.parse(probe.result);
-            if (parsed.ready === CEP_HOST_READY) {
-              return { ok: true };
-            }
-          } catch (e) {
-            lastDetail = 'ExtendScript returned invalid startup diagnostics.';
+          const probeResult = String(probe.result || '').trim();
+          if (probeResult === CEP_HOST_READY) {
+            return { ok: true };
           }
+          lastDetail = getCepHostDetail(probeResult, 'ExtendScript startup probe returned an unexpected response.');
         } else {
           lastDetail = probe.error || lastDetail;
         }
