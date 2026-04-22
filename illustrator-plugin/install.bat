@@ -15,8 +15,8 @@ if not exist "%ZXP_FILE%" (
 )
 if not exist "%ZXP_FILE%" (
     echo [ERROR] egui_expressive_export-1.0.0.zxp not found.
-    echo Please build it first: cd installer ^&^& bash build_zxp.sh
-    echo Or place the .zxp file next to this script.
+    echo [ERROR] Please build it first: cd installer ^&^& bash build_zxp.sh
+    echo [ERROR] Or place the .zxp file next to this script.
     exit /b 1
 )
 
