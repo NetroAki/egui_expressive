@@ -1,12 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const RUST_KEYWORDS: [&str; 51] = [
+const RUST_KEYWORDS: [&str; 52] = [
     "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
     "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut",
     "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
-    "type", "unsafe", "use", "where", "while", "async", "await", "dyn", "abstract", "become",
-    "box", "do", "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield",
+    "type", "unsafe", "use", "where", "while", "async", "await", "dyn",     "abstract", "become",
+    "box", "do", "final", "macro", "override", "priv", "typeof", "union", "unsized", "virtual", "yield",
     "try",
 ];
 

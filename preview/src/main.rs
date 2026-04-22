@@ -271,7 +271,7 @@ fn is_valid_module_name(s: &str) -> bool {
         "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut",
         "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
         "type", "unsafe", "use", "where", "while", "async", "await", "dyn", "abstract", "become",
-        "box", "do", "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield",
+        "box", "do", "final", "macro", "override", "priv", "typeof", "union", "unsized", "virtual", "yield",
         "try",
     ];
     !KEYWORDS.contains(&s)
