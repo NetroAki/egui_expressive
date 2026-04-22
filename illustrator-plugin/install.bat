@@ -9,10 +9,13 @@ echo  egui_expressive Illustrator Plugin Installer
 echo ============================================
 echo.
 
+REM Resolve paths OUTSIDE any blocks to avoid %~dp0 expansion issues
+set "SCRIPT_DIR=%~dp0"
+set "ZXP_FILE=!SCRIPT_DIR!egui_expressive_export-1.0.0.zxp"
+
 REM Look for ZXP next to script first, then in dist/
-set "ZXP_FILE=%~dp0egui_expressive_export-1.0.0.zxp"
 if not exist "!ZXP_FILE!" (
-    set "ZXP_FILE=%~dp0..\dist\egui_expressive_export-1.0.0.zxp"
+    set "ZXP_FILE=!SCRIPT_DIR!..\dist\egui_expressive_export-1.0.0.zxp"
 )
 if not exist "!ZXP_FILE!" (
     echo [ERROR] egui_expressive_export-1.0.0.zxp not found.
@@ -22,35 +25,36 @@ if not exist "!ZXP_FILE!" (
 
 echo [INFO] Found: !ZXP_FILE!
 
-REM Find UPIA in common locations
+REM Find UPIA - check each path one at a time, no nesting
 set "UPIA_PATH="
-if exist "!ProgramFiles!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
-    set "UPIA_PATH=!ProgramFiles!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
-)
+set "UPIA_TEST=!ProgramFiles!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+if exist "!UPIA_TEST!" set "UPIA_PATH=!UPIA_TEST!"
+
 if not defined UPIA_PATH (
-    if exist "!ProgramFiles(x86)!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
-        set "UPIA_PATH=!ProgramFiles(x86)!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
-    )
+    set "UPIA_TEST=!ProgramFiles(x86)!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+    if exist "!UPIA_TEST!" set "UPIA_PATH=!UPIA_TEST!"
 )
+
 if not defined UPIA_PATH (
-    if exist "!LOCALAPPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
-        set "UPIA_PATH=!LOCALAPPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
-    )
+    set "UPIA_TEST=!LOCALAPPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+    if exist "!UPIA_TEST!" set "UPIA_PATH=!UPIA_TEST!"
 )
+
 if not defined UPIA_PATH (
-    if exist "!APPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
-        set "UPIA_PATH=!APPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
-    )
+    set "UPIA_TEST=!APPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+    if exist "!UPIA_TEST!" set "UPIA_PATH=!UPIA_TEST!"
 )
 
 REM Remove previous version first
+set "EXT_ID=com.egui-expressive.illustrator-exporter"
 if defined UPIA_PATH (
     echo [INFO] Removing previous version...
-    "!UPIA_PATH!" /remove "com.egui-expressive.illustrator-exporter" >nul 2>&1
+    "!UPIA_PATH!" /remove "!EXT_ID!" >nul 2>&1
     echo [INFO] Previous version removed.
 ) else (
     echo [INFO] Removing previous version manually...
-    rmdir /s /q "!APPDATA!\Adobe\CEP\extensions\com.egui-expressive.illustrator-exporter" >nul 2>&1
+    set "EXT_DIR=!APPDATA!\Adobe\CEP\extensions\!EXT_ID!"
+    rmdir /s /q "!EXT_DIR!" >nul 2>&1
     echo [INFO] Previous version removed.
 )
 
@@ -65,7 +69,7 @@ if defined UPIA_PATH (
     echo [SUCCESS] Extension installed successfully.
 ) else (
     echo [WARN] UPIA not found. Falling back to manual extraction...
-    set "EXT_DIR=!APPDATA!\Adobe\CEP\extensions\com.egui-expressive.illustrator-exporter"
+    set "EXT_DIR=!APPDATA!\Adobe\CEP\extensions\!EXT_ID!"
     if not exist "!EXT_DIR!" mkdir "!EXT_DIR!"
     echo [INFO] Extracting to: !EXT_DIR!
     powershell -Command "Expand-Archive -Path '!ZXP_FILE!' -DestinationPath '!EXT_DIR!' -Force"
