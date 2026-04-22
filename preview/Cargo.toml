@@ -7,3 +7,4 @@ edition = "2021"
 egui_expressive = { path = ".." }
 egui = "0.34"
 eframe = "0.34"
+rfd = "0.14"

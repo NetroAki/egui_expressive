@@ -5,54 +5,166 @@ mod generated {
 include!(concat!(env!("OUT_DIR"), "/dispatch.rs"));
 
 use eframe::egui;
+use std::fs;
+use std::path::Path;
+
+enum AppMode {
+    Launcher,
+    Preview,
+    Building { message: String },
+}
 
 struct PreviewApp {
+    mode: AppMode,
     selected: Option<String>,
+    status: String,
 }
 
 impl Default for PreviewApp {
     fn default() -> Self {
         let names = artboard_names();
+        let mode = if names.is_empty() {
+            AppMode::Launcher
+        } else {
+            AppMode::Preview
+        };
         Self {
+            mode,
             selected: names.first().map(|s| s.to_string()),
+            status: String::new(),
         }
     }
 }
 
 impl eframe::App for PreviewApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        match &mut self.mode {
+            AppMode::Launcher => self.show_launcher(ui),
+            AppMode::Preview => self.show_preview(ui),
+            AppMode::Building { message } => {
+                ui.centered_and_justified(|ui| {
+                    ui.heading("Building preview...");
+                    ui.add_space(8.0);
+                    ui.label(message.as_str());
+                    ui.add_space(16.0);
+                    ui.spinner();
+                });
+            }
+        }
+    }
+}
+
+impl PreviewApp {
+    fn show_launcher(&mut self, ui: &mut egui::Ui) {
+        ui.centered_and_justified(|ui| {
+            ui.group(|ui| {
+                ui.set_min_width(420.0);
+                ui.heading("egui_expressive Preview");
+                ui.add_space(12.0);
+                ui.label("Select the folder where you exported your artboard code.");
+                ui.add_space(16.0);
+
+                if ui.button("📁  Select Export Folder").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                        self.load_from_folder(path);
+                    }
+                }
+
+                if !self.status.is_empty() {
+                    ui.add_space(12.0);
+                    ui.label(&self.status);
+                }
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+                ui.small("Tip: In the Illustrator panel, click 💾 Save to Folder and choose a location.");
+            });
+        });
+    }
+
+    fn load_from_folder(&mut self, src: std::path::PathBuf) {
+        self.status = format!("Loading from: {}", src.display());
+
+        let generated_dir = Path::new("generated");
+        let mut copied = 0;
+        // Find artboard files (.rs that aren't the known ones)
+        let mut artboard_files = Vec::new();
+        if let Ok(entries) = fs::read_dir(&src) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map_or(false, |e| e == "rs") {
+                    let name = path.file_stem().unwrap().to_str().unwrap();
+                    if !["mod", "tokens", "state", "components"].contains(&name) {
+                        artboard_files.push(name.to_string());
+                    }
+                    // Copy all .rs files
+                    let dest = generated_dir.join(path.file_name().unwrap());
+                    if let Err(e) = fs::copy(&path, &dest) {
+                        self.status = format!("Failed to copy {}: {}", path.display(), e);
+                        return;
+                    }
+                    copied += 1;
+                }
+            }
+        }
+
+        if copied == 0 {
+            self.status = "No .rs files found in that folder.".to_string();
+            return;
+        }
+
+        // Update mod.rs to include artboard modules
+        let mut mod_content = String::from(
+            "// Auto-generated module declarations.\n// Artboard modules auto-discovered at build time.\n\npub mod tokens;\npub mod state;\npub mod components;\n"
+        );
+        for name in &artboard_files {
+            mod_content.push_str(&format!("pub mod {};\n", name));
+        }
+        if let Err(e) = fs::write(generated_dir.join("mod.rs"), mod_content) {
+            self.status = format!("Failed to write mod.rs: {}", e);
+            return;
+        }
+
+        self.status = format!(
+            "Copied {} file(s). Rebuilding preview...",
+            copied
+        );
+        self.mode = AppMode::Building {
+            message: self.status.clone(),
+        };
+
+        // Trigger rebuild in subprocess
+        let _ = std::process::Command::new("cargo")
+            .arg("run")
+            .current_dir(std::env::current_dir().unwrap())
+            .spawn();
+
+        // Exit launcher so the rebuilt instance takes over
+        std::process::exit(0);
+    }
+
+    fn show_preview(&mut self, ui: &mut egui::Ui) {
         let names = artboard_names();
 
         // Top bar
         ui.horizontal(|ui| {
             ui.heading("egui_expressive Preview");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if names.is_empty() {
-                    ui.label("No artboards loaded");
-                } else {
-                    ui.label(format!("{} artboard(s)", names.len()));
+                if ui.button("🔄  Load Different Folder").clicked() {
+                    // Clear generated files and go back to launcher
+                    let _ = self.clear_generated();
+                    self.mode = AppMode::Launcher;
+                    self.selected = None;
+                    return;
                 }
+                ui.label(format!("{} artboard(s)", names.len()));
             });
         });
         ui.separator();
 
-        if names.is_empty() {
-            ui.centered_and_justified(|ui| {
-                ui.group(|ui| {
-                    ui.set_min_width(400.0);
-                    ui.heading("No generated files found");
-                    ui.add_space(8.0);
-                    ui.label("Copy your exported .rs files to preview/generated/ and run cargo run again.");
-                    ui.add_space(4.0);
-                    ui.label("Files needed: mod.rs, tokens.rs, state.rs, components.rs, <artboard>.rs");
-                });
-            });
-            return;
-        }
-
         // Sidebar + main area
         ui.horizontal(|ui| {
-            // Sidebar
             ui.vertical(|ui| {
                 ui.set_min_width(180.0);
                 ui.set_max_width(240.0);
@@ -70,7 +182,6 @@ impl eframe::App for PreviewApp {
 
             ui.separator();
 
-            // Main area
             ui.vertical(|ui| {
                 ui.set_min_width(600.0);
                 if let Some(ref name) = self.selected {
@@ -84,6 +195,34 @@ impl eframe::App for PreviewApp {
                 }
             });
         });
+    }
+
+    fn clear_generated(&self,
+    ) -> Result<(), std::io::Error> {
+        let generated_dir = Path::new("generated");
+        // Restore placeholder files
+        let placeholders = [
+            ("mod.rs", include_str!("../generated/mod.rs")),
+            ("tokens.rs", include_str!("../generated/tokens.rs")),
+            ("state.rs", include_str!("../generated/state.rs")),
+            ("components.rs", include_str!("../generated/components.rs")),
+        ];
+        for (name, content) in &placeholders {
+            fs::write(generated_dir.join(name), content)?;
+        }
+        // Remove any artboard files
+        if let Ok(entries) = fs::read_dir(generated_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map_or(false, |e| e == "rs") {
+                    let stem = path.file_stem().unwrap().to_str().unwrap();
+                    if !["mod", "tokens", "state", "components"].contains(&stem) {
+                        let _ = fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 

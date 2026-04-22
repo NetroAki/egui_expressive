@@ -8,6 +8,16 @@ fn main() {
 
     fs::create_dir_all(&generated_out).unwrap();
 
+    // Clear stale files from previous builds
+    if let Ok(entries) = fs::read_dir(&generated_out) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "rs") {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
+
     // Copy all .rs files from generated/ to OUT_DIR/generated/
     let mut has_files = false;
     if generated_src.exists() {
