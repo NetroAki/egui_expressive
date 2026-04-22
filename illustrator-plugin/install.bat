@@ -38,9 +38,16 @@ if exist "%APPDATA%\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPlugi
 echo [INFO] Removing previous version...
 call :remove_required "%APPDATA%\Adobe\CEP\extensions\%EXT_ID%"
 if errorlevel 1 exit /b 1
+call :remove_optional "%APPDATA%\Adobe\CEPServiceManager4\extensions\%EXT_ID%"
+call :remove_optional "%LOCALAPPDATA%\Adobe\CEPServiceManager4\extensions\%EXT_ID%"
 call :remove_optional "%ProgramData%\Adobe\CEP\extensions\%EXT_ID%"
+call :remove_optional "%ProgramData%\Adobe\CEPServiceManager4\extensions\%EXT_ID%"
 call :remove_optional "%ProgramFiles%\Common Files\Adobe\CEP\extensions\%EXT_ID%"
+call :remove_optional "%ProgramFiles%\Common Files\Adobe\CEPServiceManager4\extensions\%EXT_ID%"
 call :remove_optional "%ProgramFiles(x86)%\Common Files\Adobe\CEP\extensions\%EXT_ID%"
+call :remove_optional "%ProgramFiles(x86)%\Common Files\Adobe\CEPServiceManager4\extensions\%EXT_ID%"
+if exist "%ProgramFiles%\Adobe" for /d %%D in ("%ProgramFiles%\Adobe\*") do call :remove_optional "%%~fD\CEP\extensions\%EXT_ID%"
+if exist "%ProgramFiles(x86)%\Adobe" for /d %%D in ("%ProgramFiles(x86)%\Adobe\*") do call :remove_optional "%%~fD\CEP\extensions\%EXT_ID%"
 call :try_upia_remove
 
 set "EXT_DIR=%APPDATA%\Adobe\CEP\extensions\%EXT_ID%"
