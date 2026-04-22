@@ -96,18 +96,24 @@ impl PreviewApp {
                     let path = entry.path();
                     if path.extension().is_some_and(|e| e == "rs") {
                         if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                            if !["mod", "tokens", "state", "components"].contains(&name) {
+                            if is_valid_module_name(name)
+                                && !["mod", "tokens", "state", "components"].contains(&name)
+                            {
                                 artboard_files.push(name.to_string());
                             }
                         }
-                        // Copy all .rs files
+                        // Copy all .rs files with valid module names
                         if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
-                            let dest = generated_dir.join(fname);
-                            if let Err(e) = fs::copy(&path, &dest) {
-                                self.status = format!("Failed to copy {}: {}", path.display(), e);
-                                return;
+                            if let Some(stem) = fname.strip_suffix(".rs") {
+                                if is_valid_module_name(stem) {
+                                    let dest = generated_dir.join(fname);
+                                    if let Err(e) = fs::copy(&path, &dest) {
+                                        self.status = format!("Failed to copy {}: {}", path.display(), e);
+                                        return;
+                                    }
+                                    copied += 1;
+                                }
                             }
-                            copied += 1;
                         }
                     }
                 }
@@ -178,7 +184,7 @@ impl PreviewApp {
                 if ui.button("[ Load Different Folder ]").clicked() {
                     // Clear generated files and go back to launcher
                     if let Err(e) = self.clear_generated() {
-                        eprintln!("Warning: failed to clear generated files: {}", e);
+                        self.status = format!("Warning: failed to clear generated files: {}", e);
                     }
                     self.mode = AppMode::Launcher;
                     self.selected = None;
@@ -251,6 +257,13 @@ impl PreviewApp {
         }
         Ok(())
     }
+}
+
+fn is_valid_module_name(s: &str) -> bool {
+    if s.is_empty() || s.starts_with(|c: char| c.is_ascii_digit()) {
+        return false;
+    }
+    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn main() -> eframe::Result {

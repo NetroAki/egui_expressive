@@ -55,7 +55,7 @@ fn main() {
                 let path = entry.path();
                 if path.extension().is_some_and(|e| e == "rs") {
                     if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                        if !["mod", "tokens", "state", "components"].contains(&name) {
+                        if is_valid_module_name(name) && !["mod", "tokens", "state", "components"].contains(&name) {
                             artboards.push(name.to_string());
                         }
                     }
@@ -104,6 +104,13 @@ fn main() {
     let _ = fs::write(out_dir.join("dispatch.rs"), dispatch);
 
     println!("cargo:rerun-if-changed=generated");
+}
+
+fn is_valid_module_name(s: &str) -> bool {
+    if s.is_empty() || s.starts_with(|c: char| c.is_ascii_digit()) {
+        return false;
+    }
+    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn snake_to_pascal(s: &str) -> String {
