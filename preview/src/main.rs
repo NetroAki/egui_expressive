@@ -135,13 +135,20 @@ impl PreviewApp {
         };
 
         // Trigger rebuild in subprocess
-        let _ = std::process::Command::new("cargo")
+        match std::process::Command::new("cargo")
             .arg("run")
             .current_dir(std::env::current_dir().unwrap())
-            .spawn();
-
-        // Exit launcher so the rebuilt instance takes over
-        std::process::exit(0);
+            .spawn()
+        {
+            Ok(_) => {
+                // Exit launcher so the rebuilt instance takes over
+                std::process::exit(0);
+            }
+            Err(e) => {
+                self.status = format!("Failed to start rebuild: {}", e);
+                self.mode = AppMode::Launcher;
+            }
+        }
     }
 
     fn show_preview(&mut self, ui: &mut egui::Ui) {
@@ -217,7 +224,7 @@ impl PreviewApp {
                 if path.extension().is_some_and(|e| e == "rs") {
                     let stem = path.file_stem().unwrap().to_str().unwrap();
                     if !["mod", "tokens", "state", "components"].contains(&stem) {
-                        let _ = fs::remove_file(&path);
+                        fs::remove_file(&path)?;
                     }
                 }
             }

@@ -34,13 +34,11 @@ To load a different export, click **Load Different Folder** in the top bar.
 
 ## Files
 
-The preview app expects these files in the selected folder:
+The preview app looks for these files in the selected folder:
 
-- `mod.rs` — module declarations
-- `tokens.rs` — color constants
-- `state.rs` — state structs + action enums
-- `components.rs` — reusable component functions
 - `<artboard_name>.rs` — one per artboard (e.g. `login_screen.rs`)
+
+If `mod.rs`, `tokens.rs`, `state.rs`, or `components.rs` are missing, the app auto-generates minimal placeholders so the preview still compiles. For the best experience, export all files from Illustrator.
 
 ## How it works
 

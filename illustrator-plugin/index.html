@@ -943,7 +943,7 @@
         ${fileNames.map(name => `
           <div class="tree-file" id="tree-${name.replace(/[^a-z0-9]/gi,'_')}" onclick="showFile('${name}')">
             <span>${name}</span>
-            <button class="dl-btn" onclick="event.stopPropagation();downloadFile('${name}')" title="Download">Get</button>
+            <button class="dl-btn" onclick="event.stopPropagation();downloadFile('${name}')" title="Download ${name}">Get ${name}</button>
           </div>
         `).join('')}
       `;

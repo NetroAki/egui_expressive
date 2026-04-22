@@ -13,7 +13,7 @@ fn main() {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "rs") {
-                let _ = fs::remove_file(&path);
+                fs::remove_file(&path).unwrap_or(());
             }
         }
     }

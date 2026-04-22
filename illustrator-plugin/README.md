@@ -21,7 +21,7 @@ This plugin uses CEP (Common Extensibility Platform). The `manifest.json` file i
    - **Use naming conventions** — Name layers `row-toolbar`, `btn-save`, `col-sidebar` for better output
    - **Infer gaps** — Automatically detect spacing between elements
    - **Include JSON sidecar** — Export element data for manual inspection
-5. Click **Export**
+5. Click **Export Selected Artboards**
 6. Copy the generated code or save to your project
 
 ## Naming Conventions
