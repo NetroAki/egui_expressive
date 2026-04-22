@@ -1,76 +1,82 @@
 @echo off
-REM install.bat — Install egui_expressive Exporter into Adobe Illustrator
+REM install.bat - Install egui_expressive Exporter into Adobe Illustrator
 REM Self-contained: place this .bat next to the .zxp file
 
-setlocal enabledelayedexpansion
+setlocal EnableExtensions EnableDelayedExpansion
 
 echo ============================================
 echo  egui_expressive Illustrator Plugin Installer
 echo ============================================
 echo.
 
+REM Look for ZXP next to script first, then in dist/
 set "ZXP_FILE=%~dp0egui_expressive_export-1.0.0.zxp"
-if not exist "%ZXP_FILE%" (
+if not exist "!ZXP_FILE!" (
     set "ZXP_FILE=%~dp0..\dist\egui_expressive_export-1.0.0.zxp"
 )
-if not exist "%ZXP_FILE%" (
+if not exist "!ZXP_FILE!" (
     echo [ERROR] egui_expressive_export-1.0.0.zxp not found.
-    echo [ERROR] Please build it first: cd installer ^&^& bash build_zxp.sh
-    echo [ERROR] Or place the .zxp file next to this script.
+    echo [ERROR] Run build_zxp.bat first, or place the .zxp next to this script.
     exit /b 1
 )
 
-echo [INFO] Found: %ZXP_FILE%
+echo [INFO] Found: !ZXP_FILE!
 
 REM Find UPIA in common locations
 set "UPIA_PATH="
-if exist "%ProgramFiles%\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
-    set "UPIA_PATH=%ProgramFiles%\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
-) else if exist "%ProgramFiles(x86)%\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
-    set "UPIA_PATH=%ProgramFiles(x86)%\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
-) else if exist "%LOCALAPPDATA%\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
-    set "UPIA_PATH=%LOCALAPPDATA%\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
-) else if exist "%APPDATA%\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
-    set "UPIA_PATH=%APPDATA%\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+if exist "!ProgramFiles!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
+    set "UPIA_PATH=!ProgramFiles!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+)
+if not defined UPIA_PATH (
+    if exist "!ProgramFiles(x86)!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
+        set "UPIA_PATH=!ProgramFiles(x86)!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+    )
+)
+if not defined UPIA_PATH (
+    if exist "!LOCALAPPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
+        set "UPIA_PATH=!LOCALAPPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+    )
+)
+if not defined UPIA_PATH (
+    if exist "!APPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" (
+        set "UPIA_PATH=!APPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+    )
 )
 
 REM Remove previous version first
 if defined UPIA_PATH (
     echo [INFO] Removing previous version...
     "!UPIA_PATH!" /remove "com.egui-expressive.illustrator-exporter" >nul 2>&1
-    echo [INFO] Previous version removed (if present).
+    echo [INFO] Previous version removed.
 ) else (
     echo [INFO] Removing previous version manually...
-    rmdir /s /q "%APPDATA%\Adobe\CEP\extensions\com.egui-expressive.illustrator-exporter" >nul 2>&1
-    echo [INFO] Previous version removed (if present).
+    rmdir /s /q "!APPDATA!\Adobe\CEP\extensions\com.egui-expressive.illustrator-exporter" >nul 2>&1
+    echo [INFO] Previous version removed.
 )
 
 REM Install
 if defined UPIA_PATH (
     echo [INFO] Installing via UPIA...
-    "!UPIA_PATH!" /install "%ZXP_FILE%"
-    if errorlevel 1 (
+    "!UPIA_PATH!" /install "!ZXP_FILE!"
+    if !errorlevel! neq 0 (
         echo [ERROR] UPIA installation failed.
         exit /b 1
     )
     echo [SUCCESS] Extension installed successfully.
 ) else (
     echo [WARN] UPIA not found. Falling back to manual extraction...
-    
-    set "EXT_DIR=%APPDATA%\Adobe\CEP\extensions\com.egui-expressive.illustrator-exporter"
+    set "EXT_DIR=!APPDATA!\Adobe\CEP\extensions\com.egui-expressive.illustrator-exporter"
     if not exist "!EXT_DIR!" mkdir "!EXT_DIR!"
-    
     echo [INFO] Extracting to: !EXT_DIR!
-    powershell -Command "Expand-Archive -Path '%ZXP_FILE%' -DestinationPath '!EXT_DIR!' -Force"
-    if errorlevel 1 (
+    powershell -Command "Expand-Archive -Path '!ZXP_FILE!' -DestinationPath '!EXT_DIR!' -Force"
+    if !errorlevel! neq 0 (
         echo [ERROR] Failed to extract .zxp file.
         exit /b 1
     )
-    
     echo [SUCCESS] Extension extracted successfully.
 )
 
-REM Enable CEP debug mode for self-signed extensions (no admin required)
+REM Enable CEP debug mode for self-signed extensions
 echo [INFO] Enabling CEP debug mode for self-signed extensions...
 reg add "HKCU\SOFTWARE\Adobe\CSXS.10" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
 reg add "HKCU\SOFTWARE\Adobe\CSXS.11" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
@@ -78,13 +84,13 @@ reg add "HKCU\SOFTWARE\Adobe\CSXS.12" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 
 reg add "HKCU\SOFTWARE\Adobe\CSXS.13" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
 reg add "HKCU\SOFTWARE\Adobe\CSXS.14" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
 reg add "HKCU\SOFTWARE\Adobe\CSXS.15" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-echo [INFO] CEP debug mode enabled (CSXS.10-15).
+echo [INFO] CEP debug mode enabled.
 
 echo.
 echo ============================================
 echo  Installation complete!
 echo  Restart Illustrator and open:
-echo  Window ^> Extensions ^> egui_expressive Export
+echo  Window - Extensions - egui_expressive Export
 echo ============================================
 pause
 
