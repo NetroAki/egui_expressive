@@ -1,6 +1,6 @@
 @echo off
-REM install.bat - Install egui_expressive Exporter into Adobe Illustrator
-REM Self-contained: place this .bat next to the .zxp file
+REM install.bat — Per-user CEP extension installer (no admin required)
+REM Extracts .zxp to APPDATA and enables debug mode
 
 setlocal EnableExtensions EnableDelayedExpansion
 
@@ -9,109 +9,112 @@ echo  egui_expressive Illustrator Plugin Installer
 echo ============================================
 echo.
 
-REM Resolve paths OUTSIDE any blocks to avoid %~dp0 expansion issues
+REM --- Resolve ZXP path (outside blocks) ---
 set "SCRIPT_DIR=%~dp0"
 set "ZXP_FILE=!SCRIPT_DIR!egui_expressive_export-1.0.0.zxp"
-
-REM Look for ZXP next to script first, then in dist/
 if not exist "!ZXP_FILE!" (
     set "ZXP_FILE=!SCRIPT_DIR!..\dist\egui_expressive_export-1.0.0.zxp"
 )
 if not exist "!ZXP_FILE!" (
     echo [ERROR] egui_expressive_export-1.0.0.zxp not found.
-    echo [ERROR] Run build_zxp.bat first, or place the .zxp next to this script.
+    echo [ERROR] Place the .zxp next to this script, or run build_zxp.bat first.
+    pause
     exit /b 1
 )
 
 echo [INFO] Found: !ZXP_FILE!
 
-REM Find UPIA - check each path one at a time, no nesting
-set "UPIA_PATH="
-set "UPIA_TEST=!ProgramFiles!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
-if exist "!UPIA_TEST!" set "UPIA_PATH=!UPIA_TEST!"
-
-if not defined UPIA_PATH (
-    set "UPIA_TEST=!ProgramFiles(x86)!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
-    if exist "!UPIA_TEST!" set "UPIA_PATH=!UPIA_TEST!"
-)
-
-if not defined UPIA_PATH (
-    set "UPIA_TEST=!LOCALAPPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
-    if exist "!UPIA_TEST!" set "UPIA_PATH=!UPIA_TEST!"
-)
-
-if not defined UPIA_PATH (
-    set "UPIA_TEST=!APPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
-    if exist "!UPIA_TEST!" set "UPIA_PATH=!UPIA_TEST!"
-)
-
-REM Remove previous version — always force remove folder, then UPIA unregister
+REM --- Extension identity ---
 set "EXT_ID=com.egui-expressive.illustrator-exporter"
+set "EXT_NAME=egui_expressive Exporter"
+
+REM --- Uninstall: discover and remove from ALL known locations ---
 echo [INFO] Removing previous version...
+set "FOUND_OLD=0"
 
-REM Try UPIA remove first (unregisters from Adobe's extension database)
-if defined UPIA_PATH (
-    "!UPIA_PATH!" /remove "!EXT_ID!" 2>nul
-)
-
-REM Always manually delete the extension folder (guaranteed cleanup)
-set "EXT_DIR=!APPDATA!\Adobe\CEP\extensions\!EXT_ID!"
-if exist "!EXT_DIR!" (
-    rmdir /s /q "!EXT_DIR!"
-    echo [INFO] Old extension folder deleted.
-) else (
-    echo [INFO] No previous extension folder found.
-)
-
-REM Also check per-user ProgramData location
-set "EXT_DIR2=!ProgramData!\Adobe\CEP\extensions\!EXT_ID!"
-if exist "!EXT_DIR2!" (
-    rmdir /s /q "!EXT_DIR2!"
-    echo [INFO] Old system extension folder deleted.
-)
-
-echo [INFO] Previous version removed.
-
-REM Install fresh
-set "EXT_DIR=!APPDATA!\Adobe\CEP\extensions\!EXT_ID!"
-if defined UPIA_PATH (
-    echo [INFO] Installing via UPIA...
-    "!UPIA_PATH!" /install "!ZXP_FILE!"
-    if !errorlevel! neq 0 (
-        echo [WARN] UPIA install failed, trying manual extraction...
-        if not exist "!EXT_DIR!" mkdir "!EXT_DIR!"
-        echo [INFO] Extracting to: !EXT_DIR!
-        powershell -Command "Expand-Archive -Path '!ZXP_FILE!' -DestinationPath '!EXT_DIR!' -Force"
+REM Check all known CEP extension paths
+for %%L in (
+    "!APPDATA!\Adobe\CEP\extensions"
+    "!ProgramData!\Adobe\CEP\extensions"
+    "!ProgramFiles!\Common Files\Adobe\CEP\extensions"
+    "!ProgramFiles(x86)!\Common Files\Adobe\CEP\extensions"
+) do (
+    set "OLD_DIR=%%~L\!EXT_ID!"
+    if exist "!OLD_DIR!" (
+        echo [INFO]   Found old install at: !OLD_DIR!
+        rmdir /s /q "!OLD_DIR!"
         if !errorlevel! neq 0 (
-            echo [ERROR] Failed to extract .zxp file.
+            echo [ERROR]   Failed to delete !OLD_DIR!
+            echo [ERROR]   Close Illustrator and retry.
+            pause
             exit /b 1
         )
-    )
-) else (
-    echo [INFO] UPIA not found. Installing via manual extraction...
-    if not exist "!EXT_DIR!" mkdir "!EXT_DIR!"
-    echo [INFO] Extracting to: !EXT_DIR!
-    powershell -Command "Expand-Archive -Path '!ZXP_FILE!' -DestinationPath '!EXT_DIR!' -Force"
-    if !errorlevel! neq 0 (
-        echo [ERROR] Failed to extract .zxp file.
-        exit /b 1
+        set "FOUND_OLD=1"
+        echo [INFO]   Deleted.
     )
 )
-echo [SUCCESS] Extension installed.
 
-REM Enable CEP debug mode for self-signed extensions
+if !FOUND_OLD! equ 0 (
+    echo [INFO] No previous installation found.
+)
+
+REM Also try UPIA unregister if available (optional cleanup)
+set "UPIA_PATH="
+for %%P in (
+    "!ProgramFiles!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+    "!ProgramFiles(x86)!\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+    "!LOCALAPPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+    "!APPDATA!\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe"
+) do (
+    if exist "%%~P" (
+        set "UPIA_PATH=%%~P"
+        goto :upia_found
+    )
+)
+:upia_found
+
+if defined UPIA_PATH (
+    echo [INFO] Unregistering from Adobe extension database...
+    "!UPIA_PATH!" /remove "!EXT_ID!"
+    if !errorlevel! neq 0 (
+        echo [WARN] UPIA unregister failed (non-critical, extension folder already deleted).
+    ) else (
+        echo [INFO] Unregister done.
+    )
+)
+
+REM --- Install: per-user location (no admin) ---
+set "EXT_DIR=!APPDATA!\Adobe\CEP\extensions\!EXT_ID!"
+echo [INFO] Installing to: !EXT_DIR!
+if not exist "!EXT_DIR!" mkdir "!EXT_DIR!"
+
+REM Pass paths via env vars to avoid PowerShell quoting issues with apostrophes
+set "ZXP_SRC=!ZXP_FILE!"
+set "ZXP_DST=!EXT_DIR!"
+powershell -NoProfile -Command "$src = $env:ZXP_SRC; $dst = $env:ZXP_DST; Expand-Archive -LiteralPath $src -DestinationPath $dst -Force"
+if !errorlevel! neq 0 (
+    echo [ERROR] Extraction failed.
+    echo [ERROR] If the path contains special characters, move the .zxp to a simple path like C:\temp\
+    pause
+    exit /b 1
+)
+echo [INFO] Extraction complete.
+
+REM --- Enable CEP debug mode (HKCU = no admin) ---
 echo [INFO] Enabling CEP debug mode for self-signed extensions...
-reg add "HKCU\SOFTWARE\Adobe\CSXS.10" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.11" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.12" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.13" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.14" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.15" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-echo [INFO] CEP debug mode enabled.
+for %%V in (10 11 12 13 14 15) do (
+    reg add "HKCU\SOFTWARE\Adobe\CSXS.%%V" /v PlayerDebugMode /t REG_SZ /d 1 /f
+    if !errorlevel! equ 0 (
+        echo [INFO]   CSXS.%%V debug mode enabled.
+    ) else (
+        echo [WARN]   CSXS.%%V registry write failed.
+    )
+)
 
 echo.
 echo ============================================
 echo  Installation complete!
+echo.
 echo  Restart Illustrator and open:
 echo  Window - Extensions - egui_expressive Export
 echo ============================================
