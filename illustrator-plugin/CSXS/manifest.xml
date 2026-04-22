@@ -1,11 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  CEP Extension Manifest for egui_expressive Exporter
-  Enables .zxp packaging via ZXPSignCmd for Adobe Illustrator.
-
-  UXP manifest (manifest.json) is retained for developer/UXT mode.
-  This CEP manifest enables standard distribution as a .zxp extension.
--->
 <ExtensionManifest Version="7.0" ExtensionBundleId="com.egui-expressive.illustrator-exporter"
                    ExtensionBundleVersion="1.0.0"
                    ExtensionBundleName="egui_expressive Exporter"
@@ -17,14 +10,13 @@
 
   <ExecutionEnvironment>
     <HostList>
-      <!-- Illustrator 2022 (26) through future versions -->
       <Host Name="ILST" Version="[26.0,99.9]" />
     </HostList>
     <LocaleList>
       <Locale Code="All" />
     </LocaleList>
     <RequiredRuntimeList>
-      <RequiredRuntime Name="CSXS" Version="11.0" />
+      <RequiredRuntime Name="CSXS" Version="10.0" />
     </RequiredRuntimeList>
   </ExecutionEnvironment>
 

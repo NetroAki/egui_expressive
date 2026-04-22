@@ -76,12 +76,18 @@ if defined UPIA_PATH (
 
 REM Enable CEP debug mode for self-signed extensions (no admin required)
 echo [INFO] Enabling CEP debug mode for self-signed extensions...
+reg add "HKCU\SOFTWARE\Adobe\CSXS.9" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
 reg add "HKCU\SOFTWARE\Adobe\CSXS.10" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
 reg add "HKCU\SOFTWARE\Adobe\CSXS.11" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
 reg add "HKCU\SOFTWARE\Adobe\CSXS.12" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
 reg add "HKCU\SOFTWARE\Adobe\CSXS.13" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
 reg add "HKCU\SOFTWARE\Adobe\CSXS.14" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
 reg add "HKCU\SOFTWARE\Adobe\CSXS.15" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-echo [INFO] CEP debug mode enabled (CSXS.10-15). Restart Illustrator for changes to take effect.
+reg add "HKCU\SOFTWARE\Adobe\CSXS.16" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
+reg add "HKCU\SOFTWARE\Adobe\CSXS.17" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
+reg add "HKCU\SOFTWARE\Adobe\CSXS.18" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
+reg add "HKCU\SOFTWARE\Adobe\CSXS.19" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
+reg add "HKCU\SOFTWARE\Adobe\CSXS.20" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
+echo [INFO] CEP debug mode enabled (CSXS.9-20). Restart Illustrator for changes to take effect.
 
 endlocal

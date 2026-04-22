@@ -75,12 +75,18 @@ exit /b 1
 :extracted_ok
 echo [INFO] Extraction complete.
 echo [INFO] Enabling CEP debug mode for self-signed extensions...
+call :enable_debug 9
 call :enable_debug 10
 call :enable_debug 11
 call :enable_debug 12
 call :enable_debug 13
 call :enable_debug 14
 call :enable_debug 15
+call :enable_debug 16
+call :enable_debug 17
+call :enable_debug 18
+call :enable_debug 19
+call :enable_debug 20
 
 echo.
 echo ============================================

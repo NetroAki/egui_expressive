@@ -11,11 +11,13 @@
       --surface-container-high: #36343b;
       --on-surface: #e6e1e5;
       --on-surface-variant: #cac4d0;
-      --primary: #4caf50;
-      --on-primary: #1b5e20;
+      --primary: #a8c7fa;
+      --on-primary: #062e6f;
+      --primary-muted: rgba(168, 199, 250, 0.18);
       --outline: #938f99;
       --outline-variant: #49454f;
       --error: #f2b8b5;
+      --error-container: rgba(242, 184, 181, 0.1);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { 
@@ -50,6 +52,35 @@
       letter-spacing: 0.08em;
       color: var(--on-surface-variant);
       margin-bottom: 6px;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .section-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .ghost-btn {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--on-surface-variant);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 3px 8px;
+      border-radius: 999px;
+      transition: background 0.2s, color 0.2s, border-color 0.2s;
+    }
+    .ghost-btn.primary {
+      color: var(--primary);
+    }
+    .ghost-btn:hover {
+      background: var(--surface-container);
+      border-color: var(--outline-variant);
     }
     .artboard-list { max-height: 100px; overflow-y: auto; }
     .artboard-item {
@@ -112,7 +143,12 @@
       flex-shrink: 0;
     }
     .export-btn:hover { opacity: 0.9; }
-    .export-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .export-btn:disabled {
+      opacity: 1;
+      cursor: not-allowed;
+      background: var(--primary-muted);
+      color: rgba(230, 225, 229, 0.45);
+    }
     
     /* Main content area — split: file tree + code preview */
     .content-area {
@@ -212,7 +248,7 @@
     
     /* Warnings panel */
     .warnings-panel {
-      background: rgba(242, 184, 181, 0.1);
+      background: var(--error-container);
       border-top: 1px solid rgba(242, 184, 181, 0.3);
       padding: 8px 12px;
       flex-shrink: 0;
@@ -233,7 +269,7 @@
     
     /* Status bar */
     .status-bar {
-      padding: 4px 12px;
+      padding: 6px 12px;
       font-size: 10px;
       color: var(--on-surface-variant);
       border-top: 1px solid var(--outline-variant);
@@ -241,6 +277,12 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 12px;
+    }
+
+    .status-text {
+      flex: 1;
+      min-width: 0;
     }
 
     .ai-parser-status {
@@ -248,6 +290,7 @@
       display: flex;
       align-items: center;
       gap: 4px;
+      white-space: nowrap;
     }
     .ai-parser-status .dot {
       width: 6px;
@@ -255,10 +298,40 @@
       border-radius: 50%;
       background: var(--outline);
     }
-    .ai-parser-status.available .dot { background: #4caf50; }
-    .ai-parser-status.available { color: #4caf50; }
+    .ai-parser-status.available .dot { background: var(--primary); }
+    .ai-parser-status.available { color: var(--primary); }
     .ai-parser-status.unavailable .dot { background: var(--outline); }
     .ai-parser-status.unavailable { color: var(--on-surface-variant); }
+
+    .artboard-message {
+      background: var(--surface-container);
+      border: 1px solid var(--outline-variant);
+      border-radius: 6px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11px;
+    }
+    .artboard-message.error {
+      background: var(--error-container);
+      border-color: var(--error);
+    }
+    .artboard-message-title {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--on-surface-variant);
+    }
+    .artboard-message.error .artboard-message-title,
+    .artboard-message.error .artboard-message-body {
+      color: var(--error);
+    }
+    .artboard-message-detail {
+      color: var(--on-surface-variant);
+      line-height: 1.4;
+    }
 
     .empty-state {
       display: flex;
@@ -271,6 +344,28 @@
       gap: 8px;
     }
     .empty-state .icon { font-size: 24px; }
+
+    .artboard-list::-webkit-scrollbar,
+    .file-tree::-webkit-scrollbar,
+    .code-preview::-webkit-scrollbar,
+    .warnings-panel::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+    .artboard-list::-webkit-scrollbar-thumb,
+    .file-tree::-webkit-scrollbar-thumb,
+    .code-preview::-webkit-scrollbar-thumb,
+    .warnings-panel::-webkit-scrollbar-thumb {
+      background: var(--surface-container-high);
+      border-radius: 999px;
+      border: 2px solid var(--surface);
+    }
+    .artboard-list::-webkit-scrollbar-track,
+    .file-tree::-webkit-scrollbar-track,
+    .code-preview::-webkit-scrollbar-track,
+    .warnings-panel::-webkit-scrollbar-track {
+      background: var(--surface);
+    }
   </style>
   <!-- JSZip is loaded from CDN for online use; CEP panels without internet will fall back to individual file downloads -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -282,10 +377,12 @@
   </header>
   
   <div class="artboard-section">
-    <div class="section-label">Artboards <span id="artboard-count"></span></div>
-    <div style="display:flex;gap:8px;margin-bottom:6px;">
-      <button onclick="selectAll(true)" style="background:none;border:none;color:var(--primary);font-size:11px;cursor:pointer;padding:0;">Select all</button>
-      <button onclick="selectAll(false)" style="background:none;border:none;color:var(--on-surface-variant);font-size:11px;cursor:pointer;padding:0;">None</button>
+    <div class="section-header">
+      <div class="section-label">Artboards <span id="artboard-count"></span></div>
+      <div class="section-actions">
+        <button class="ghost-btn primary" onclick="selectAll(true)">Select all</button>
+        <button class="ghost-btn" onclick="selectAll(false)">None</button>
+      </div>
     </div>
     <div class="artboard-list" id="artboard-list">
       <div style="color:var(--on-surface-variant);font-size:11px;padding:4px 0;">Loading artboards...</div>
@@ -333,13 +430,20 @@
     <div id="warnings-list"></div>
   </section>
   
-  <section class="status-bar" id="status-bar" aria-label="Status" role="status" aria-live="polite">Ready</section>
-  <section class="ai-parser-status" id="ai-parser-status" title="Project file analysis via ai-parser" aria-label="Parser"></section>
+  <section class="status-bar" id="status-bar" aria-label="Status" role="status" aria-live="polite">
+    <span class="status-text" id="status-text">Ready</span>
+    <span class="ai-parser-status" id="ai-parser-status" title="Project file analysis via ai-parser" aria-label="Parser"></span>
+  </section>
 
   <!-- Plugin codegen library loaded for both UXP and CEP panel contexts -->
   <script src="plugin.js"></script>
   <script>
     const options = { naming: true, gaps: true, sidecar: true, native: true };
+    const CEP_EVAL_ERROR = 'EvalScript error.';
+    const CEP_HOST_READY = '__HOST_READY__';
+    const CEP_HOST_MISSING = '__HOST_MISSING__';
+    const CEP_HOST_INIT_ATTEMPTS = 6;
+    const CEP_HOST_INIT_DELAY_MS = 250;
     let generatedFiles = {};
     let activeFile = null;
     
@@ -354,70 +458,221 @@
     }
 
     function setStatus(msg) {
-      document.getElementById('status-bar').textContent = msg;
+      document.getElementById('status-text').textContent = msg;
     }
     
-    function showArtboardError(msg) {
+    function showArtboardError(msg, tone = 'error', title = '', detail = '') {
       const list = document.getElementById('artboard-list');
-      list.innerHTML = `<div style="color:var(--error);font-size:11px;padding:4px 0;">${escapeHtml(msg)}</div>`;
+      const safeTitle = title || (tone === 'error' ? 'Unable to load artboards' : 'Status');
+      const detailHtml = detail ? `<div class="artboard-message-detail">${escapeHtml(detail)}</div>` : '';
+      list.innerHTML = `
+        <div class="artboard-message ${tone}" role="${tone === 'error' ? 'alert' : 'status'}">
+          <div class="artboard-message-title">${escapeHtml(safeTitle)}</div>
+          <div class="artboard-message-body">${escapeHtml(msg)}</div>
+          ${detailHtml}
+        </div>
+      `;
+    }
+
+    function wait(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function evalCepScript(script) {
+      return new Promise(resolve => {
+        try {
+          if (!window.__adobe_cep__ || typeof window.__adobe_cep__.evalScript !== 'function') {
+            resolve({ ok: false, error: 'CEP bridge unavailable' });
+            return;
+          }
+          window.__adobe_cep__.evalScript(script, function(result) {
+            if (result === CEP_EVAL_ERROR) {
+              resolve({ ok: false, error: CEP_EVAL_ERROR, result });
+              return;
+            }
+            resolve({ ok: true, result });
+          });
+        } catch (e) {
+          resolve({ ok: false, error: e && e.message ? e.message : String(e) });
+        }
+      });
+    }
+
+    function getExtensionRootPath() {
+      try {
+        if (window.__adobe_cep__ && typeof window.__adobe_cep__.getSystemPath === 'function') {
+          try {
+            const fromString = window.__adobe_cep__.getSystemPath('extension');
+            if (fromString) return fromString;
+          } catch (e) {}
+          try {
+            if (typeof SystemPath !== 'undefined' && SystemPath.EXTENSION) {
+              const fromConstant = window.__adobe_cep__.getSystemPath(SystemPath.EXTENSION);
+              if (fromConstant) return fromConstant;
+            }
+          } catch (e) {}
+        }
+      } catch (e) {}
+
+      try {
+        const href = window.location.href.split(/[?#]/)[0];
+        const url = new URL(href);
+        let root = decodeURIComponent(url.pathname || '');
+        root = root.replace(/\/index\.html$/i, '');
+        if (/^\/[A-Za-z]:/.test(root)) {
+          root = root.slice(1);
+        }
+        return root;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function escapeForExtendScriptPath(value) {
+      return String(value || '').replace(/\\/g, '/').replace(/'/g, "\\'");
+    }
+
+    async function forceLoadCepHost() {
+      const root = getExtensionRootPath();
+      if (!root) {
+        return { ok: false, detail: 'Could not resolve the extension install path.' };
+      }
+
+      const hostPath = escapeForExtendScriptPath(root.replace(/[\\/]+$/, '') + '/host.jsx');
+      const loadResult = await evalCepScript(`(function(){try{$.evalFile('${hostPath}');return JSON.stringify({ready:typeof getDiagnosticsJSON==='function'});}catch(e){return JSON.stringify({error:String(e)})}})()`);
+      if (!loadResult.ok) {
+        return { ok: false, detail: loadResult.error || 'ExtendScript rejected $.evalFile().' };
+      }
+
+      try {
+        const parsed = JSON.parse(loadResult.result);
+        if (parsed.ready) {
+          return { ok: true };
+        }
+        return { ok: false, detail: parsed.error || 'host.jsx loaded but did not expose the expected functions.' };
+      } catch (e) {
+        return { ok: false, detail: 'Unexpected response while loading host.jsx.' };
+      }
+    }
+
+    async function ensureCepHostReady() {
+      let lastDetail = '';
+      for (let attempt = 1; attempt <= CEP_HOST_INIT_ATTEMPTS; attempt += 1) {
+        const probe = await evalCepScript(`JSON.stringify({ready:typeof getDiagnosticsJSON==='function'?'${CEP_HOST_READY}':'${CEP_HOST_MISSING}'})`);
+        if (probe.ok) {
+          try {
+            const parsed = JSON.parse(probe.result);
+            if (parsed.ready === CEP_HOST_READY) {
+              return { ok: true };
+            }
+          } catch (e) {
+            lastDetail = 'ExtendScript returned invalid startup diagnostics.';
+          }
+        } else {
+          lastDetail = probe.error || lastDetail;
+        }
+
+        if (attempt === 1) {
+          const forced = await forceLoadCepHost();
+          if (forced.ok) {
+            return { ok: true };
+          }
+          lastDetail = forced.detail || lastDetail;
+        }
+
+        if (attempt < CEP_HOST_INIT_ATTEMPTS) {
+          await wait(CEP_HOST_INIT_DELAY_MS * attempt);
+        }
+      }
+
+      return { ok: false, detail: lastDetail || 'The ExtendScript host never became ready.' };
+    }
+
+    async function loadCepArtboards() {
+      const hostReady = await ensureCepHostReady();
+      if (!hostReady.ok) {
+        showArtboardError(
+          'Illustrator did not finish loading host.jsx for this panel.',
+          'error',
+          'ExtendScript host unavailable',
+          (hostReady.detail || 'Restart Illustrator, reinstall the latest build, and if the panel is still green you are likely running an older install.')
+        );
+        setStatus('ExtendScript host unavailable');
+        return;
+      }
+
+      const diagResponse = await evalCepScript('getDiagnosticsJSON()');
+      if (!diagResponse.ok) {
+        showArtboardError(
+          'CEP connected, but Illustrator rejected the first diagnostics call.',
+          'error',
+          'evalScript failed',
+          'Restart Illustrator, reinstall the latest build, and rerun install_zxp.bat only if the panel still fails after reinstall.'
+        );
+        setStatus('CEP evalScript failed');
+        return;
+      }
+
+      let diag;
+      try {
+        diag = JSON.parse(diagResponse.result);
+      } catch (e) {
+        showArtboardError('Illustrator returned invalid diagnostics.', 'error', 'Unexpected diagnostics', e.message);
+        setStatus('Invalid Illustrator diagnostics');
+        return;
+      }
+
+      if (diag && diag.error) {
+        showArtboardError('Illustrator error: ' + diag.error, 'error', 'Illustrator reported an error');
+        setStatus('Illustrator error: ' + diag.error);
+        return;
+      }
+      if (!diag.hasDoc) {
+        showArtboardError('No document open in Illustrator. Open an .ai file first.', 'info', 'Open a document');
+        setStatus('Open an Illustrator document first');
+        return;
+      }
+      if (diag.artboardCount === 0) {
+        showArtboardError('No artboards found in this document. Add at least one artboard in Illustrator.', 'info', 'No artboards found');
+        setStatus('No artboards in document');
+        return;
+      }
+
+      const artboardsResponse = await evalCepScript('getArtboardsJSON()');
+      if (!artboardsResponse.ok) {
+        showArtboardError('Illustrator was ready, but loading artboards still failed.', 'error', 'Artboard query failed', 'Restart Illustrator and reinstall the latest build if this persists.');
+        setStatus('Artboard query failed');
+        return;
+      }
+      if (!artboardsResponse.result || artboardsResponse.result === 'undefined') {
+        showArtboardError('No document open in Illustrator.', 'info', 'Open a document');
+        setStatus('No document open in Illustrator');
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(artboardsResponse.result);
+        if (parsed && parsed.error) {
+          showArtboardError('Illustrator error: ' + parsed.error, 'error', 'Illustrator reported an error');
+          setStatus('Illustrator error: ' + parsed.error);
+          return;
+        }
+        loadArtboards(parsed);
+        setStatus('Ready — ' + parsed.length + ' artboard(s) loaded');
+      } catch (e) {
+        showArtboardError('Error parsing artboard data: ' + e.message, 'error', 'Artboard data could not be read');
+        setStatus('Error parsing artboard data: ' + e.message);
+      }
     }
     
     // Request artboard list on load
-    window.addEventListener('load', () => {
+    window.addEventListener('load', async () => {
       try {
         if (window.__adobe_cep__) {
-          // CEP: use evalScript to call ExtendScript functions in host.jsx
           try {
-            window.__adobe_cep__.evalScript('getDiagnosticsJSON()', function(diagResult) {
-                try {
-                    var diag = JSON.parse(diagResult);
-                    if (diag && diag.error) {
-                        showArtboardError('Illustrator error: ' + diag.error);
-                        setStatus('Illustrator error: ' + diag.error);
-                        return;
-                    }
-                    if (!diag.hasDoc) {
-                        showArtboardError('No document open in Illustrator. Open an .ai file first.');
-                        setStatus('Open an Illustrator document first');
-                        return;
-                    }
-                    if (diag.artboardCount === 0) {
-                        showArtboardError('No artboards found in this document. Add at least one artboard in Illustrator.');
-                        setStatus('No artboards in document');
-                        return;
-                    }
-                    // Proceed to load artboards — single serialized call, no race
-                    window.__adobe_cep__.evalScript('getArtboardsJSON()', function(result) {
-                        if (result === 'EvalScript error.') {
-                            showArtboardError('evalScript error — host.jsx may not be loaded. Check CEP debug mode and reinstall.');
-                            setStatus('evalScript error — reinstall plugin');
-                        } else if (!result || result === 'undefined') {
-                            showArtboardError('No document open in Illustrator');
-                            setStatus('No document open in Illustrator');
-                        } else {
-                            try {
-                                var parsed = JSON.parse(result);
-                                if (parsed && parsed.error) {
-                                    showArtboardError('Illustrator error: ' + parsed.error);
-                                    setStatus('Illustrator error: ' + parsed.error);
-                                    return;
-                                }
-                                loadArtboards(parsed);
-                                setStatus('Ready — ' + parsed.length + ' artboard(s) loaded');
-                            } catch(e) {
-                                showArtboardError('Error parsing artboard data: ' + e.message);
-                                setStatus('Error parsing artboard data: ' + e.message);
-                            }
-                        }
-                    });
-                } catch(e) {
-                    // diagResult was 'EvalScript error.' or unparseable — evalScript not working
-                    showArtboardError('evalScript failed — CEP debug mode may not be enabled. Run install_zxp.bat again to enable it.');
-                    setStatus('CEP evalScript not working');
-                }
-            });
+            await loadCepArtboards();
           } catch(ce) {
-            showArtboardError('CEP error: ' + ce.message);
+            showArtboardError('CEP error: ' + ce.message, 'error', 'CEP error');
             setStatus('CEP error: ' + ce.message);
           }
         } else {
@@ -425,7 +680,7 @@
           window.postMessage({ type: 'GET_ARTBOARDS' }, '*');
         }
       } catch(e) {
-        showArtboardError('Plugin load error: ' + e.message);
+        showArtboardError('Plugin load error: ' + e.message, 'error', 'Plugin load error');
         setStatus('Plugin load error: ' + e.message);
       }
       checkAiParser();
@@ -469,49 +724,54 @@
       
       try {
         if (window.__adobe_cep__) {
-          // CEP panel mode: artboard discovery works via evalScript (host.jsx),
-          // but full export requires the Illustrator DOM API which is only available
-          // in ExtendScript or UXP contexts. Attempt client-side codegen with
-          // data fetched from host.jsx via evalScript.
-          window.__adobe_cep__.evalScript('getArtboardsJSON()', function(abResult) {
-            if (abResult === 'EvalScript error.') {
+          (async () => {
+            const hostReady = await ensureCepHostReady();
+            if (!hostReady.ok) {
               document.getElementById('export-btn').disabled = false;
-              setStatus('evalScript error — host.jsx may not be loaded. Check CEP debug mode.');
+              setStatus('ExtendScript host unavailable — restart Illustrator and reinstall the latest build');
               return;
-            } else if (!abResult || abResult === 'undefined') {
+            }
+
+            const abResult = await evalCepScript('getArtboardsJSON()');
+            if (!abResult.ok) {
+              document.getElementById('export-btn').disabled = false;
+              setStatus('evalScript error — host.jsx is still unavailable');
+              return;
+            } else if (!abResult.result || abResult.result === 'undefined') {
               document.getElementById('export-btn').disabled = false;
               setStatus('No document open in Illustrator');
               return;
             }
-            // In CEP, we can show artboards but export needs ExtendScript-side processing
-            // Since full export pipeline is in ExtendScript host.jsx, call it per artboard
-            window.__adobe_cep__.evalScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(exportPayload)) + ')', function(result) {
-              if (result === 'EvalScript error.') {
+
+            const result = await evalCepScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(exportPayload)) + ')');
+            if (!result.ok) {
+              document.getElementById('export-btn').disabled = false;
+              setStatus('evalScript error — host.jsx is still unavailable');
+              return;
+            } else if (!result.result || result.result === 'undefined') {
+              document.getElementById('export-btn').disabled = false;
+              setStatus('Could not extract artboard data');
+              return;
+            }
+
+            try {
+              const rawData = JSON.parse(result.result);
+              if (rawData && rawData.error) {
                 document.getElementById('export-btn').disabled = false;
-                setStatus('evalScript error — host.jsx may not be loaded. Check CEP debug mode.');
-                return;
-              } else if (!result || result === 'undefined') {
-                document.getElementById('export-btn').disabled = false;
-                setStatus('Could not extract artboard data');
+                setStatus('Illustrator error: ' + rawData.error);
                 return;
               }
-              try {
-                const rawData = JSON.parse(result);
-                if (rawData && rawData.error) {
-                  document.getElementById('export-btn').disabled = false;
-                  setStatus('Illustrator error: ' + rawData.error);
-                  return;
-                }
-                // CEP path: use exportFromRawData with ExtendScript-extracted data
-                const exportResult = exportFromRawData(rawData, options);
-                handleExportResult({ payload: { files: exportResult.files, filesArray: Object.entries(exportResult.files).map(([filename, content]) => ({filename, content})), colorMap: exportResult.colorMap, warnings: exportResult.warnings || [] } });
-                document.getElementById('export-btn').disabled = false;
-                setStatus('Exported ' + Object.keys(exportResult.files).length + ' files');
-              } catch(e) {
-                document.getElementById('export-btn').disabled = false;
-                setStatus('Error processing export: ' + e.message);
-              }
-            });
+              const exportResult = exportFromRawData(rawData, options);
+              handleExportResult({ payload: { files: exportResult.files, filesArray: Object.entries(exportResult.files).map(([filename, content]) => ({filename, content})), colorMap: exportResult.colorMap, warnings: exportResult.warnings || [] } });
+              document.getElementById('export-btn').disabled = false;
+              setStatus('Exported ' + Object.keys(exportResult.files).length + ' files');
+            } catch(e) {
+              document.getElementById('export-btn').disabled = false;
+              setStatus('Error processing export: ' + e.message);
+            }
+          })().catch(e => {
+            document.getElementById('export-btn').disabled = false;
+            setStatus('Error processing export: ' + e.message);
           });
         } else {
           // UXP path: postMessage
