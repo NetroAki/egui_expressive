@@ -63,9 +63,10 @@ exit /b 1
 :ext_dir_ready
 set "ZXP_SRC=%ZXP_FILE%"
 set "ZXP_DST=%EXT_DIR%"
-powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; $src = $env:ZXP_SRC; $dst = $env:ZXP_DST; if (Test-Path $dst) { Get-ChildItem -LiteralPath $dst -Force | Remove-Item -Recurse -Force }; [System.IO.Compression.ZipFile]::ExtractToDirectory($src, $dst)"
+powershell -NoProfile -Command "$src = $env:ZXP_SRC; $dst = $env:ZXP_DST; Add-Type -AssemblyName System.IO.Compression.FileSystem; try { if (Test-Path -LiteralPath $dst) { Get-ChildItem -LiteralPath $dst -Force | Remove-Item -Recurse -Force }; [System.IO.Compression.ZipFile]::ExtractToDirectory($src, $dst); exit 0 } catch { Write-Host ('[POWERSHELL] ' + $_.Exception.Message); exit 1 }"
 if %ERRORLEVEL% equ 0 goto extracted_ok
-echo [ERROR] Extraction failed.
+echo [ERROR] Extraction failed while unpacking the .zxp file.
+echo [ERROR] See the PowerShell message above for the exact cause.
 echo [ERROR] Source: %ZXP_FILE%
 echo [ERROR] Destination: %EXT_DIR%
 pause
@@ -131,7 +132,9 @@ echo [INFO] Unregister done.
 goto :eof
 
 :upia_remove_failed
-echo [WARN] UPIA unregister failed.
+echo [WARN] UPIA unregister failed with exit code %ERRORLEVEL%.
+echo [WARN] This usually means Adobe has no registered record for this extension,
+echo [WARN] or the extension database entry is stale. Continuing because file-based cleanup already ran.
 goto :eof
 
 :enable_debug
