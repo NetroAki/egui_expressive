@@ -93,7 +93,7 @@ impl PreviewApp {
         if let Ok(entries) = fs::read_dir(&src) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "rs") {
+                if path.extension().is_some_and(|e| e == "rs") {
                     let name = path.file_stem().unwrap().to_str().unwrap();
                     if !["mod", "tokens", "state", "components"].contains(&name) {
                         artboard_files.push(name.to_string());
@@ -214,7 +214,7 @@ impl PreviewApp {
         if let Ok(entries) = fs::read_dir(generated_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "rs") {
+                if path.extension().is_some_and(|e| e == "rs") {
                     let stem = path.file_stem().unwrap().to_str().unwrap();
                     if !["mod", "tokens", "state", "components"].contains(&stem) {
                         let _ = fs::remove_file(&path);

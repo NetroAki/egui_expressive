@@ -12,7 +12,7 @@ fn main() {
     if let Ok(entries) = fs::read_dir(&generated_out) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "rs") {
+            if path.extension().is_some_and(|e| e == "rs") {
                 let _ = fs::remove_file(&path);
             }
         }
@@ -24,7 +24,7 @@ fn main() {
         for entry in fs::read_dir(generated_src).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "rs") {
+            if path.extension().is_some_and(|e| e == "rs") {
                 let dest = generated_out.join(path.file_name().unwrap());
                 fs::copy(&path, &dest).unwrap();
                 has_files = true;
@@ -62,7 +62,7 @@ fn main() {
         for entry in fs::read_dir(&generated_out).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "rs") {
+            if path.extension().is_some_and(|e| e == "rs") {
                 let name = path.file_stem().unwrap().to_str().unwrap();
                 if !["mod", "tokens", "state", "components"].contains(&name) {
                     artboards.push(name.to_string());

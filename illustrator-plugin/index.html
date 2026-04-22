@@ -432,7 +432,7 @@
   
   <section class="status-bar" id="status-bar" aria-label="Status" role="status" aria-live="polite">
     <span class="status-text" id="status-text">Ready</span>
-    <span class="ai-parser-status" id="ai-parser-status" title="Project file analysis via ai-parser" aria-label="Parser"></span>
+    <span class="ai-parser-status" id="ai-parser-status" title="Project file analysis via ai-parser"></span>
   </section>
 
   <!-- Plugin codegen library loaded for both UXP and CEP panel contexts -->
@@ -933,7 +933,7 @@
       
       const saveBtn = window.__adobe_cep__ 
         ? `<button onclick="saveToFolder()" title="Save all to folder">Save to Folder</button>`
-        : `<button onclick="downloadZip()" title="Download all as ZIP">ZIP</button>`;
+        : `<button onclick="downloadZip()" title="Download all as ZIP">Get ZIP</button>`;
       
       tree.innerHTML = `
         <div class="file-tree-header">
@@ -943,7 +943,7 @@
         ${fileNames.map(name => `
           <div class="tree-file" id="tree-${name.replace(/[^a-z0-9]/gi,'_')}" onclick="showFile('${name}')">
             <span>${name}</span>
-            <button class="dl-btn" onclick="event.stopPropagation();downloadFile('${name}')" title="Download">v</button>
+            <button class="dl-btn" onclick="event.stopPropagation();downloadFile('${name}')" title="Download">Get</button>
           </div>
         `).join('')}
       `;
