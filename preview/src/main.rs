@@ -263,7 +263,16 @@ fn is_valid_module_name(s: &str) -> bool {
     if s.is_empty() || s.starts_with(|c: char| c.is_ascii_digit()) {
         return false;
     }
-    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return false;
+    }
+    const KEYWORDS: &[&str] = &[
+        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
+        "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut",
+        "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
+        "type", "unsafe", "use", "where", "while", "async", "await", "dyn",
+    ];
+    !KEYWORDS.contains(&s)
 }
 
 fn main() -> eframe::Result {

@@ -1,6 +1,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const RUST_KEYWORDS: [&str; 51] = [
+    "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
+    "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut",
+    "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
+    "type", "unsafe", "use", "where", "while", "async", "await", "dyn", "abstract", "become",
+    "box", "do", "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield",
+    "try",
+];
+
 fn main() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR set by Cargo"));
     let generated_src = Path::new("generated");
@@ -13,7 +22,9 @@ fn main() {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "rs") {
-                let _ = fs::remove_file(&path);
+                if let Err(e) = fs::remove_file(&path) {
+                    eprintln!("cargo:warning=failed to remove stale file {}: {}", path.display(), e);
+                }
             }
         }
     }
@@ -27,8 +38,10 @@ fn main() {
                 if path.extension().is_some_and(|e| e == "rs") {
                     if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
                         let dest = generated_out.join(fname);
-                        let _ = fs::copy(&path, &dest);
-                        has_files = true;
+                        match fs::copy(&path, &dest) {
+                            Ok(_) => has_files = true,
+                            Err(e) => eprintln!("cargo:warning=failed to copy {}: {}", path.display(), e),
+                        }
                     }
                 }
             }
@@ -39,7 +52,9 @@ fn main() {
     let ensure_placeholder = |name: &str, content: &str| {
         let p = generated_out.join(name);
         if !p.exists() {
-            let _ = fs::write(&p, content);
+            if let Err(e) = fs::write(&p, content) {
+                eprintln!("cargo:warning=failed to write placeholder {}: {}", name, e);
+            }
         }
     };
     ensure_placeholder("mod.rs", include_str!("generated/mod.rs"));
@@ -101,7 +116,9 @@ fn main() {
         dispatch.push_str("}\n");
     }
 
-    let _ = fs::write(out_dir.join("dispatch.rs"), dispatch);
+    if let Err(e) = fs::write(out_dir.join("dispatch.rs"), dispatch) {
+        eprintln!("cargo:warning=failed to write dispatch.rs: {}", e);
+    }
 
     println!("cargo:rerun-if-changed=generated");
 }
@@ -110,7 +127,10 @@ fn is_valid_module_name(s: &str) -> bool {
     if s.is_empty() || s.starts_with(|c: char| c.is_ascii_digit()) {
         return false;
     }
-    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return false;
+    }
+    !RUST_KEYWORDS.contains(&s)
 }
 
 fn snake_to_pascal(s: &str) -> String {
