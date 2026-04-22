@@ -63,7 +63,7 @@ exit /b 1
 :ext_dir_ready
 set "ZXP_SRC=%ZXP_FILE%"
 set "ZXP_DST=%EXT_DIR%"
-powershell -NoProfile -Command "$src = $env:ZXP_SRC; $dst = $env:ZXP_DST; Expand-Archive -LiteralPath $src -DestinationPath $dst -Force"
+powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; $src = $env:ZXP_SRC; $dst = $env:ZXP_DST; if (Test-Path $dst) { Get-ChildItem -LiteralPath $dst -Force | Remove-Item -Recurse -Force }; [System.IO.Compression.ZipFile]::ExtractToDirectory($src, $dst)"
 if %ERRORLEVEL% equ 0 goto extracted_ok
 echo [ERROR] Extraction failed.
 echo [ERROR] Source: %ZXP_FILE%
@@ -126,11 +126,12 @@ goto :eof
 if not defined UPIA_PATH goto :eof
 echo [INFO] Unregistering from Adobe extension database...
 "%UPIA_PATH%" /remove "%EXT_ID%"
-if %ERRORLEVEL% equ 0 (
-    echo [INFO] Unregister done.
-) else (
-    echo [WARN] UPIA unregister failed.
-)
+if errorlevel 1 goto upia_remove_failed
+echo [INFO] Unregister done.
+goto :eof
+
+:upia_remove_failed
+echo [WARN] UPIA unregister failed.
 goto :eof
 
 :enable_debug
