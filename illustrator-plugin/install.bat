@@ -45,31 +45,50 @@ if not defined UPIA_PATH (
     if exist "!UPIA_TEST!" set "UPIA_PATH=!UPIA_TEST!"
 )
 
-REM Remove previous version first
+REM Remove previous version — always force remove folder, then UPIA unregister
 set "EXT_ID=com.egui-expressive.illustrator-exporter"
+echo [INFO] Removing previous version...
+
+REM Try UPIA remove first (unregisters from Adobe's extension database)
 if defined UPIA_PATH (
-    echo [INFO] Removing previous version...
-    "!UPIA_PATH!" /remove "!EXT_ID!" >nul 2>&1
-    echo [INFO] Previous version removed.
-) else (
-    echo [INFO] Removing previous version manually...
-    set "EXT_DIR=!APPDATA!\Adobe\CEP\extensions\!EXT_ID!"
-    rmdir /s /q "!EXT_DIR!" >nul 2>&1
-    echo [INFO] Previous version removed.
+    "!UPIA_PATH!" /remove "!EXT_ID!" 2>nul
 )
 
-REM Install
+REM Always manually delete the extension folder (guaranteed cleanup)
+set "EXT_DIR=!APPDATA!\Adobe\CEP\extensions\!EXT_ID!"
+if exist "!EXT_DIR!" (
+    rmdir /s /q "!EXT_DIR!"
+    echo [INFO] Old extension folder deleted.
+) else (
+    echo [INFO] No previous extension folder found.
+)
+
+REM Also check per-user ProgramData location
+set "EXT_DIR2=!ProgramData!\Adobe\CEP\extensions\!EXT_ID!"
+if exist "!EXT_DIR2!" (
+    rmdir /s /q "!EXT_DIR2!"
+    echo [INFO] Old system extension folder deleted.
+)
+
+echo [INFO] Previous version removed.
+
+REM Install fresh
+set "EXT_DIR=!APPDATA!\Adobe\CEP\extensions\!EXT_ID!"
 if defined UPIA_PATH (
     echo [INFO] Installing via UPIA...
     "!UPIA_PATH!" /install "!ZXP_FILE!"
     if !errorlevel! neq 0 (
-        echo [ERROR] UPIA installation failed.
-        exit /b 1
+        echo [WARN] UPIA install failed, trying manual extraction...
+        if not exist "!EXT_DIR!" mkdir "!EXT_DIR!"
+        echo [INFO] Extracting to: !EXT_DIR!
+        powershell -Command "Expand-Archive -Path '!ZXP_FILE!' -DestinationPath '!EXT_DIR!' -Force"
+        if !errorlevel! neq 0 (
+            echo [ERROR] Failed to extract .zxp file.
+            exit /b 1
+        )
     )
-    echo [SUCCESS] Extension installed successfully.
 ) else (
-    echo [WARN] UPIA not found. Falling back to manual extraction...
-    set "EXT_DIR=!APPDATA!\Adobe\CEP\extensions\!EXT_ID!"
+    echo [INFO] UPIA not found. Installing via manual extraction...
     if not exist "!EXT_DIR!" mkdir "!EXT_DIR!"
     echo [INFO] Extracting to: !EXT_DIR!
     powershell -Command "Expand-Archive -Path '!ZXP_FILE!' -DestinationPath '!EXT_DIR!' -Force"
@@ -77,8 +96,8 @@ if defined UPIA_PATH (
         echo [ERROR] Failed to extract .zxp file.
         exit /b 1
     )
-    echo [SUCCESS] Extension extracted successfully.
 )
+echo [SUCCESS] Extension installed.
 
 REM Enable CEP debug mode for self-signed extensions
 echo [INFO] Enabling CEP debug mode for self-signed extensions...
