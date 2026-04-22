@@ -624,7 +624,7 @@ function generateElementComment(el) {
   let comment = `// ${sanitizeComment(el.type + ": " + el.id)}`;
   if (el.thirdPartyEffects && el.thirdPartyEffects.length > 0) {
     el.thirdPartyEffects.forEach(effect => {
-      comment += `\n// ${sanitizeComment("⚠️ " + effect.note)}`;
+      comment += `\n// ${sanitizeComment("WARNING: " + effect.note)}`;
     });
   }
   return comment;

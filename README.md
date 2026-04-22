@@ -46,9 +46,9 @@ eframe = "0.34"
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `debug` | ✅ | Enables DebugOverlay (methods become no-ops when off), debug_label, debug_interaction (removed from exports when off) |
-| `daw` | ❌ | Enables the daw convenience re-export module (widgets are always available in the widgets module) |
-| `clip-mask` | ❌ | Enables `clipped_shape_cpu` for CPU-side arbitrary-shape clipping (requires `tiny-skia`) |
+| `debug` | [yes] | Enables DebugOverlay (methods become no-ops when off), debug_label, debug_interaction (removed from exports when off) |
+| `daw` | [no] | Enables the daw convenience re-export module (widgets are always available in the widgets module) |
+| `clip-mask` | [no] | Enables `clipped_shape_cpu` for CPU-side arbitrary-shape clipping (requires `tiny-skia`) |
 
 ## Quick Example
 
@@ -162,7 +162,7 @@ cargo run --example timeline        # Large timeline canvas with viewport cullin
 
 ## Documentation
 
-📖 **[Wiki](../../wiki)** — full guides for every module:
+[docs] **[Wiki](../../wiki)** — full guides for every module:
 
 [Getting Started](../../wiki/Getting-Started) · [Animation](../../wiki/Animation) · [Blur Effects](../../wiki/Blur-Effects) · [Drawing & Shapes](../../wiki/Drawing-and-Shapes) · [Interaction](../../wiki/Interaction) · [Layout Macros](../../wiki/Layout-Macros) · [Material Design 3](../../wiki/Material-Design-3) · [State Management](../../wiki/State-Management) · [Style & Theming](../../wiki/Style-and-Theming) · [SwiftUI Patterns](../../wiki/SwiftUI-Patterns) · [Large Surfaces](../../wiki/Large-Surfaces) · [Widgets](../../wiki/Widgets) · [Debug & DevTools](../../wiki/Debug-and-DevTools) · [Figma Integration](../../wiki/Figma-Integration) · [Cookbook](../../wiki/Cookbook)
 

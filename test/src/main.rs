@@ -267,11 +267,11 @@ impl App {
             // Panel toggles (Browser/Rack/Playlist/Mixer/Devices)
             inset_frame().show(ui, |ui| {
                 let panels: [(&str, &mut bool); 5] = [
-                    ("◀ Browser", &mut self.show_browser),
+                    ("< Browser", &mut self.show_browser),
                     ("■ Rack", &mut self.show_channel_rack),
                     ("≡ Playlist", &mut self.show_playlist),
                     (" sliders", &mut self.show_mixer),
-                    ("⊞ Devices", &mut self.show_devices),
+                    ("+ Devices", &mut self.show_devices),
                 ];
                 for (label, active) in panels {
                     let color = if *active { ACCENT_GLOW } else { SURFACE_400 };
@@ -394,12 +394,12 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("BROWSER").size(9.0).color(SURFACE_400).strong());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.button(RichText::new("✕").size(10.0).color(SURFACE_400)).clicked() {
+                            if ui.button(RichText::new("x").size(10.0).color(SURFACE_400)).clicked() {
                                 self.show_browser = false;
                             }
                             let _ = ui.button(RichText::new("↗").size(10.0).color(SURFACE_400));
-                            let _ = ui.button(RichText::new("⊞").size(10.0).color(SURFACE_400));
-                            if ui.button(RichText::new("🔍").size(10.0).color(SURFACE_400)).clicked() {
+                            let _ = ui.button(RichText::new("+").size(10.0).color(SURFACE_400));
+                            if ui.button(RichText::new("?").size(10.0).color(SURFACE_400)).clicked() {
                                 self.browser_search_open = !self.browser_search_open;
                             }
                         });
@@ -414,7 +414,7 @@ impl App {
                         .inner_margin(Margin::symmetric(6, 2))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new("🔍").size(10.0).color(SURFACE_400));
+                                ui.label(RichText::new("?").size(10.0).color(SURFACE_400));
                                 let response = ui.add(
                                     egui::TextEdit::singleline(&mut self.browser_search_query)
                                         .font(TextStyle::Monospace)
@@ -422,7 +422,7 @@ impl App {
                                         .hint_text("Search...")
                                 );
                                 if !self.browser_search_query.is_empty()
-                                    && ui.button("✕").clicked()
+                                    && ui.button("x").clicked()
                                 {
                                     self.browser_search_query.clear();
                                 }
@@ -437,7 +437,7 @@ impl App {
                     .tab("Samples")
                     .tab("Instr")
                     .tab("FX")
-                    .tab("★")
+                    .tab("*")
                     .height(24.0)
                     .show(ui);
                 self.browser_tab = new_tab;
@@ -491,7 +491,7 @@ impl App {
                                 let _ = ui.button(RichText::new("▶").size(10.0).color(SURFACE_300));
                                 ui.label(RichText::new("0:00.000 | WAV | 24-bit | 48kHz | Stereo").size(8.0).color(SURFACE_400).monospace());
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    let _ = ui.button(RichText::new("✕").size(8.0).color(SURFACE_500));
+                                    let _ = ui.button(RichText::new("x").size(8.0).color(SURFACE_500));
                                 });
                             });
                             // Waveform
@@ -510,67 +510,67 @@ impl App {
     }
 
     fn browser_projects(&self, ui: &mut Ui) {
-        let tree = TreeNode::new("Current Project").icon('📂').child(
-            TreeNode::new("Project.neuprj").icon('📄')
+        let tree = TreeNode::new("Current Project").icon('>').child(
+            TreeNode::new("Project.neuprj").icon('-')
         ).child(
-            TreeNode::new("Bounce_2026-02-23.wav").icon('🔊')
+            TreeNode::new("Bounce_2026-02-23.wav").icon('~')
         ).child(
-            TreeNode::new("Vocals_Take_03.wav").icon('🔊')
+            TreeNode::new("Vocals_Take_03.wav").icon('~')
         ).child(
-            TreeNode::new("ChordProgression.mid").icon('🎵')
+            TreeNode::new("ChordProgression.mid").icon('*')
         ).child(
-            TreeNode::new("Automation_FilterCut.autoclip").icon('📊')
+            TreeNode::new("Automation_FilterCut.autoclip").icon('#')
         ).child(
-            TreeNode::new("MixBusPreset.nfx").icon('🎛')
+            TreeNode::new("MixBusPreset.nfx").icon('@')
         );
         TreeView::new("proj_tree").node(tree).row_height(20.0).show(ui);
 
-        let recent = TreeNode::new("Recent Projects").icon('📂').child(
-            TreeNode::new("Synthwave_03").icon('📄')
+        let recent = TreeNode::new("Recent Projects").icon('>').child(
+            TreeNode::new("Synthwave_03").icon('-')
         ).child(
-            TreeNode::new("Client_Edit_A").icon('📄')
+            TreeNode::new("Client_Edit_A").icon('-')
         );
         TreeView::new("recent_tree").node(recent).row_height(20.0).show(ui);
 
-        let plugs = TreeNode::new("Plugin Database").icon('📂').child(
-            TreeNode::new("Installed").icon('📂')
+        let plugs = TreeNode::new("Plugin Database").icon('>').child(
+            TreeNode::new("Installed").icon('>')
         );
         TreeView::new("plugs_tree").node(plugs).row_height(20.0).show(ui);
     }
 
     fn browser_samples(&self, ui: &mut Ui) {
-        let tree = TreeNode::new("Packs").icon('📂').child(
-            TreeNode::new("Drums").icon('📂').child(
-                TreeNode::new("Kick_01.wav").icon('🔊')
+        let tree = TreeNode::new("Packs").icon('>').child(
+            TreeNode::new("Drums").icon('>').child(
+                TreeNode::new("Kick_01.wav").icon('~')
             ).child(
-                TreeNode::new("Kick_02_Heavy.wav").icon('🔊')
+                TreeNode::new("Kick_02_Heavy.wav").icon('~')
             ).child(
-                TreeNode::new("Snare_A.wav").icon('🔊')
+                TreeNode::new("Snare_A.wav").icon('~')
             ).child(
-                TreeNode::new("Clap_Room.wav").icon('🔊')
+                TreeNode::new("Clap_Room.wav").icon('~')
             ).child(
-                TreeNode::new("HiHats").icon('📂').child(
-                    TreeNode::new("Hat_Closed_01.wav").icon('🔊')
+                TreeNode::new("HiHats").icon('>').child(
+                    TreeNode::new("Hat_Closed_01.wav").icon('~')
                 ).child(
-                    TreeNode::new("Hat_Closed_02_Tight.wav").icon('🔊')
+                    TreeNode::new("Hat_Closed_02_Tight.wav").icon('~')
                 ).child(
-                    TreeNode::new("Hat_Open_01.wav").icon('🔊')
+                    TreeNode::new("Hat_Open_01.wav").icon('~')
                 ).child(
-                    TreeNode::new("Hat_Pedal.wav").icon('🔊')
+                    TreeNode::new("Hat_Pedal.wav").icon('~')
                 )
             ).child(
-                TreeNode::new("Perc").icon('📂')
+                TreeNode::new("Perc").icon('>')
             ).child(
-                TreeNode::new("Cymbals").icon('📂')
+                TreeNode::new("Cymbals").icon('>')
             )
         ).child(
-            TreeNode::new("Synths").icon('📂')
+            TreeNode::new("Synths").icon('>')
         ).child(
-            TreeNode::new("Loops").icon('📂')
+            TreeNode::new("Loops").icon('>')
         ).child(
-            TreeNode::new("FX").icon('📂')
+            TreeNode::new("FX").icon('>')
         ).child(
-            TreeNode::new("MIDI").icon('📂')
+            TreeNode::new("MIDI").icon('>')
         );
         TreeView::new("samples_tree").node(tree).row_height(20.0).show(ui);
     }
@@ -578,40 +578,40 @@ impl App {
     fn browser_instruments(&self, ui: &mut Ui) {
         let mut synth_children = Vec::new();
         for s in ["Wavetable Synth", "FM Keys", "Granular Pad", "Multi-Engine Synth", "SoundFont Player"] {
-            synth_children.push(TreeNode::new(s).icon('🎹'));
+            synth_children.push(TreeNode::new(s).icon('+'));
         }
-        let mut node = TreeNode::new("Synths").icon('📂');
+        let mut node = TreeNode::new("Synths").icon('>');
         for child in synth_children {
             node = node.child(child);
         }
         let tree = node
-            .child(TreeNode::new("Samplers").icon('📂'))
-            .child(TreeNode::new("Drums").icon('📂'))
-            .child(TreeNode::new("Utilities").icon('📂'));
+            .child(TreeNode::new("Samplers").icon('>'))
+            .child(TreeNode::new("Drums").icon('>'))
+            .child(TreeNode::new("Utilities").icon('>'));
         TreeView::new("instr_tree").node(tree).row_height(20.0).show(ui);
     }
 
     fn browser_effects(&self, ui: &mut Ui) {
-        let tree = TreeNode::new("Dynamics").icon('📂')
-            .child(TreeNode::new("VCA Comp").icon('🎛'))
-            .child(TreeNode::new("Limiter").icon('🎛'))
-            .child(TreeNode::new("Gate").icon('🎛'))
-            .child(TreeNode::new("EQ & Filters").icon('📂')
-                .child(TreeNode::new("Parametric EQ").icon('🎛'))
-                .child(TreeNode::new("Low Pass").icon('🎛'))
-                .child(TreeNode::new("High Pass").icon('🎛'))
+        let tree = TreeNode::new("Dynamics").icon('>')
+            .child(TreeNode::new("VCA Comp").icon('@'))
+            .child(TreeNode::new("Limiter").icon('@'))
+            .child(TreeNode::new("Gate").icon('@'))
+            .child(TreeNode::new("EQ & Filters").icon('>')
+                .child(TreeNode::new("Parametric EQ").icon('@'))
+                .child(TreeNode::new("Low Pass").icon('@'))
+                .child(TreeNode::new("High Pass").icon('@'))
             )
-            .child(TreeNode::new("Space").icon('📂')
-                .child(TreeNode::new("Plate Reverb").icon('🎛'))
-                .child(TreeNode::new("Delay").icon('🎛'))
+            .child(TreeNode::new("Space").icon('>')
+                .child(TreeNode::new("Plate Reverb").icon('@'))
+                .child(TreeNode::new("Delay").icon('@'))
             )
-            .child(TreeNode::new("Modulation").icon('📂')
-                .child(TreeNode::new("Chorus").icon('🎛'))
-                .child(TreeNode::new("Phaser").icon('🎛'))
+            .child(TreeNode::new("Modulation").icon('>')
+                .child(TreeNode::new("Chorus").icon('@'))
+                .child(TreeNode::new("Phaser").icon('@'))
             )
-            .child(TreeNode::new("Utility").icon('📂')
-                .child(TreeNode::new("Utility").icon('🎛'))
-                .child(TreeNode::new("Stereo Tool").icon('🎛'))
+            .child(TreeNode::new("Utility").icon('>')
+                .child(TreeNode::new("Utility").icon('@'))
+                .child(TreeNode::new("Stereo Tool").icon('@'))
             );
         TreeView::new("fx_tree").node(tree).row_height(20.0).show(ui);
     }
@@ -635,11 +635,11 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("PLAYLIST").size(9.0).color(SURFACE_400).strong());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.button(RichText::new("✕").size(10.0).color(SURFACE_400)).clicked() {
+                            if ui.button(RichText::new("x").size(10.0).color(SURFACE_400)).clicked() {
                                 self.show_playlist = false;
                             }
                             let _ = ui.button(RichText::new("↗").size(10.0).color(SURFACE_400));
-                            let _ = ui.button(RichText::new("⊞").size(10.0).color(SURFACE_400));
+                            let _ = ui.button(RichText::new("+").size(10.0).color(SURFACE_400));
                         });
                     });
                 });
@@ -681,7 +681,7 @@ impl App {
                         Align2::LEFT_CENTER, "Lanes", FontId::proportional(9.0), SURFACE_400);
                     // Eye icon
                     p.text(pos2(header_rect.right() - 24.0, header_rect.center().y),
-                        Align2::CENTER_CENTER, "👁", FontId::proportional(11.0), SURFACE_400);
+                        Align2::CENTER_CENTER, "o", FontId::proportional(11.0), SURFACE_400);
 
                     // Right border
                     p.line_segment([
@@ -732,7 +732,7 @@ impl App {
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     // Tools: Select/Draw/Paint/Slice
-                                    let tools = [("◀", 0), ("✎", 1), ("⊞", 2), ("✂", 3)];
+                                    let tools = [("<", 0), ("e", 1), ("+", 2), ("c", 3)];
                                     for (icon, idx) in tools {
                                         let bg = if self.playlist_tool == idx { SURFACE_700 } else { SURFACE_800 };
                                         let fg = if self.playlist_tool == idx { Color32::WHITE } else { SURFACE_300 };
@@ -749,7 +749,7 @@ impl App {
 
                                     // Automation mode + draw buttons
                                     ui.add(egui::Button::new(RichText::new("~").size(10.0).color(SURFACE_300)).fill(SURFACE_800).min_size(vec2(24.0, 24.0)));
-                                    ui.add(egui::Button::new(RichText::new("✎~").size(10.0).color(SURFACE_300)).fill(SURFACE_800).min_size(vec2(24.0, 24.0)));
+                                    ui.add(egui::Button::new(RichText::new("e~").size(10.0).color(SURFACE_300)).fill(SURFACE_800).min_size(vec2(24.0, 24.0)));
 
                                     // Separator
                                     let (sep, _) = ui.allocate_exact_size(vec2(1.0, 18.0), Sense::hover());
@@ -887,7 +887,7 @@ impl App {
                                 self.show_channel_rack = false;
                             }
                             let _ = ui.button(RichText::new("↗").size(10.0).color(SURFACE_400));
-                            let _ = ui.button(RichText::new("⊞").size(10.0).color(SURFACE_400));
+                            let _ = ui.button(RichText::new("+").size(10.0).color(SURFACE_400));
                             if ui.button(RichText::new("+").size(12.0).color(SURFACE_400)).clicked() {
                                 // Add generator
                                 self.generators.push(gen("New", MIXER_COLORS[self.generators.len() % MIXER_COLORS.len()],
@@ -897,7 +897,7 @@ impl App {
                     });
                 });
 
-                // Tools row — Actions toggle + Rand/Inv/Rev/Alt + 2/4/8 + ←/→/✕ | Swing + More
+                // Tools row — Actions toggle + Rand/Inv/Rev/Alt + 2/4/8 + ←/→/x | Swing + More
                 Frame::new()
                     .fill(Color32::from_rgba_premultiplied(2, 6, 23, 100))
                     .stroke(Stroke::new(1.0, SURFACE_800))
@@ -964,7 +964,7 @@ impl App {
                                         gen.steps[0].rotate_right(1);
                                     }
                                 }
-                                if ui.add(egui::Button::new(RichText::new("✕").size(9.0).color(SURFACE_200)).fill(SURFACE_800)).clicked() {
+                                if ui.add(egui::Button::new(RichText::new("x").size(9.0).color(SURFACE_200)).fill(SURFACE_800)).clicked() {
                                     if let Some(gen) = self.generators.first_mut() {
                                         for step in gen.steps[0].iter_mut() { *step = false; }
                                     }
@@ -1073,13 +1073,13 @@ impl App {
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new("Compact").size(8.0).color(SURFACE_500).strong());
-                                    let _ = ui.button(RichText::new("⊞").size(8.0).color(SURFACE_400));
+                                    let _ = ui.button(RichText::new("+").size(8.0).color(SURFACE_400));
                                 });
                             });
 
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let _ = ui.button(RichText::new("↗").size(10.0).color(SURFACE_400));
-                            let _ = ui.button(RichText::new("⊞").size(10.0).color(SURFACE_400));
+                            let _ = ui.button(RichText::new("+").size(10.0).color(SURFACE_400));
                             // Route button
                             let _ = ui.button(RichText::new("⊕").size(10.0).color(SURFACE_400));
                         });
@@ -1174,7 +1174,7 @@ impl App {
 
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let _ = ui.button(RichText::new("↗").size(10.0).color(SURFACE_400));
-                            let _ = ui.button(RichText::new("⊞").size(10.0).color(SURFACE_400));
+                            let _ = ui.button(RichText::new("+").size(10.0).color(SURFACE_400));
                         });
                     });
                 });

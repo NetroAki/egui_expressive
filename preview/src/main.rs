@@ -64,7 +64,7 @@ impl PreviewApp {
                 ui.label("Select the folder where you exported your artboard code.");
                 ui.add_space(16.0);
 
-                if ui.button("📁  Select Export Folder").clicked() {
+                if ui.button("[ Select Export Folder ]").clicked() {
                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
                         self.load_from_folder(path);
                     }
@@ -78,7 +78,7 @@ impl PreviewApp {
                 ui.add_space(8.0);
                 ui.separator();
                 ui.add_space(4.0);
-                ui.small("Tip: In the Illustrator panel, click 💾 Save to Folder and choose a location.");
+                ui.small("Tip: In the Illustrator panel, click 'Save to Folder' and choose a location.");
             });
         });
     }
@@ -151,7 +151,7 @@ impl PreviewApp {
         ui.horizontal(|ui| {
             ui.heading("egui_expressive Preview");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("🔄  Load Different Folder").clicked() {
+                if ui.button("[ Load Different Folder ]").clicked() {
                     // Clear generated files and go back to launcher
                     let _ = self.clear_generated();
                     self.mode = AppMode::Launcher;

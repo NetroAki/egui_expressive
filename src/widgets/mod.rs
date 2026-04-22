@@ -1365,7 +1365,7 @@ impl ContextMenuBuilder {
                     callback,
                 } => {
                     ui.horizontal(|ui| {
-                        let check_str = if checked { "✓ " } else { "  " };
+                        let check_str = if checked { "[x] " } else { "  " };
                         let full_label = format!("{}{}", check_str, label);
                         if ui.selectable_label(checked, &full_label).clicked() {
                             (callback)(!checked);
@@ -1620,9 +1620,9 @@ impl TreeNode {
 /// # Example
 /// ```ignore
 /// TreeView::new("browser_tree")
-///     .node(TreeNode::new("Samples").icon('📁')
-///         .child(TreeNode::new("Kick.wav").icon('🎵'))
-///         .child(TreeNode::new("Snare.wav").icon('🎵')))
+///     .node(TreeNode::new("Samples").icon('>')
+///         .child(TreeNode::new("Kick.wav").icon('*'))
+///         .child(TreeNode::new("Snare.wav").icon('*')))
 ///     .show(ui);
 /// ```
 pub struct TreeView {

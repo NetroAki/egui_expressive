@@ -6,7 +6,7 @@ A GUI app that lets you preview exported Illustrator artboards as live egui UIs.
 
 1. **Export from Illustrator**
    - Open the egui_expressive panel in Illustrator
-   - Select artboards and click **💾 Save to Folder**
+   - Select artboards and click **Save to Folder**
    - Choose a destination folder
 
 2. **Run the preview**
@@ -16,7 +16,7 @@ A GUI app that lets you preview exported Illustrator artboards as live egui UIs.
    ```
 
 3. **Select your export folder**
-   - Click **📁 Select Export Folder** in the launcher
+   - Click **Select Export Folder** in the launcher
    - Pick the folder where you saved the `.rs` files
    - The app copies files, rebuilds, and launches the preview automatically
 
@@ -30,7 +30,7 @@ A GUI app that lets you preview exported Illustrator artboards as live egui UIs.
 Illustrator → Save to Folder → Select in Preview → See rendered UI
 ```
 
-To load a different export, click **🔄 Load Different Folder** in the top bar.
+To load a different export, click **Load Different Folder** in the top bar.
 
 ## Files
 

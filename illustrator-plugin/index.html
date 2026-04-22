@@ -413,7 +413,7 @@
   <main class="content-area">
     <div class="file-tree" id="file-tree">
       <div class="empty-state">
-        <div class="icon">📁</div>
+        <div class="icon">[ ]</div>
         <div>Export to see files</div>
       </div>
     </div>
@@ -426,7 +426,7 @@
   </main>
   
   <section class="warnings-panel" id="warnings-panel" style="display:none;" aria-label="Warnings">
-    <div class="warn-title">⚠️ Elements requiring manual attention</div>
+    <div class="warn-title">Elements requiring manual attention</div>
     <div id="warnings-list"></div>
   </section>
   
@@ -932,8 +932,8 @@
       }
       
       const saveBtn = window.__adobe_cep__ 
-        ? `<button onclick="saveToFolder()" title="Save all to folder">💾 Save to Folder</button>`
-        : `<button onclick="downloadZip()" title="Download all as ZIP">⬇ ZIP</button>`;
+        ? `<button onclick="saveToFolder()" title="Save all to folder">Save to Folder</button>`
+        : `<button onclick="downloadZip()" title="Download all as ZIP">ZIP</button>`;
       
       tree.innerHTML = `
         <div class="file-tree-header">
@@ -943,7 +943,7 @@
         ${fileNames.map(name => `
           <div class="tree-file" id="tree-${name.replace(/[^a-z0-9]/gi,'_')}" onclick="showFile('${name}')">
             <span>${name}</span>
-            <button class="dl-btn" onclick="event.stopPropagation();downloadFile('${name}')" title="Download">⬇</button>
+            <button class="dl-btn" onclick="event.stopPropagation();downloadFile('${name}')" title="Download">v</button>
           </div>
         `).join('')}
       `;
