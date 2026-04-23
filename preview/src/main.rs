@@ -2,16 +2,24 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated/mod.rs"));
 }
 
+mod shared;
+use shared::is_valid_module_name;
+
 include!(concat!(env!("OUT_DIR"), "/dispatch.rs"));
 
 use eframe::egui;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
+fn generated_dir() -> PathBuf {
+    Path::new(MANIFEST_DIR).join("generated")
+}
 
 enum AppMode {
     Launcher,
     Preview,
-    Building { message: String },
 }
 
 struct PreviewApp {
@@ -41,15 +49,6 @@ impl eframe::App for PreviewApp {
         match &mut self.mode {
             AppMode::Launcher => self.show_launcher(ui),
             AppMode::Preview => self.show_preview(ui),
-            AppMode::Building { message } => {
-                ui.centered_and_justified(|ui| {
-                    ui.heading("Building preview...");
-                    ui.add_space(8.0);
-                    ui.label(message.as_str());
-                    ui.add_space(16.0);
-                    ui.spinner();
-                });
-            }
         }
     }
 }
@@ -83,36 +82,42 @@ impl PreviewApp {
         });
     }
 
-    fn load_from_folder(&mut self, src: std::path::PathBuf) {
+    fn load_from_folder(&mut self, src: PathBuf) {
         self.status = format!("Loading from: {}", src.display());
 
-        let generated_dir = Path::new("generated");
+        let generated_dir = generated_dir();
+        // Clear any stale files from previous loads
+        let _ = self.clear_generated();
+        if let Err(e) = fs::create_dir_all(&generated_dir) {
+            self.status = format!("Failed to create generated directory: {}", e);
+            return;
+        }
         let mut copied = 0;
         // Find artboard files (.rs that aren't the known ones)
         let mut artboard_files = Vec::new();
         match fs::read_dir(&src) {
             Ok(entries) => {
-                for entry in entries.flatten() {
+                for entry_res in entries {
+                    let entry = match entry_res {
+                        Ok(e) => e,
+                        Err(e) => {
+                            self.status = format!("Failed to read directory entry: {}", e);
+                            return;
+                        }
+                    };
                     let path = entry.path();
                     if path.extension().is_some_and(|e| e == "rs") {
-                        if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                            if is_valid_module_name(name)
-                                && !["mod", "tokens", "state", "components"].contains(&name)
-                            {
-                                artboard_files.push(name.to_string());
-                            }
-                        }
-                        // Copy all .rs files with valid module names
-                        if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
-                            if let Some(stem) = fname.strip_suffix(".rs") {
-                                if is_valid_module_name(stem) {
-                                    let dest = generated_dir.join(fname);
-                                    if let Err(e) = fs::copy(&path, &dest) {
-                                        self.status = format!("Failed to copy {}: {}", path.display(), e);
-                                        return;
-                                    }
-                                    copied += 1;
+                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            if is_valid_module_name(stem) {
+                                if !["tokens", "state", "components"].contains(&stem) {
+                                    artboard_files.push(stem.to_string());
                                 }
+                                let dest = generated_dir.join(path.file_name().unwrap());
+                                if let Err(e) = fs::copy(&path, &dest) {
+                                    self.status = format!("Failed to copy {}: {}", path.display(), e);
+                                    return;
+                                }
+                                copied += 1;
                             }
                         }
                     }
@@ -145,22 +150,10 @@ impl PreviewApp {
             "Copied {} file(s). Rebuilding preview...",
             copied
         );
-        self.mode = AppMode::Building {
-            message: self.status.clone(),
-        };
 
-        // Trigger rebuild in subprocess
-        let cwd = match std::env::current_dir() {
-            Ok(d) => d,
-            Err(e) => {
-                self.status = format!("Cannot detect working directory: {}", e);
-                self.mode = AppMode::Launcher;
-                return;
-            }
-        };
         match std::process::Command::new("cargo")
             .arg("run")
-            .current_dir(cwd)
+            .current_dir(MANIFEST_DIR)
             .spawn()
         {
             Ok(_) => {
@@ -229,52 +222,37 @@ impl PreviewApp {
         });
     }
 
-    fn clear_generated(&self,
-    ) -> Result<(), std::io::Error> {
-        let generated_dir = Path::new("generated");
+    fn clear_generated(&self) -> Result<(), std::io::Error> {
+        let generated_dir = generated_dir();
+        fs::create_dir_all(&generated_dir)?;
         // Restore placeholder files
         let placeholders = [
-            ("mod.rs", include_str!("../generated/mod.rs")),
-            ("tokens.rs", include_str!("../generated/tokens.rs")),
-            ("state.rs", include_str!("../generated/state.rs")),
-            ("components.rs", include_str!("../generated/components.rs")),
+            ("mod.rs", "// Auto-generated module declarations.\n// Artboard modules will be auto-discovered at build time.\n\npub mod tokens;\npub mod state;\npub mod components;\n"),
+            ("tokens.rs", ""),
+            ("state.rs", ""),
+            ("components.rs", ""),
         ];
         for (name, content) in &placeholders {
             fs::write(generated_dir.join(name), content)?;
         }
         // Remove any artboard files
-        if let Ok(entries) = fs::read_dir(generated_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "rs") {
-                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                        if !["mod", "tokens", "state", "components"].contains(&stem) {
-                            let _ = fs::remove_file(&path);
-                        }
+        let entries = fs::read_dir(generated_dir)?;
+        for entry_res in entries {
+            let entry = match entry_res {
+                Ok(e) => e,
+                Err(e) => return Err(e),
+            };
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "rs") {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    if !["mod", "tokens", "state", "components"].contains(&stem) {
+                        fs::remove_file(&path)?;
                     }
                 }
             }
         }
         Ok(())
     }
-}
-
-fn is_valid_module_name(s: &str) -> bool {
-    if s.is_empty() || s.starts_with(|c: char| c.is_ascii_digit()) {
-        return false;
-    }
-    if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return false;
-    }
-    const KEYWORDS: &[&str] = &[
-        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
-        "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut",
-        "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
-        "type", "unsafe", "use", "where", "while", "async", "await", "dyn", "abstract", "become",
-        "box", "do", "final", "macro", "override", "priv", "typeof", "union", "unsized", "virtual", "yield",
-        "try",
-    ];
-    !KEYWORDS.contains(&s)
 }
 
 fn main() -> eframe::Result {

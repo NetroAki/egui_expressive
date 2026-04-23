@@ -1,14 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const RUST_KEYWORDS: [&str; 52] = [
-    "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
-    "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut",
-    "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
-    "type", "unsafe", "use", "where", "while", "async", "await", "dyn",     "abstract", "become",
-    "box", "do", "final", "macro", "override", "priv", "typeof", "union", "unsized", "virtual", "yield",
-    "try",
-];
+include!("src/shared.rs");
 
 fn main() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR set by Cargo"));
@@ -18,33 +11,53 @@ fn main() {
     fs::create_dir_all(&generated_out).expect("create OUT_DIR/generated");
 
     // Clear stale files from previous builds
-    if let Ok(entries) = fs::read_dir(&generated_out) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "rs") {
-                if let Err(e) = fs::remove_file(&path) {
-                    eprintln!("cargo:warning=failed to remove stale file {}: {}", path.display(), e);
+    match fs::read_dir(&generated_out) {
+        Ok(entries) => {
+            for entry_res in entries {
+                let entry = match entry_res {
+                    Ok(e) => e,
+                    Err(e) => {
+                        println!("cargo:warning=failed to read directory entry in generated_out: {}", e);
+                        continue;
+                    }
+                };
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "rs") {
+                    if let Err(e) = fs::remove_file(&path) {
+                        println!("cargo:warning=failed to remove stale file {}: {}", path.display(), e);
+                    }
                 }
             }
         }
+        Err(e) => println!("cargo:warning=failed to read generated_out directory: {}", e),
     }
 
     // Copy all .rs files from generated/ to OUT_DIR/generated/
     let mut has_files = false;
     if generated_src.exists() {
-        if let Ok(entries) = fs::read_dir(generated_src) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "rs") {
-                    if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
-                        let dest = generated_out.join(fname);
-                        match fs::copy(&path, &dest) {
-                            Ok(_) => has_files = true,
-                            Err(e) => eprintln!("cargo:warning=failed to copy {}: {}", path.display(), e),
+        match fs::read_dir(generated_src) {
+            Ok(entries) => {
+                for entry_res in entries {
+                    let entry = match entry_res {
+                        Ok(e) => e,
+                        Err(e) => {
+                            println!("cargo:warning=failed to read directory entry in generated_src: {}", e);
+                            continue;
+                        }
+                    };
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "rs") {
+                        if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
+                            let dest = generated_out.join(fname);
+                            match fs::copy(&path, &dest) {
+                                Ok(_) => has_files = true,
+                                Err(e) => println!("cargo:warning=failed to copy {}: {}", path.display(), e),
+                            }
                         }
                     }
                 }
             }
+            Err(e) => println!("cargo:warning=failed to read generated source directory: {}", e),
         }
     }
 
@@ -53,29 +66,39 @@ fn main() {
         let p = generated_out.join(name);
         if !p.exists() {
             if let Err(e) = fs::write(&p, content) {
-                eprintln!("cargo:warning=failed to write placeholder {}: {}", name, e);
+                println!("cargo:warning=failed to write placeholder {}: {}", name, e);
             }
         }
     };
-    ensure_placeholder("mod.rs", include_str!("generated/mod.rs"));
-    ensure_placeholder("tokens.rs", include_str!("generated/tokens.rs"));
-    ensure_placeholder("state.rs", include_str!("generated/state.rs"));
-    ensure_placeholder("components.rs", include_str!("generated/components.rs"));
+    ensure_placeholder("mod.rs", "// Auto-generated module declarations.\n// Artboard modules will be auto-discovered at build time.\n\npub mod tokens;\npub mod state;\npub mod components;\n");
+    ensure_placeholder("tokens.rs", "");
+    ensure_placeholder("state.rs", "");
+    ensure_placeholder("components.rs", "");
 
     // Find artboard files (anything that's not mod/tokens/state/components)
     let mut artboards = Vec::new();
     if has_files {
-        if let Ok(entries) = fs::read_dir(&generated_out) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "rs") {
-                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                        if is_valid_module_name(name) && !["mod", "tokens", "state", "components"].contains(&name) {
-                            artboards.push(name.to_string());
+        match fs::read_dir(&generated_out) {
+            Ok(entries) => {
+                for entry_res in entries {
+                    let entry = match entry_res {
+                        Ok(e) => e,
+                        Err(e) => {
+                            println!("cargo:warning=failed to read directory entry for artboards: {}", e);
+                            continue;
+                        }
+                    };
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "rs") {
+                        if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                            if is_valid_module_name(name) && !["tokens", "state", "components"].contains(&name) {
+                                artboards.push(name.to_string());
+                            }
                         }
                     }
                 }
             }
+            Err(e) => println!("cargo:warning=failed to read generated output directory for artboards: {}", e),
         }
     }
 
@@ -117,30 +140,8 @@ fn main() {
     }
 
     if let Err(e) = fs::write(out_dir.join("dispatch.rs"), dispatch) {
-        eprintln!("cargo:warning=failed to write dispatch.rs: {}", e);
+        println!("cargo:warning=failed to write dispatch.rs: {}", e);
     }
 
     println!("cargo:rerun-if-changed=generated");
-}
-
-fn is_valid_module_name(s: &str) -> bool {
-    if s.is_empty() || s.starts_with(|c: char| c.is_ascii_digit()) {
-        return false;
-    }
-    if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return false;
-    }
-    !RUST_KEYWORDS.contains(&s)
-}
-
-fn snake_to_pascal(s: &str) -> String {
-    s.split('_')
-        .map(|w| {
-            let mut chars = w.chars();
-            match chars.next() {
-                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect()
 }
