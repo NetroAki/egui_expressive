@@ -195,7 +195,9 @@ impl PreviewApp {
                 ui.set_max_width(240.0);
                 ui.heading("Artboards");
                 ui.separator();
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("preview_artboard_list")
+                    .show(ui, |ui| {
                     for name in names {
                         let selected = self.selected.as_deref() == Some(*name);
                         if ui.selectable_label(selected, *name).clicked() {
@@ -210,9 +212,11 @@ impl PreviewApp {
             ui.vertical(|ui| {
                 ui.set_min_width(600.0);
                 if let Some(ref name) = self.selected {
-                    egui::ScrollArea::both().show(ui, |ui| {
-                        render_artboard(name, ui);
-                    });
+                    egui::ScrollArea::both()
+                        .id_salt(("preview_artboard_canvas", name))
+                        .show(ui, |ui| {
+                            render_artboard(name, ui);
+                        });
                 } else {
                     ui.centered_and_justified(|ui| {
                         ui.label("Select an artboard from the sidebar");

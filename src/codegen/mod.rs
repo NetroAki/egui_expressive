@@ -1269,6 +1269,10 @@ pub fn generate_rust(
     }
 
     output.push_str("    let origin = ui.cursor().min;\n");
+    output.push_str(&format!(
+        "    ui.allocate_space(egui::vec2({:.1}, {:.1}));\n",
+        artboard_w, artboard_h
+    ));
     output.push_str("    let painter = ui.painter();\n");
     output.push('\n');
 
@@ -1519,7 +1523,10 @@ pub fn generate_node(
                 (true, true) => "egui::ScrollArea::both()",
                 (false, false) => "egui::ScrollArea::vertical()",
             };
-            output.push_str(&format!("{}{}.show(ui, |ui| {{\n", indent_str, scroll_type));
+            output.push_str(&format!(
+                "{}{}.id_salt({:?}).show(ui, |ui| {{\n",
+                indent_str, scroll_type, id
+            ));
             for child in children {
                 output.push_str(&generate_node(child, indent + 4, token_map));
             }
@@ -4174,6 +4181,21 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_scroll_area_uses_id_salt() {
+        let node = LayoutNode::ScrollArea {
+            vertical: true,
+            horizontal: false,
+            children: vec![],
+            id: "scroll-foo\"bar".to_string(),
+        };
+
+        let output = generate_node(&node, 0, None);
+
+        assert!(output.contains("egui::ScrollArea::vertical().id_salt("));
+        assert!(output.contains(r#"scroll-foo\"bar"#));
+    }
+
+    #[test]
     fn test_cluster_into_rows() {
         let elements = vec![
             LayoutElement {
@@ -4710,6 +4732,11 @@ mod tests {
             fn_count, 1,
             "expected exactly 1 pub fn draw_, found {}",
             fn_count
+        );
+        assert!(
+            code.contains("ui.allocate_space(egui::vec2(375.0, 812.0));"),
+            "missing artboard size allocation: {}",
+            &code[..300.min(code.len())]
         );
     }
 

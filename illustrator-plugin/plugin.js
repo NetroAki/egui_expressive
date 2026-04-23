@@ -305,12 +305,39 @@ function extractEffects(item) {
 }
 
 // ─── Color/Gradient ──────────────────────────────────────────────────────────
+function clampByte(value, fallback) {
+  const n = Number(value);
+  const safe = Number.isFinite(n) ? n : fallback;
+  return Math.max(0, Math.min(255, Math.round(safe)));
+}
+
 function colorToRGB(c) {
   if (!c) return null;
   try {
-    if (c.typename === "RGBColor") return { r: Math.round(c.red), g: Math.round(c.green), b: Math.round(c.blue), a: 255 };
-    if (c.typename === "CMYKColor") { const k = c.black/100; return { r: Math.round(255*(1-c.cyan/100)*(1-k)), g: Math.round(255*(1-c.magenta/100)*(1-k)), b: Math.round(255*(1-c.yellow/100)*(1-k)), a: 255 }; }
-    if (c.typename === "GrayColor") { const v = Math.round(255*(1-c.gray/100)); return { r: v, g: v, b: v, a: 255 }; }
+    if (c.typename === "SpotColor") {
+      if (c.spot && c.spot.color) return colorToRGB(c.spot.color);
+      if (c.color) return colorToRGB(c.color);
+      return null;
+    }
+    if (c.typename === "RGBColor") return { r: clampByte(c.red, 0), g: clampByte(c.green, 0), b: clampByte(c.blue, 0), a: 255 };
+    if (c.typename === "CMYKColor") {
+      const cyan = Number(c.cyan);
+      const magenta = Number(c.magenta);
+      const yellow = Number(c.yellow);
+      const black = Number(c.black);
+      const k = Number.isFinite(black) ? black / 100 : 0;
+      return {
+        r: clampByte(255 * (1 - (Number.isFinite(cyan) ? cyan : 0) / 100) * (1 - k), 0),
+        g: clampByte(255 * (1 - (Number.isFinite(magenta) ? magenta : 0) / 100) * (1 - k), 0),
+        b: clampByte(255 * (1 - (Number.isFinite(yellow) ? yellow : 0) / 100) * (1 - k), 0),
+        a: 255,
+      };
+    }
+    if (c.typename === "GrayColor") {
+      const gray = Number(c.gray);
+      const v = clampByte(255 * (1 - (Number.isFinite(gray) ? gray : 0) / 100), 0);
+      return { r: v, g: v, b: v, a: 255 };
+    }
   } catch (e) {}
   return null;
 }
@@ -349,9 +376,8 @@ function getGradient(item) {
 }
 
 function gradientColorToRGB(c) {
-  if (!c) return { r: 128, g: 128, b: 128 };
-  try { if (c.typename === "RGBColor") return { r: Math.round(c.red), g: Math.round(c.green), b: Math.round(c.blue) }; if (c.typename === "CMYKColor") { const k = c.black/100; return { r: Math.round(255*(1-c.cyan/100)*(1-k)), g: Math.round(255*(1-c.magenta/100)*(1-k)), b: Math.round(255*(1-c.yellow/100)*(1-k)) }; } if (c.typename === "GrayColor") { const v = Math.round(255*(1-c.gray/100)); return { r: v, g: v, b: v }; } } catch (e) {}
-  return { r: 128, g: 128, b: 128 };
+  const rgb = colorToRGB(c);
+  return rgb ? { r: rgb.r, g: rgb.g, b: rgb.b } : { r: 128, g: 128, b: 128 };
 }
 
 // ─── Text Details ────────────────────────────────────────────────────────────
@@ -949,7 +975,10 @@ function sanitize(n) {
 function getColorName(fill, colorMap) { return fill ? (colorMap.get(`${fill.r},${fill.g},${fill.b}`) || "SURFACE") : "SURFACE"; }
 
 // ─── JSON Sidecar ────────────────────────────────────────────────────────────
-function colorToHex(c) { if (!c) return undefined; return "#" + [c.r, c.g, c.b].map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0")).join(""); }
+function colorToHex(c) {
+  if (!c) return undefined;
+  return "#" + [c.r, c.g, c.b].map(v => clampByte(v, 0).toString(16).padStart(2, "0")).join("");
+}
 
 function mapEffectForSidecar(fx) {
   if (!fx) return undefined;
@@ -1263,5 +1292,4 @@ if (typeof window !== 'undefined' && window.addEventListener) {
 
 // ─── CEP ExtendScript Entry Points ──────────────────────────────────────
 // These functions are called from index.html via CSInterface.evalScript()
-
 
