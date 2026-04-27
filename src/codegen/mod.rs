@@ -1316,9 +1316,13 @@ pub fn generate_rust(
     let mut output = String::new();
 
     // Add imports at the top
+    output.push_str("#[allow(unused_imports)]\n");
     output.push_str("use egui::{Color32, RichText, Ui, Vec2, Rect, Pos2, Stroke, vec2, pos2};\n");
+    output.push_str("#[allow(unused_imports)]\n");
     output.push_str("use egui_expressive::{hstack, vstack, ShapeBuilder, LayeredPainter};\n");
+    output.push_str("#[allow(unused_imports)]\n");
     output.push_str("use super::tokens;\n");
+    output.push_str("#[allow(unused_imports)]\n");
     output.push_str("use super::state::*;\n");
     output.push('\n');
 
@@ -2625,30 +2629,20 @@ pub fn generate_tokens_file(color_map: &HashMap<String, Color32>, spacing: &[f32
 pub fn generate_state_file(artboards: &[ArtboardState]) -> String {
     let mut output = String::new();
 
-    output.push_str("// Auto-generated state\n");
-    output.push_str("use egui::Color32;\n\n");
+    output.push_str("// Auto-generated state\n\n");
 
     for artboard in artboards {
         let struct_name = to_pascal_case(&artboard.name);
 
         // Generate struct with text fields
-        output.push_str(&format!("pub struct {}State {{\n", struct_name));
+        output.push_str(&format!(
+            "#[derive(Default, Clone)]\npub struct {}State {{\n",
+            struct_name
+        ));
         for field in &artboard.text_fields {
             let field_name = sanitize_field_name(field);
             output.push_str(&format!("    pub {}: String,\n", field_name));
         }
-        output.push_str("}\n\n");
-
-        // Generate Default impl
-        output.push_str(&format!("impl Default for {}State {{\n", struct_name));
-        output.push_str("    fn default() -> Self {\n");
-        output.push_str("        Self {\n");
-        for field in &artboard.text_fields {
-            let field_name = sanitize_field_name(field);
-            output.push_str(&format!("            {}: String::new(),\n", field_name));
-        }
-        output.push_str("        }\n");
-        output.push_str("    }\n");
         output.push_str("}\n\n");
 
         // Generate Action enum
@@ -2684,7 +2678,9 @@ pub fn generate_mod_file(artboard_names: &[&str]) -> String {
 pub fn generate_components_file(components: &[ComponentDef]) -> String {
     let mut output = String::new();
 
+    output.push_str("#[allow(unused_imports)]\n");
     output.push_str("use egui::{Color32, RichText, Ui};\n");
+    output.push_str("#[allow(unused_imports)]\n");
     output.push_str("use super::tokens;\n\n");
 
     for comp in components {
@@ -5604,6 +5600,7 @@ mod tests {
         }];
 
         let state = generate_state_file(&artboards);
+        assert!(state.contains("#[derive(Default, Clone)]"));
         assert!(state.contains("pub struct LoginScreenState"));
         assert!(state.contains("pub email: String"));
         assert!(state.contains("pub password: String"));

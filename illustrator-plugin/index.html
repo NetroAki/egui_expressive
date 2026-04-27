@@ -511,6 +511,29 @@
       });
     }
 
+    let currentHostLogPath = '';
+
+    function buildHostLogScript(functionName, payload) {
+      return functionName + '(' + JSON.stringify(JSON.stringify(payload || {})) + ')';
+    }
+
+    async function appendHostExportLog(stage, detail) {
+      if (!window.__adobe_cep__) return null;
+      try {
+        const result = await evalCepScript(buildHostLogScript('appendHostLogJSON', { stage, detail }));
+        if (result.ok && result.result) {
+          const parsed = JSON.parse(result.result);
+          currentHostLogPath = parsed.path || currentHostLogPath;
+          return parsed;
+        }
+      } catch (ignored) { /* host logging must never block export */ }
+      return null;
+    }
+
+    function withHostLogHint(message) {
+      return currentHostLogPath ? message + ' — log: ' + currentHostLogPath : message;
+    }
+
     function getExtensionRootPath() {
       try {
         if (window.__adobe_cep__ && typeof window.__adobe_cep__.getSystemPath === 'function') {
@@ -778,53 +801,68 @@
               return;
             }
 
+            await appendHostExportLog('cep export clicked', 'selected=' + selected.join(',') + ' options=' + JSON.stringify(options));
+            await appendHostExportLog('cep export', 'querying artboards');
+
             const abResult = await evalCepScript('getArtboardsJSON()');
             if (!abResult.ok) {
               document.getElementById('export-btn').disabled = false;
-              setStatus('evalScript error — host.jsx is still unavailable');
+              await appendHostExportLog('cep export error', 'getArtboardsJSON failed: ' + abResult.error);
+              setStatus(withHostLogHint('evalScript error — host.jsx is still unavailable'));
               return;
             } else if (!abResult.result || abResult.result === 'undefined') {
               document.getElementById('export-btn').disabled = false;
-              setStatus('No document open in Illustrator');
+              await appendHostExportLog('cep export error', 'getArtboardsJSON returned empty');
+              setStatus(withHostLogHint('No document open in Illustrator'));
               return;
             }
 
+            await appendHostExportLog('cep export', 'extracting selected artboards');
             const result = await evalCepScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(exportPayload)) + ')');
             if (!result.ok) {
               document.getElementById('export-btn').disabled = false;
-              setStatus('evalScript error — host.jsx is still unavailable');
+              await appendHostExportLog('cep export error', 'extractArtboardDataJSON failed: ' + result.error);
+              setStatus(withHostLogHint('evalScript error — host.jsx is still unavailable'));
               return;
             } else if (!result.result || result.result === 'undefined') {
               document.getElementById('export-btn').disabled = false;
-              setStatus('Could not extract artboard data');
+              await appendHostExportLog('cep export error', 'extractArtboardDataJSON returned empty');
+              setStatus(withHostLogHint('Could not extract artboard data'));
               return;
             }
 
             try {
+              await appendHostExportLog('cep export', 'parsing extracted JSON chars=' + result.result.length);
               const rawData = JSON.parse(result.result);
               if (rawData && rawData.error) {
                 document.getElementById('export-btn').disabled = false;
-                setStatus('Illustrator error: ' + rawData.error);
+                await appendHostExportLog('cep export error', 'Illustrator error: ' + rawData.error);
+                setStatus(withHostLogHint('Illustrator error: ' + rawData.error));
                 return;
               }
               const docPath = Array.isArray(rawData) && rawData.length ? rawData[0].documentPath : null;
               const hostDiagnostics = Array.isArray(rawData)
                 ? rawData.flatMap(entry => Array.isArray(entry.hostDiagnostics) ? entry.hostDiagnostics : [])
                 : [];
+              await appendHostExportLog('cep export', 'running parser/codegen docPath=' + (docPath || '<none>') + ' artboards=' + (Array.isArray(rawData) ? rawData.length : 0));
               const enrichedData = typeof extractFromProjectFile === 'function'
                 ? await extractFromProjectFile(rawData, docPath)
                 : rawData;
+              await appendHostExportLog('cep export', 'generating Rust files');
               const exportResult = exportFromRawData(enrichedData, Object.assign({}, options, { parserDiagnostics: hostDiagnostics }));
               handleExportResult({ payload: { files: exportResult.files, assets: exportResult.assets, filesArray: Object.entries(exportResult.files).map(([filename, content]) => ({filename, content})), colorMap: exportResult.colorMap, warnings: exportResult.warnings || [] } });
               document.getElementById('export-btn').disabled = false;
-              setStatus('Exported ' + Object.keys(exportResult.files).length + ' files');
+              await appendHostExportLog('cep export done', 'files=' + Object.keys(exportResult.files).length + ' warnings=' + (exportResult.warnings || []).length);
+              setStatus(withHostLogHint('Exported ' + Object.keys(exportResult.files).length + ' files'));
             } catch(e) {
               document.getElementById('export-btn').disabled = false;
-              setStatus('Error processing export: ' + e.message);
+              await appendHostExportLog('cep export exception', e.message || String(e));
+              setStatus(withHostLogHint('Error processing export: ' + e.message));
             }
           })().catch(e => {
             document.getElementById('export-btn').disabled = false;
-            setStatus('Error processing export: ' + e.message);
+            appendHostExportLog('cep export rejected', e.message || String(e));
+            setStatus(withHostLogHint('Error processing export: ' + e.message));
           });
         } else {
           // UXP path: postMessage
@@ -1049,27 +1087,33 @@
       }
 
       setStatus('Select a folder...');
+      await appendHostExportLog('save to folder', 'files=' + Object.keys(generatedFiles || {}).length + ' assets=' + Object.keys(window.generatedAssets || {}).length);
       const payload = { files: generatedFiles, assets: window.generatedAssets || {} };
       // Double stringify: once for the JSON payload, once to escape it as a string literal for evalScript
       const script = 'saveFilesToFolderJSON(' + JSON.stringify(JSON.stringify(payload)) + ')';
       const result = await evalCepScript(script);
 
       if (!result.ok) {
-        setStatus('Failed to save: ' + result.error);
+        await appendHostExportLog('save to folder error', result.error || 'evalScript failed');
+        setStatus(withHostLogHint('Failed to save: ' + result.error));
         return;
       }
 
       try {
         const parsed = JSON.parse(result.result);
         if (parsed.canceled) {
-          setStatus('Save canceled');
+          await appendHostExportLog('save to folder', 'canceled');
+          setStatus(withHostLogHint('Save canceled'));
         } else if (parsed.error) {
-          setStatus('Save error: ' + parsed.error);
+          await appendHostExportLog('save to folder error', parsed.error);
+          setStatus(withHostLogHint('Save error: ' + parsed.error));
         } else if (parsed.success) {
-          setStatus('Saved ' + parsed.saved.length + ' files to ' + parsed.folder);
+          await appendHostExportLog('save to folder done', 'saved=' + parsed.saved.length + ' folder=' + parsed.folder);
+          setStatus(withHostLogHint('Saved ' + parsed.saved.length + ' files to ' + parsed.folder));
         }
       } catch (e) {
-        setStatus('Error parsing save result');
+        await appendHostExportLog('save to folder exception', e.message || String(e));
+        setStatus(withHostLogHint('Error parsing save result'));
       }
     }
   </script>

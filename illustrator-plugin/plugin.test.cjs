@@ -132,13 +132,28 @@ function testAriaPressedToggle() {
 
 function testHostJsx() {
   const hostSource = fs.readFileSync(path.join(__dirname, 'host.jsx'), 'utf8');
+  const writes = [];
   const hostSandbox = {
     Folder: function(path) { this.fsName = path; this.create = function() {}; },
-    File: function(path) { this.fsName = path; this.exists = true; this.copy = function() { return true; }; this.open = function() { return true; }; this.write = function() { return true; }; this.close = function() {}; }
+    File: function(path) {
+      this.fsName = path;
+      this.exists = true;
+      this.parent = { exists: true };
+      this.copy = function() { return true; };
+      this.open = function(mode) { this.mode = mode; this.buffer = ''; writes.push(this); return true; };
+      this.write = function(content) { this.buffer += String(content); return true; };
+      this.writeln = function(content) { this.buffer += String(content) + '\n'; return true; };
+      this.close = function() {};
+    }
   };
+  hostSandbox.Folder.myDocuments = new hostSandbox.Folder('/tmp/Documents');
+  hostSandbox.Folder.desktop = new hostSandbox.Folder('/tmp/Desktop');
+  hostSandbox.Folder.temp = new hostSandbox.Folder('/tmp');
   hostSandbox.Folder.selectDialog = function() { return new hostSandbox.Folder('/tmp/export'); };
 
   vm.runInNewContext(hostSource, hostSandbox, { filename: 'host.jsx' });
+
+  assert(writes.some(w => w.fsName === '/tmp/Documents/egui_expressive_export.log' && w.mode === 'w' && w.buffer.includes('host.jsx loaded')));
 
   const assetPath = hostSandbox.portableAssetPath('C:\\test\\image.png');
   assert(assetPath.startsWith('assets/'));
@@ -153,6 +168,14 @@ function testHostJsx() {
   const diags = hostSandbox.consumeHostDiagnostics();
   assert(diags.length > 0);
   assert(diags[0].note.includes("Not saved"));
+  assert(writes.some(w => w.fsName === '/tmp/Documents/egui_expressive_export.log' && w.buffer.includes('getDocumentPath fullName')));
+
+  const resetLog = JSON.parse(hostSandbox.resetHostLogJSON(JSON.stringify({ detail: 'unit test reset' })));
+  assert.strictEqual(resetLog.success, true);
+  assert.strictEqual(resetLog.path, '/tmp/Documents/egui_expressive_export.log');
+  hostSandbox.appendHostLogJSON(JSON.stringify({ stage: 'unit test append', detail: 'hello' }));
+  assert(writes.some(w => w.fsName === '/tmp/Documents/egui_expressive_export.log' && w.mode === 'w' && w.buffer.includes('unit test reset')));
+  assert(writes.some(w => w.fsName === '/tmp/Documents/egui_expressive_export.log' && w.mode === 'a' && w.buffer.includes('unit test append')));
 
   // Test saveFilesToFolderJSON
   const payload = {
@@ -209,6 +232,20 @@ function testFileTreeAndCodePreview() {
   assert(domSandbox.elements['code-preview'].innerHTML.includes('main'));
 
   domSandbox.copyCode();
+}
+
+function testGenerateStateFileDerives() {
+  const results = [{
+    artboard: { name: "Artboard 1", width: 100, height: 100 },
+    elements: [
+      { id: "text_1", type: "text", text: "Hello", textStyle: { size: 14 } }
+    ]
+  }];
+  const exported = plugin.exportFromRawData ? plugin.exportFromRawData(results, { naming: false }) : null;
+  if (exported) {
+    const code = exported.files["state.rs"];
+    assert(code.includes("#[derive(Default, Clone)]"), "State struct should derive Default and Clone");
+  }
 }
 
 function testHostSaveFailureHandling() {
@@ -607,3 +644,4 @@ testAriaPressedToggle();
 testHostJsx();
 testFileTreeAndCodePreview();
 testHostSaveFailureHandling();
+testGenerateStateFileDerives();
