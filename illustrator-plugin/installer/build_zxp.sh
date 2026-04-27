@@ -48,12 +48,16 @@ prune_stale_packages() {
 
 write_release_readme() {
     local readme_path="$1"
+    local packaged_zxp_name="$ZXP_NAME"
+    if [ "$PLATFORM" = "win32" ]; then
+        packaged_zxp_name="egui_expressive_export-${VERSION}.zxp"
+    fi
     cat > "$readme_path" <<EOF
 # egui_expressive Illustrator Exporter — ${PLATFORM} package
 
 This bundle contains the platform-specific ZXP:
 
-- ${ZXP_NAME}
+- ${packaged_zxp_name}
 
 Install only on a matching ${PLATFORM} host. Do not install this ZXP on another platform because the bundled ai-parser binary is platform-specific.
 
@@ -70,7 +74,7 @@ The helper requires ${ZXP_NAME} and refuses non-matching platform packages.
 EOF
     elif [ "$PLATFORM" = "win32" ]; then
         cat >> "$readme_path" <<EOF
-Run install.bat on Windows. The helper requires ${ZXP_NAME} and refuses non-matching platform packages.
+Run install.bat on Windows. The helper expects ${packaged_zxp_name} next to the script.
 EOF
     else
         cat >> "$readme_path" <<EOF
@@ -93,7 +97,11 @@ sync_release_bundle() {
         zip -j "$zip_path" "$zxp_path" "$RELEASE_DIR/README.md" "$PLUGIN_DIR/install.sh" >/dev/null
     elif [ "$PLATFORM" = "win32" ]; then
         cp "$PLUGIN_DIR/install.bat" "$RELEASE_DIR/install.bat"
-        zip -j "$zip_path" "$zxp_path" "$RELEASE_DIR/README.md" "$PLUGIN_DIR/install.bat" >/dev/null
+        local installer_zxp_name="egui_expressive_export-${VERSION}.zxp"
+        local installer_zxp_path="$OUTPUT_DIR/$installer_zxp_name"
+        cp "$zxp_path" "$installer_zxp_path"
+        cp "$zxp_path" "$RELEASE_DIR/$installer_zxp_name"
+        zip -j "$zip_path" "$installer_zxp_path" "$RELEASE_DIR/README.md" "$PLUGIN_DIR/install.bat" >/dev/null
     else
         zip -j "$zip_path" "$zxp_path" "$RELEASE_DIR/README.md" >/dev/null
     fi

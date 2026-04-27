@@ -9,7 +9,7 @@ The packaged extension includes the Rust `ai-parser` binary under `bin/<platform
 1. Build the platform-specific `.zxp` file by running `cd installer && bash build_zxp.sh` (macOS/Linux) or `cd installer && build_zxp.bat` (Windows). The output is named like `egui_expressive_export-1.0.0-darwin.zxp`, `egui_expressive_export-1.0.0-linux.zxp`, or `egui_expressive_export-1.0.0-win32.zxp`.
    - **Note**: You can set the `ZXP_SIGN_PASSWORD` environment variable to specify a custom password for the self-signed certificate. If not set, an ephemeral password is used.
 2. Install the generated `.zxp` file:
-   - **Windows**: Double-click `install.bat` (requires `*-win32.zxp`, next to the script or in `..\dist\`)
+   - **Windows**: Double-click `install.bat` from the Windows installer bundle (requires `egui_expressive_export-1.0.0.zxp` next to the script or in `..\dist\`)
    - **macOS**: Run `chmod +x install.sh && ./install.sh` (requires `*-darwin.zxp`, next to the script or in `../dist/`)
    - **Linux CEP test host**: Install the `*-linux.zxp` with your CEP extension manager; the macOS/Windows helper scripts intentionally refuse cross-platform ZXP installs.
 3. Restart Adobe Illustrator.

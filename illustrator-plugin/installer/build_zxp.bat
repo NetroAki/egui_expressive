@@ -198,6 +198,17 @@ if errorlevel 1 (
     echo [ERROR] Failed to sync release artifact
     goto :error
 )
+set "INSTALLER_ZXP_NAME=egui_expressive_export-%VERSION%.zxp"
+copy "%OUTPUT_DIR%\%ZXP_NAME%" "%OUTPUT_DIR%\%INSTALLER_ZXP_NAME%" >nul
+if errorlevel 1 (
+    echo [ERROR] Failed to create Windows installer ZXP alias
+    goto :error
+)
+copy "%OUTPUT_DIR%\%ZXP_NAME%" "%RELEASE_DIR%\%INSTALLER_ZXP_NAME%" >nul
+if errorlevel 1 (
+    echo [ERROR] Failed to sync Windows installer ZXP alias
+    goto :error
+)
 del /f /q "%RELEASE_DIR%\install.sh" 2>nul
 del /f /q "%RELEASE_DIR%\install.bat" 2>nul
 del /f /q "%RELEASE_DIR%\install_zxp.bat" 2>nul
@@ -213,19 +224,19 @@ echo [INFO] Release artifact synced: %RELEASE_DIR%\%ZXP_NAME%
   echo.
   echo This bundle contains the platform-specific ZXP:
   echo.
-  echo - %ZXP_NAME%
+  echo - %INSTALLER_ZXP_NAME%
   echo.
   echo Install only on a matching %PLATFORM% host. Do not install this ZXP on another platform because the bundled ai-parser binary is platform-specific.
   echo.
   echo ## Install
   echo.
-  echo Run install.bat on Windows. The helper requires %ZXP_NAME% and refuses non-matching platform packages.
+  echo Run install.bat on Windows. The helper expects %INSTALLER_ZXP_NAME% next to the script.
 ) > "%RELEASE_DIR%\README.md"
 
 set "INSTALLER_ZIP=%OUTPUT_DIR%\egui_expressive_export-%VERSION%-%PLATFORM%-installer.zip"
 del /f /q "%INSTALLER_ZIP%" 2>nul
 del /f /q "%RELEASE_DIR%\egui_expressive_export-%VERSION%-%PLATFORM%-installer.zip" 2>nul
-powershell -NoProfile -Command "$files = @('%OUTPUT_DIR%\%ZXP_NAME%', '%RELEASE_DIR%\README.md', '%PLUGIN_DIR%\install.bat'); Compress-Archive -LiteralPath $files -DestinationPath '%INSTALLER_ZIP%' -Force"
+powershell -NoProfile -Command "$files = @('%OUTPUT_DIR%\%INSTALLER_ZXP_NAME%', '%RELEASE_DIR%\README.md', '%PLUGIN_DIR%\install.bat'); Compress-Archive -LiteralPath $files -DestinationPath '%INSTALLER_ZIP%' -Force"
 if errorlevel 1 (
     echo [ERROR] Failed to create installer bundle
     goto :error
