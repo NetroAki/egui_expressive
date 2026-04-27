@@ -27,7 +27,7 @@ A GUI app that lets you preview exported Illustrator artboards as live egui UIs.
 ## Workflow
 
 ```
-Illustrator → Save to Folder → Select in Preview → See rendered UI
+Illustrator -> Save to Folder -> Select in Preview -> See rendered UI
 ```
 
 To load a different export, click **Load Different Folder** in the top bar.
@@ -38,7 +38,7 @@ The preview app looks for these files in the selected folder:
 
 - `<artboard_name>.rs` — one per artboard (e.g. `login_screen.rs`)
 
-If `mod.rs`, `tokens.rs`, `state.rs`, or `components.rs` are missing, the app auto-generates minimal placeholders so the preview still compiles. For the best experience, export all files from Illustrator.
+If `mod.rs`, `tokens.rs`, `state.rs`, or `components.rs` are missing, the preview will fail to compile. For the best experience, export all files from Illustrator.
 
 ## How it works
 
@@ -56,10 +56,10 @@ The preview uses a `build.rs` script that:
 ## Troubleshooting
 
 **"No artboards loaded"**
-→ Make sure the folder contains `.rs` files exported from Illustrator.
+-> Make sure the folder contains `.rs` files exported from Illustrator.
 
 **Build errors after selecting folder**
-→ The exported code may have issues. Check the terminal output for compilation errors.
+-> The exported code may have issues. Check the terminal output for compilation errors.
 
 **Artboard not showing**
-→ Make sure the artboard `.rs` file is in the folder and `mod.rs` declares it.
+-> Make sure the artboard `.rs` file is in the folder and `mod.rs` declares it.

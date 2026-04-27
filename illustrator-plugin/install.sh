@@ -12,12 +12,26 @@ echo ""
 
 # --- Resolve ZXP path ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ZXP_FILE="$SCRIPT_DIR/egui_expressive_export-1.0.0.zxp"
+case "$(uname -s)" in
+  Darwin*) PLATFORM="darwin" ;;
+  *)
+    echo "ERROR: install.sh supports macOS CEP installs only."
+    echo "Use a CEP extension manager for this platform-specific ZXP instead."
+    exit 1
+    ;;
+esac
+ZXP_FILE=""
+for candidate in \
+  "$SCRIPT_DIR/egui_expressive_export-1.0.0-${PLATFORM}.zxp" \
+  "$SCRIPT_DIR/../dist/egui_expressive_export-1.0.0-${PLATFORM}.zxp"
+do
+  if [ -f "$candidate" ]; then
+    ZXP_FILE="$candidate"
+    break
+  fi
+done
 if [ ! -f "$ZXP_FILE" ]; then
-  ZXP_FILE="$SCRIPT_DIR/../dist/egui_expressive_export-1.0.0.zxp"
-fi
-if [ ! -f "$ZXP_FILE" ]; then
-  echo "ERROR: egui_expressive_export-1.0.0.zxp not found."
+  echo "ERROR: platform-specific egui_expressive_export-1.0.0-<platform>.zxp not found."
   echo "Place the .zxp next to this script, or run build_zxp.sh first."
   exit 1
 fi

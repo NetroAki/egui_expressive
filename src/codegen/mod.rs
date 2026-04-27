@@ -11,7 +11,7 @@ use std::collections::HashMap;
 // ============================================================================
 
 /// Gradient stop definition.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GradientStop {
     pub position: f32, // 0.0–1.0
     pub color: Color32,
@@ -25,15 +25,35 @@ pub enum GradientType {
 }
 
 /// Gradient definition with angle and stops.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GradientDef {
     pub gradient_type: GradientType,
     pub angle_deg: f32,
+    pub center: Option<[f32; 2]>,
+    pub focal_point: Option<[f32; 2]>,
+    pub radius: Option<f32>,
+    pub transform: Option<[f32; 6]>,
     pub stops: Vec<GradientStop>,
 }
 
+fn stable_pattern_seed(name: &str) -> u32 {
+    name.bytes().fold(0x811c_9dc5, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+    })
+}
+
+fn seeded_pattern_colors(seed: u32) -> (Color32, Color32) {
+    let r = 64 + (seed & 0x7f) as u8;
+    let g = 64 + ((seed >> 8) & 0x7f) as u8;
+    let b = 64 + ((seed >> 16) & 0x7f) as u8;
+    (
+        Color32::from_rgba_unmultiplied(r, g, b, 220),
+        Color32::from_rgba_unmultiplied(255 - r / 2, 255 - g / 2, 255 - b / 2, 48),
+    )
+}
+
 /// Blend mode for compositing.
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub enum BlendMode {
     #[default]
     Normal,
@@ -88,6 +108,7 @@ pub enum EffectType {
     GaussianBlur,
     Bevel,
     Feather,
+    Noise,
     LiveEffect,
     Unknown(String),
 }
@@ -109,6 +130,10 @@ pub struct EffectDef {
     pub shadow_color: Option<Color32>,
     // For blur/feather
     pub radius: f32,
+    // For noise/grain
+    pub amount: f32,
+    pub scale: f32,
+    pub seed: u32,
 }
 
 impl Default for EffectDef {
@@ -126,6 +151,9 @@ impl Default for EffectDef {
             highlight: None,
             shadow_color: None,
             radius: 0.0,
+            amount: 0.0,
+            scale: 1.0,
+            seed: 0,
         }
     }
 }
@@ -234,6 +262,7 @@ pub struct ThirdPartyEffect {
 #[derive(Clone, Debug)]
 pub struct AppearanceFill {
     pub color: Color32,
+    pub gradient: Option<GradientDef>,
     pub opacity: f32,
     pub blend_mode: BlendMode,
 }
@@ -245,6 +274,18 @@ pub struct AppearanceStroke {
     pub width: f32,
     pub opacity: f32,
     pub blend_mode: BlendMode,
+    pub cap: Option<StrokeCap>,
+    pub join: Option<StrokeJoin>,
+    pub dash: Option<Vec<f32>>,
+    pub miter_limit: Option<f32>,
+}
+
+/// Illustrator path anchor and Bezier handles preserved for code generation.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PathPoint {
+    pub anchor: [f32; 2],
+    pub left_ctrl: [f32; 2],
+    pub right_ctrl: [f32; 2],
 }
 
 /// Visual styling properties carried through the layout node tree.
@@ -259,6 +300,7 @@ pub struct VisualStyle {
     pub stroke_dash: Option<Vec<f32>>,
     pub stroke_cap: Option<StrokeCap>,
     pub stroke_join: Option<StrokeJoin>,
+    pub stroke_miter_limit: Option<f32>,
     pub stroke: Option<(f32, Color32)>,
     pub image_path: Option<String>, // for Image nodes
 }
@@ -275,8 +317,9 @@ impl VisualStyle {
             stroke_dash: elem.stroke_dash.clone(),
             stroke_cap: elem.stroke_cap.clone(),
             stroke_join: elem.stroke_join.clone(),
+            stroke_miter_limit: elem.stroke_miter_limit,
             stroke: elem.stroke,
-            image_path: None,
+            image_path: elem.image_path.clone(),
         }
     }
 
@@ -288,6 +331,7 @@ impl VisualStyle {
             && self.blend_mode == BlendMode::Normal
             && self.effects.is_empty()
             && self.stroke_dash.is_none()
+            && self.stroke_miter_limit.is_none()
             && self.stroke.is_none()
     }
 }
@@ -337,8 +381,12 @@ pub struct LayoutElement {
     // Appearance stack (multiple fills/strokes from expand+analyze)
     pub appearance_fills: Vec<AppearanceFill>,
     pub appearance_strokes: Vec<AppearanceStroke>,
+    pub appearance_stack: crate::scene::AppearanceStack,
+    pub path_points: Vec<PathPoint>,
+    pub path_closed: bool,
     /// Artboard this element belongs to (None = unassigned / appears in all artboards).
     pub artboard_name: Option<String>,
+    pub image_path: Option<String>,
 }
 
 impl LayoutElement {
@@ -381,7 +429,11 @@ impl LayoutElement {
             notes: vec![],
             appearance_fills: vec![],
             appearance_strokes: vec![],
+            appearance_stack: crate::scene::AppearanceStack::default(),
+            path_points: vec![],
+            path_closed: false,
             artboard_name: None,
+            image_path: None,
         }
     }
 }
@@ -390,6 +442,8 @@ impl LayoutElement {
 pub enum ElementType {
     Group,
     Shape,
+    Circle,
+    Ellipse,
     Path,
     Text,
     Image,
@@ -475,6 +529,7 @@ pub enum LayoutNode {
         id: String,
         style: VisualStyle,
     },
+    RichScene(crate::scene::SceneNode),
     Unknown {
         id: String,
         comment: String,
@@ -878,6 +933,22 @@ pub fn infer_layout(elements: &[LayoutElement], options: &InferenceOptions) -> V
 }
 
 fn infer_element(elem: &LayoutElement, options: &InferenceOptions) -> LayoutNode {
+    // Check if it's a rich element that requires scene rendering
+    let is_rich = !elem.path_points.is_empty()
+        || !elem.appearance_stack.is_empty()
+        || !elem.appearance_fills.is_empty()
+        || !elem.appearance_strokes.is_empty()
+        || elem.blend_mode != BlendMode::Normal
+        || elem.clip_children
+        || elem
+            .effects
+            .iter()
+            .any(|e| e.blend_mode != BlendMode::Normal);
+
+    if is_rich {
+        return LayoutNode::RichScene(crate::scene::SceneNode::from_layout_element(elem));
+    }
+
     // Check naming convention
     if options.use_naming_conventions {
         let hint = parse_naming(&elem.id);
@@ -1040,9 +1111,10 @@ fn infer_element(elem: &LayoutElement, options: &InferenceOptions) -> LayoutNode
             }
             NamingHint::Grid(label) => {
                 // Grid layout - treat as column with tight spacing
+                let children = infer_children(&elem.children, options);
                 return LayoutNode::Column {
                     gap: 2.0,
-                    children: vec![],
+                    children,
                     bg: elem.fill,
                     id: label,
                 };
@@ -1090,6 +1162,9 @@ fn infer_element(elem: &LayoutElement, options: &InferenceOptions) -> LayoutNode
                     comment: "empty group".to_string(),
                 }
             }
+        }
+        ElementType::Circle | ElementType::Ellipse => {
+            LayoutNode::RichScene(crate::scene::SceneNode::from_layout_element(elem))
         }
         ElementType::Shape => LayoutNode::Shape {
             x: elem.x,
@@ -1256,10 +1331,12 @@ pub fn generate_rust(
 
     // Generate function signature with or without state
     if let Some(state_name) = state_struct_name {
+        let action_name = state_name.replace("State", "Action");
         output.push_str(&format!(
-            "pub fn draw_{}(ui: &mut Ui, state: &mut {}) {{\n",
+            "pub fn draw_{}(ui: &mut Ui, state: &mut {}) -> Option<{}> {{\n",
             sanitize_fn_name(fn_name),
-            state_name
+            state_name,
+            action_name
         ));
     } else {
         output.push_str(&format!(
@@ -1297,6 +1374,10 @@ pub fn generate_rust(
     // Generate code for each top-level node
     for node in nodes {
         output.push_str(&generate_node(node, 4, token_map));
+    }
+
+    if state_struct_name.is_some() {
+        output.push_str("    None\n");
     }
 
     output.push_str("}\n");
@@ -1570,8 +1651,8 @@ pub fn generate_node(
         }
         LayoutNode::Button { label, id } => {
             output.push_str(&format!(
-                "{}// Button: {}\n{}if ui.button(\"{}\").clicked() {{\n{}{}// Add click handler here\n{}{}}}\n",
-                indent_str, id, indent_str, label, indent_str, indent_str, indent_str, indent_str
+                "{}// Button: {}\n{}if ui.button(\"{}\").clicked() {{\n{}{}}}\n",
+                indent_str, id, indent_str, label, indent_str, indent_str
             ));
         }
         LayoutNode::Label {
@@ -1643,10 +1724,9 @@ pub fn generate_node(
             ));
         }
         LayoutNode::Icon { name, id } => {
-            // Emit a placeholder icon using the icon name as a label
             output.push_str(&format!(
-                "{}// Icon: {} - {}\n{}ui.label(egui::RichText::new(\"[{}]\").size(16.0).color(egui::Color32::from_gray(180)));\n",
-                indent_str, id, name, indent_str, name
+                "{}// Icon: {} - {} (Icons are not natively supported yet; implement custom rendering here)\n",
+                indent_str, id, name
             ));
         }
         LayoutNode::Shape {
@@ -1730,19 +1810,34 @@ pub fn generate_node(
                     "{}let _rot = egui_expressive::Transform2D::rotate_around({:.4}, rect.center());\n",
                     inner, style.rotation_deg
                 ));
-                output.push_str(&format!(
-                    "{}let _rot_pts = vec![_rot.apply(rect.min), _rot.apply(egui::pos2(rect.max.x, rect.min.y)), _rot.apply(rect.max), _rot.apply(egui::pos2(rect.min.x, rect.max.y))];\n",
-                    inner
-                ));
-                output.push_str(&format!(
-                    "{}painter.add(egui::Shape::convex_polygon(_rot_pts, fill, stroke));\n",
-                    inner
-                ));
+                if style.corner_radius > 0.001 {
+                    output.push_str(&format!(
+                        "{}let _rot_pts = egui_expressive::rounded_rect_path(rect, {:.1}).into_iter().map(|p| _rot.apply(p)).collect::<Vec<_>>();\n",
+                        inner, style.corner_radius
+                    ));
+                    output.push_str(&format!(
+                        "{}painter.add(egui::Shape::closed_line(_rot_pts.clone(), stroke));\n",
+                        inner
+                    ));
+                    output.push_str(&format!(
+                        "{}painter.add(egui::Shape::convex_polygon(_rot_pts, fill, egui::Stroke::NONE));\n",
+                        inner
+                    ));
+                } else {
+                    output.push_str(&format!(
+                        "{}let _rot_pts = vec![_rot.apply(rect.min), _rot.apply(egui::pos2(rect.max.x, rect.min.y)), _rot.apply(rect.max), _rot.apply(egui::pos2(rect.min.x, rect.max.y))];\n",
+                        inner
+                    ));
+                    output.push_str(&format!(
+                        "{}painter.add(egui::Shape::convex_polygon(_rot_pts, fill, stroke));\n",
+                        inner
+                    ));
+                }
             } else if let Some(grad) = &style.gradient {
                 if has_rotation {
                     output.push_str(&format!(
-                        "{}// Note: rotation not supported with gradients\n",
-                        inner
+                        "{}let _rot = egui_expressive::Transform2D::rotate_around({:.4}, rect.center());\n",
+                        inner, style.rotation_deg
                     ));
                 }
                 let stops_str: String = grad
@@ -1760,49 +1855,163 @@ pub fn generate_node(
                     .join(", ");
                 match grad.gradient_type {
                     GradientType::Linear => {
-                        output.push_str(&format!(
-                            "{}painter.add(egui_expressive::linear_gradient_rect(rect, &[{}], egui_expressive::GradientDir::Angle({:.1})));\n",
-                            inner, stops_str, grad.angle_deg
-                        ));
+                        if has_rotation || style.corner_radius > 0.001 || grad.transform.is_some() {
+                            let transform_expr = grad
+                                .transform
+                                .map(|m| {
+                                    format!(
+                                        "Some(egui_expressive::Transform2D {{ a: {:.4}, b: {:.4}, c: {:.4}, d: {:.4}, e: origin.x + {:.4} - {:.4} * origin.x - {:.4} * origin.y, f: origin.y + {:.4} - {:.4} * origin.x - {:.4} * origin.y }})",
+                                        m[0], m[1], m[2], m[3], m[4], m[0], m[2], m[5], m[1], m[3]
+                                    )
+                                })
+                                .unwrap_or_else(|| "None".to_string());
+                            let gradient_rect_points = if has_rotation {
+                                if style.corner_radius > 0.001 {
+                                    format!(
+                                        "egui_expressive::rounded_rect_path(rect, {:.1}).into_iter().map(|p| _rot.apply(p)).collect::<Vec<_>>()",
+                                        style.corner_radius
+                                    )
+                                } else {
+                                    "vec![_rot.apply(rect.left_top()), _rot.apply(rect.right_top()), _rot.apply(rect.right_bottom()), _rot.apply(rect.left_bottom())]".to_string()
+                                }
+                            } else if style.corner_radius > 0.001 {
+                                format!(
+                                    "egui_expressive::rounded_rect_path(rect, {:.1})",
+                                    style.corner_radius
+                                )
+                            } else {
+                                "vec![rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()]".to_string()
+                            };
+                            output.push_str(&format!(
+                                "{}let gradient_rect_pts = {};\n",
+                                inner, gradient_rect_points
+                            ));
+                            output.push_str(&format!(
+                                "{}let mut grad_shape = egui_expressive::gradient_path_mesh_with_transform(&gradient_rect_pts, &[{}], {:.1}, false, egui_expressive::GradientPathGeometry {{ transform: {}, ..Default::default() }}).unwrap_or(egui::Shape::Noop);\n",
+                                inner, stops_str, grad.angle_deg, transform_expr
+                            ));
+                        } else {
+                            output.push_str(&format!(
+                                "{}let mut grad_shape = egui_expressive::linear_gradient_rect(rect, &[{}], egui_expressive::GradientDir::Angle({:.1}));\n",
+                                inner, stops_str, grad.angle_deg
+                            ));
+                        }
                     }
                     GradientType::Radial => {
-                        // radial_gradient_rect takes inner_color, outer_color, segments
-                        // Use first stop as inner, last stop as outer
-                        let inner_color = grad
-                            .stops
-                            .first()
-                            .map(|s| {
-                                let [sr, sg, sb, sa] = s.color.to_srgba_unmultiplied();
-                                let a = (sa as f32 * style.opacity).clamp(0.0, 255.0) as u8;
+                        let point_expr = |point: Option<[f32; 2]>| {
+                            point
+                                .map(|p| {
+                                    format!("Some(origin + egui::vec2({:.1}, {:.1}))", p[0], p[1])
+                                })
+                                .unwrap_or_else(|| "None".to_string())
+                        };
+                        let radius_expr = grad
+                            .radius
+                            .map(|r| format!("Some({:.1})", r))
+                            .unwrap_or_else(|| "None".to_string());
+                        let transform_expr = grad
+                            .transform
+                            .map(|m| {
                                 format!(
-                                    "egui::Color32::from_rgba_unmultiplied({}, {}, {}, {})",
-                                    sr, sg, sb, a
+                                    "Some(egui_expressive::Transform2D {{ a: {:.4}, b: {:.4}, c: {:.4}, d: {:.4}, e: origin.x + {:.4} - {:.4} * origin.x - {:.4} * origin.y, f: origin.y + {:.4} - {:.4} * origin.x - {:.4} * origin.y }})",
+                                    m[0], m[1], m[2], m[3], m[4], m[0], m[2], m[5], m[1], m[3]
                                 )
                             })
-                            .unwrap_or_else(|| "egui::Color32::WHITE".to_string());
-                        let outer_color = grad
-                            .stops
-                            .last()
-                            .map(|s| {
-                                let [sr, sg, sb, sa] = s.color.to_srgba_unmultiplied();
-                                let a = (sa as f32 * style.opacity).clamp(0.0, 255.0) as u8;
+                            .unwrap_or_else(|| "None".to_string());
+                        let gradient_rect_points = if style.corner_radius > 0.001 {
+                            if has_rotation {
                                 format!(
-                                    "egui::Color32::from_rgba_unmultiplied({}, {}, {}, {})",
-                                    sr, sg, sb, a
+                                    "egui_expressive::rounded_rect_path(rect, {:.1}).into_iter().map(|p| _rot.apply(p)).collect::<Vec<_>>()",
+                                    style.corner_radius
                                 )
-                            })
-                            .unwrap_or_else(|| "egui::Color32::TRANSPARENT".to_string());
+                            } else {
+                                format!(
+                                    "egui_expressive::rounded_rect_path(rect, {:.1})",
+                                    style.corner_radius
+                                )
+                            }
+                        } else if has_rotation {
+                            "vec![_rot.apply(rect.left_top()), _rot.apply(rect.right_top()), _rot.apply(rect.right_bottom()), _rot.apply(rect.left_bottom())]".to_string()
+                        } else {
+                            "vec![rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()]".to_string()
+                        };
                         output.push_str(&format!(
-                            "{}painter.add(egui_expressive::radial_gradient_rect(rect, {}, {}, 32));\n",
-                            inner, inner_color, outer_color
+                            "{}let gradient_rect_pts = {};\n",
+                            inner, gradient_rect_points
+                        ));
+                        output.push_str(&format!(
+                            "{}let mut grad_shape = egui_expressive::gradient_path_mesh_with_transform(&gradient_rect_pts, &[{}], {:.1}, true, egui_expressive::GradientPathGeometry {{ center: {}, focal_point: {}, radius: {}, transform: {} }}).unwrap_or(egui::Shape::Noop);\n",
+                            inner,
+                            stops_str,
+                            grad.angle_deg,
+                            point_expr(grad.center),
+                            point_expr(grad.focal_point),
+                            radius_expr,
+                            transform_expr
                         ));
                     }
                 }
+                output.push_str(&format!("{}painter.add(grad_shape);\n", inner));
                 // Emit stroke on top of gradient fill if present
-                output.push_str(&format!(
-                    "{}if stroke != egui::Stroke::NONE {{ painter.rect_stroke(rect, {:.1}, stroke, egui::StrokeKind::Outside); }}\n",
-                    inner, style.corner_radius
-                ));
+                if style.stroke.is_some() {
+                    let stroke_points = if style.corner_radius > 0.001 {
+                        if has_rotation {
+                            format!(
+                                "egui_expressive::rounded_rect_path(rect, {:.1}).into_iter().map(|p| _rot.apply(p)).collect::<Vec<_>>()",
+                                style.corner_radius
+                            )
+                        } else {
+                            format!(
+                                "egui_expressive::rounded_rect_path(rect, {:.1})",
+                                style.corner_radius
+                            )
+                        }
+                    } else if has_rotation {
+                        "vec![_rot.apply(rect.left_top()), _rot.apply(rect.right_top()), _rot.apply(rect.right_bottom()), _rot.apply(rect.left_bottom())]".to_string()
+                    } else {
+                        "vec![rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()]".to_string()
+                    };
+                    let closed_stroke_points = format!(
+                        "{{ let mut pts = {}; pts.push(pts[0]); pts }}",
+                        stroke_points
+                    );
+                    if let Some(dashes) = &style.stroke_dash {
+                        let dash_values = dashes
+                            .iter()
+                            .map(|dash| format!("{:.1}", dash))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let cap_variant = match style.stroke_cap {
+                            Some(StrokeCap::Round) => "Round",
+                            Some(StrokeCap::Square) => "Square",
+                            _ => "Butt",
+                        };
+                        let join_variant = match style.stroke_join {
+                            Some(StrokeJoin::Round) => "Round",
+                            Some(StrokeJoin::Bevel) => "Bevel",
+                            Some(StrokeJoin::Miter) | None
+                                if style.stroke_miter_limit.unwrap_or(4.0) <= 1.0 =>
+                            {
+                                "Bevel"
+                            }
+                            _ => "Miter",
+                        };
+                        output.push_str(&format!(
+                            "{}if stroke != egui::Stroke::NONE {{ let stroke_pts = {}; let rich_stroke = egui_expressive::RichStroke {{ width: stroke.width, color: stroke.color, dash: Some(egui_expressive::DashPattern {{ dashes: vec![{}], offset: 0.0 }}), cap: egui_expressive::StrokeCap::{}, join: egui_expressive::StrokeJoin::{} }}; egui_expressive::dashed_path(&painter, &stroke_pts, &rich_stroke); }}\n",
+                            inner, closed_stroke_points, dash_values, cap_variant, join_variant
+                        ));
+                    } else if has_rotation || style.corner_radius > 0.001 {
+                        output.push_str(&format!(
+                            "{}if stroke != egui::Stroke::NONE {{ painter.add(egui::Shape::closed_line({}, stroke)); }}\n",
+                            inner, closed_stroke_points
+                        ));
+                    } else {
+                        output.push_str(&format!(
+                            "{}if stroke != egui::Stroke::NONE {{ painter.rect_stroke(rect, {:.1}, stroke, egui::StrokeKind::Outside); }}\n",
+                            inner, style.corner_radius
+                        ));
+                    }
+                }
             } else {
                 // Solid fill — use the pre-declared `fill` and `stroke` variables (which already handle opacity)
                 let rounding = style.corner_radius;
@@ -1813,18 +2022,61 @@ pub fn generate_node(
                 output.push_str(&format!("{}painter.add(shape);\n", inner));
             }
 
-            // Inner shadow (after shape)
+            // Post-shape effects (inner shadow, noise, bevel, blur, feather)
             for effect in &style.effects {
-                if effect.effect_type == EffectType::InnerShadow {
-                    output.push_str(&format!(
-                        "{}// inner_shadow: blur={:.1} color=rgba({},{},{},{})\n",
-                        inner,
-                        effect.blur,
-                        effect.color.r(),
-                        effect.color.g(),
-                        effect.color.b(),
-                        effect.color.a()
-                    ));
+                match effect.effect_type {
+                    EffectType::InnerShadow => {
+                        output.push_str(&format!(
+                            "{}for s in egui_expressive::inner_shadow(rect, egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}), {:.1}) {{ painter.add(s); }}\n",
+                            inner,
+                            effect.color.r(),
+                            effect.color.g(),
+                            effect.color.b(),
+                            effect.color.a(),
+                            effect.blur
+                        ));
+                    }
+                    EffectType::Noise => {
+                        output.push_str(&format!(
+                            "{}for s in egui_expressive::noise_rect(rect, {}, {:.2}, {:.2}) {{ painter.add(s); }}\n",
+                            inner, effect.seed, effect.scale, effect.amount
+                        ));
+                    }
+                    EffectType::Bevel => {
+                        output.push_str(&format!(
+                            "{}// bevel: depth={:.1} angle={:.1} radius={:.1}\n",
+                            inner, effect.depth, effect.angle, effect.radius
+                        ));
+                    }
+                    EffectType::GaussianBlur => {
+                        output.push_str(&format!(
+                            "{}for s in egui_expressive::blur::soft_shadow(rect, egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}), {:.1}, 0.0, egui_expressive::ShadowOffset::zero(), egui_expressive::blur::BlurQuality::High) {{ painter.add(s); }}\n",
+                            inner,
+                            effect.color.r(),
+                            effect.color.g(),
+                            effect.color.b(),
+                            effect.color.a(),
+                            effect.radius
+                        ));
+                    }
+                    EffectType::Feather => {
+                        output.push_str(&format!(
+                            "{}for s in egui_expressive::blur::soft_shadow(rect, egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}), {:.1}, 0.0, egui_expressive::ShadowOffset::zero(), egui_expressive::blur::BlurQuality::High) {{ painter.add(s); }}\n",
+                            inner,
+                            effect.color.r(),
+                            effect.color.g(),
+                            effect.color.b(),
+                            effect.color.a(),
+                            effect.radius
+                        ));
+                    }
+                    EffectType::LiveEffect => {
+                        output.push_str(&format!("{}// live_effect\n", inner));
+                    }
+                    EffectType::Unknown(ref name) => {
+                        output.push_str(&format!("{}// unknown effect: {}\n", inner, name));
+                    }
+                    _ => {}
                 }
             }
 
@@ -1847,30 +2099,27 @@ pub fn generate_node(
                 "{}let rect = egui::Rect::from_min_size(origin + egui::vec2({:.1}, {:.1}), egui::vec2({:.1}, {:.1}));\n",
                 inner, x, y, w, h
             ));
+            let alpha = (255.0 * style.opacity).clamp(0.0, 255.0) as u8;
             if let Some(path) = &style.image_path {
                 output.push_str(&format!(
-                    "{}ui.painter().image(egui::TextureId::default(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE); // image: {}\n",
-                    inner, path
+                    "{}egui_expressive::paint_image_from_path(ui, &ui.painter(), rect, \"{}\", \"{}\", egui::Color32::from_rgba_unmultiplied(255, 255, 255, {}));\n",
+                    inner, path, id, alpha
                 ));
             } else {
-                // Placeholder: tinted rect
+                // Editable image asset slot when Illustrator did not expose a linked path.
                 output.push_str(&format!(
-                    "{}// Replace with actual image texture for \"{}\"\n",
+                    "{}// Note: Image asset slot emitted without linked path for \"{}\".\n",
                     inner, id
                 ));
+                let fill_a = (180.0 * style.opacity).clamp(0.0, 255.0) as u8;
                 output.push_str(&format!(
-                    "{}painter.rect_filled(rect, {:.1}, egui::Color32::from_rgba_premultiplied(80, 80, 80, 180));\n",
-                    inner, style.corner_radius
+                    "{}painter.rect_filled(rect, {:.1}, egui::Color32::from_rgba_premultiplied(80, 80, 80, {}));\n",
+                    inner, style.corner_radius, fill_a
                 ));
+                let stroke_a = (255.0 * style.opacity).clamp(0.0, 255.0) as u8;
                 output.push_str(&format!(
-                    "{}painter.rect_stroke(rect, {:.1}, egui::Stroke::new(1.0, egui::Color32::from_gray(120)), egui::StrokeKind::Outside);\n",
-                    inner, style.corner_radius
-                ));
-            }
-            if style.opacity < 0.999 {
-                output.push_str(&format!(
-                    "{}// opacity: {:.2} — wrap image in with_opacity() after loading texture\n",
-                    inner, style.opacity
+                    "{}painter.rect_stroke(rect, {:.1}, egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 120, 120, {})), egui::StrokeKind::Outside);\n",
+                    inner, style.corner_radius, stroke_a
                 ));
             }
             output.push_str(&format!("{}}}\n", indent_str));
@@ -1878,9 +2127,294 @@ pub fn generate_node(
         LayoutNode::Unknown { id, comment } => {
             output.push_str(&format!("{}// Unknown: {} ({})\n", indent_str, id, comment));
         }
+        LayoutNode::RichScene(scene_node) => {
+            output.push_str(&format!("{}// RichScene: {}\n", indent_str, scene_node.id));
+            output.push_str(&format!("{}{{\n", indent_str));
+            let inner = " ".repeat(indent + 4);
+            output.push_str(&format!(
+                "{}let node = {};\n",
+                inner,
+                generate_scene_node_code(scene_node, indent + 4)
+            ));
+            output.push_str(&format!("{}egui_expressive::scene::render_node(ui, &painter, origin.to_vec2(), &node, 1.0);\n", inner));
+            output.push_str(&format!("{}}}\n", indent_str));
+        }
     }
 
     output
+}
+
+fn generate_scene_node_code(node: &crate::scene::SceneNode, indent: usize) -> String {
+    let ind = " ".repeat(indent);
+    let mut out = String::new();
+    out.push_str("egui_expressive::scene::SceneNode {\n");
+    out.push_str(&format!(
+        "{}    id: \"{}\".to_string(),\n",
+        ind,
+        node.id.replace('"', "\\\"")
+    ));
+
+    // Geometry
+    out.push_str(&format!("{}    geometry: ", ind));
+    match &node.geometry {
+        crate::scene::Geometry::Group { bounds } => {
+            out.push_str(&format!("egui_expressive::scene::Geometry::Group {{ bounds: egui::Rect::from_min_max(egui::pos2({:.1}, {:.1}), egui::pos2({:.1}, {:.1})) }},\n", bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y));
+        }
+        crate::scene::Geometry::Rect {
+            rect,
+            corner_radius,
+        } => {
+            out.push_str(&format!("egui_expressive::scene::Geometry::Rect {{ rect: egui::Rect::from_min_max(egui::pos2({:.1}, {:.1}), egui::pos2({:.1}, {:.1})), corner_radius: {:.1} }},\n", rect.min.x, rect.min.y, rect.max.x, rect.max.y, corner_radius));
+        }
+        crate::scene::Geometry::Ellipse { rect } => {
+            out.push_str(&format!("egui_expressive::scene::Geometry::Ellipse {{ rect: egui::Rect::from_min_max(egui::pos2({:.1}, {:.1}), egui::pos2({:.1}, {:.1})) }},\n", rect.min.x, rect.min.y, rect.max.x, rect.max.y));
+        }
+        crate::scene::Geometry::Path { points, closed } => {
+            out.push_str("egui_expressive::scene::Geometry::Path { points: vec![");
+            for p in points {
+                out.push_str(&format!("egui::pos2({:.1}, {:.1}), ", p.x, p.y));
+            }
+            out.push_str(&format!("], closed: {} }},\n", closed));
+        }
+        crate::scene::Geometry::MeshPatch {
+            corners,
+            colors,
+            subdivisions,
+        } => {
+            out.push_str("egui_expressive::scene::Geometry::MeshPatch { corners: [");
+            for p in corners {
+                out.push_str(&format!("egui::pos2({:.1}, {:.1}), ", p.x, p.y));
+            }
+            out.push_str("], colors: [");
+            for c in colors {
+                out.push_str(&format!(
+                    "egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}), ",
+                    c.r(),
+                    c.g(),
+                    c.b(),
+                    c.a()
+                ));
+            }
+            out.push_str(&format!("], subdivisions: {} }},\n", subdivisions));
+        }
+    }
+
+    // Appearance
+    out.push_str(&format!(
+        "{}    appearance: egui_expressive::scene::AppearanceStack {{\n",
+        ind
+    ));
+    out.push_str(&format!("{}        entries: vec![\n", ind));
+    for entry in &node.appearance.entries {
+        match entry {
+            crate::scene::AppearanceEntry::Fill(fill) => {
+                out.push_str(&format!("{}            egui_expressive::scene::AppearanceEntry::Fill(egui_expressive::scene::FillLayer {{\n", ind));
+                out.push_str(&format!(
+                    "{}                paint: {},\n",
+                    ind,
+                    generate_paint_source_code(&fill.paint)
+                ));
+                out.push_str(&format!(
+                    "{}                opacity: {:.2},\n",
+                    ind, fill.opacity
+                ));
+                out.push_str(&format!(
+                    "{}                blend_mode: egui_expressive::codegen::BlendMode::{:?},\n",
+                    ind, fill.blend_mode
+                ));
+                out.push_str(&format!("{}            }}),\n", ind));
+            }
+            crate::scene::AppearanceEntry::Stroke(stroke) => {
+                out.push_str(&format!("{}            egui_expressive::scene::AppearanceEntry::Stroke(egui_expressive::scene::StrokeLayer {{\n", ind));
+                out.push_str(&format!(
+                    "{}                paint: {},\n",
+                    ind,
+                    generate_paint_source_code(&stroke.paint)
+                ));
+                out.push_str(&format!(
+                    "{}                width: {:.1},\n",
+                    ind, stroke.width
+                ));
+                out.push_str(&format!(
+                    "{}                opacity: {:.2},\n",
+                    ind, stroke.opacity
+                ));
+                out.push_str(&format!(
+                    "{}                blend_mode: egui_expressive::codegen::BlendMode::{:?},\n",
+                    ind, stroke.blend_mode
+                ));
+                if let Some(dash) = &stroke.dash {
+                    out.push_str(&format!(
+                        "{}                dash: Some(vec![{}]),\n",
+                        ind,
+                        dash.iter()
+                            .map(|d| format!("{:.1}", d))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                } else {
+                    out.push_str(&format!("{}                dash: None,\n", ind));
+                }
+                if let Some(cap) = &stroke.cap {
+                    out.push_str(&format!(
+                        "{}                cap: Some(egui_expressive::codegen::StrokeCap::{:?}),\n",
+                        ind, cap
+                    ));
+                } else {
+                    out.push_str(&format!("{}                cap: None,\n", ind));
+                }
+                if let Some(join) = &stroke.join {
+                    out.push_str(&format!(
+                        "{}                join: Some(egui_expressive::codegen::StrokeJoin::{:?}),\n",
+                        ind, join
+                    ));
+                } else {
+                    out.push_str(&format!("{}                join: None,\n", ind));
+                }
+                if let Some(miter_limit) = stroke.miter_limit {
+                    out.push_str(&format!(
+                        "{}                miter_limit: Some({:.1}),\n",
+                        ind, miter_limit
+                    ));
+                } else {
+                    out.push_str(&format!("{}                miter_limit: None,\n", ind));
+                }
+                out.push_str(&format!("{}            }}),\n", ind));
+            }
+            crate::scene::AppearanceEntry::Effect(effect) => {
+                out.push_str(&format!("{}            egui_expressive::scene::AppearanceEntry::Effect(egui_expressive::scene::EffectLayer {{\n", ind));
+                out.push_str(&format!(
+                    "{}                effect_type: egui_expressive::codegen::EffectType::{:?},\n",
+                    ind, effect.effect_type
+                ));
+                out.push_str(&format!(
+                    "{}                params: egui_expressive::codegen::EffectDef {{\n",
+                    ind
+                ));
+                out.push_str(&format!("{}                    effect_type: egui_expressive::codegen::EffectType::{:?},\n", ind, effect.params.effect_type));
+                out.push_str(&format!(
+                    "{}                    x: {:.1}, y: {:.1}, blur: {:.1}, spread: {:.1},\n",
+                    ind, effect.params.x, effect.params.y, effect.params.blur, effect.params.spread
+                ));
+                out.push_str(&format!("{}                    color: egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}),\n", ind, effect.params.color.r(), effect.params.color.g(), effect.params.color.b(), effect.params.color.a()));
+                out.push_str(&format!("{}                    blend_mode: egui_expressive::codegen::BlendMode::{:?},\n", ind, effect.params.blend_mode));
+                out.push_str(&format!("{}                    depth: {:.1}, angle: {:.1}, radius: {:.1}, amount: {:.1}, scale: {:.1}, seed: {},\n", ind, effect.params.depth, effect.params.angle, effect.params.radius, effect.params.amount, effect.params.scale, effect.params.seed));
+                out.push_str(&format!(
+                    "{}                    highlight: None, shadow_color: None,\n",
+                    ind
+                )); // Simplified
+                out.push_str(&format!("{}                }},\n", ind));
+                out.push_str(&format!(
+                    "{}                opacity: {:.2},\n",
+                    ind, effect.opacity
+                ));
+                out.push_str(&format!(
+                    "{}                blend_mode: egui_expressive::codegen::BlendMode::{:?},\n",
+                    ind, effect.blend_mode
+                ));
+                out.push_str(&format!("{}            }}),\n", ind));
+            }
+        }
+    }
+    out.push_str(&format!("{}        ],\n", ind));
+    out.push_str(&format!("{}    }},\n", ind));
+
+    out.push_str(&format!("{}    opacity: {:.2},\n", ind, node.opacity));
+    out.push_str(&format!(
+        "{}    blend_mode: egui_expressive::codegen::BlendMode::{:?},\n",
+        ind, node.blend_mode
+    ));
+    out.push_str(&format!(
+        "{}    rotation_deg: {:.4},\n",
+        ind, node.rotation_deg
+    ));
+    out.push_str(&format!(
+        "{}    clip_children: {},\n",
+        ind, node.clip_children
+    ));
+
+    out.push_str(&format!("{}    children: vec![\n", ind));
+    for child in &node.children {
+        out.push_str(&format!(
+            "{}        {},\n",
+            ind,
+            generate_scene_node_code(child, indent + 8)
+        ));
+    }
+    out.push_str(&format!("{}    ],\n", ind));
+
+    out.push_str(&format!("{}}}", ind));
+    out
+}
+
+fn generate_paint_source_code(paint: &crate::scene::PaintSource) -> String {
+    fn opt_point_expr(point: Option<[f32; 2]>) -> String {
+        point
+            .map(|p| format!("Some([{:.1}, {:.1}])", p[0], p[1]))
+            .unwrap_or_else(|| "None".to_string())
+    }
+
+    fn opt_f32_expr(value: Option<f32>) -> String {
+        value
+            .map(|v| format!("Some({:.1})", v))
+            .unwrap_or_else(|| "None".to_string())
+    }
+
+    fn opt_transform_expr(value: Option<[f32; 6]>) -> String {
+        value
+            .map(|m| {
+                format!(
+                    "Some([{:.4}, {:.4}, {:.4}, {:.4}, {:.4}, {:.4}])",
+                    m[0], m[1], m[2], m[3], m[4], m[5]
+                )
+            })
+            .unwrap_or_else(|| "None".to_string())
+    }
+
+    match paint {
+        crate::scene::PaintSource::Solid(c) => format!("egui_expressive::scene::PaintSource::Solid(egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}))", c.r(), c.g(), c.b(), c.a()),
+        crate::scene::PaintSource::LinearGradient(g) => {
+            let mut stops = String::new();
+            for s in &g.stops {
+                stops.push_str(&format!("egui_expressive::codegen::GradientStop {{ position: {:.2}, color: egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}) }}, ", s.position, s.color.r(), s.color.g(), s.color.b(), s.color.a()));
+            }
+            format!("egui_expressive::scene::PaintSource::LinearGradient(egui_expressive::codegen::GradientDef {{ gradient_type: egui_expressive::codegen::GradientType::Linear, angle_deg: {:.1}, center: {}, focal_point: {}, radius: {}, transform: {}, stops: vec![{}] }})", g.angle_deg, opt_point_expr(g.center), opt_point_expr(g.focal_point), opt_f32_expr(g.radius), opt_transform_expr(g.transform), stops)
+        }
+        crate::scene::PaintSource::RadialGradient(g) => {
+            let mut stops = String::new();
+            for s in &g.stops {
+                stops.push_str(&format!("egui_expressive::codegen::GradientStop {{ position: {:.2}, color: egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}) }}, ", s.position, s.color.r(), s.color.g(), s.color.b(), s.color.a()));
+            }
+            format!("egui_expressive::scene::PaintSource::RadialGradient(egui_expressive::codegen::GradientDef {{ gradient_type: egui_expressive::codegen::GradientType::Radial, angle_deg: {:.1}, center: {}, focal_point: {}, radius: {}, transform: {}, stops: vec![{}] }})", g.angle_deg, opt_point_expr(g.center), opt_point_expr(g.focal_point), opt_f32_expr(g.radius), opt_transform_expr(g.transform), stops)
+        }
+        crate::scene::PaintSource::Pattern(p) => {
+            format!(
+                "egui_expressive::scene::PaintSource::Pattern(egui_expressive::scene::PatternDef {{ name: {:?}.to_string(), seed: {}, foreground: egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}), background: egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}), cell_size: {:.1}, mark_size: {:.1} }})",
+                p.name,
+                p.seed,
+                p.foreground.r(),
+                p.foreground.g(),
+                p.foreground.b(),
+                p.foreground.a(),
+                p.background.r(),
+                p.background.g(),
+                p.background.b(),
+                p.background.a(),
+                p.cell_size,
+                p.mark_size
+            )
+        }
+        crate::scene::PaintSource::MeshGradient { corners, colors, subdivisions } => {
+            let mut c_str = String::new();
+            for c in corners { c_str.push_str(&format!("egui::pos2({:.1}, {:.1}), ", c.x, c.y)); }
+            let mut col_str = String::new();
+            for c in colors { col_str.push_str(&format!("egui::Color32::from_rgba_unmultiplied({}, {}, {}, {}), ", c.r(), c.g(), c.b(), c.a())); }
+            format!("egui_expressive::scene::PaintSource::MeshGradient {{ corners: [{}], colors: [{}], subdivisions: {} }}", c_str, col_str, subdivisions)
+        }
+        crate::scene::PaintSource::ProceduralNoise(n) => {
+            format!("egui_expressive::scene::PaintSource::ProceduralNoise(egui_expressive::scene::NoiseDef {{ seed: {}, cell_size: {:.1}, opacity: {:.2} }})", n.seed, n.cell_size, n.opacity)
+        }
+    }
 }
 
 /// Convert a Color32 to either a token reference or a literal
@@ -1929,6 +2463,7 @@ fn get_node_width(node: &LayoutNode) -> f32 {
             children.iter().map(get_node_width).fold(0.0f32, f32::max)
         }
         LayoutNode::Spacer { size, .. } => *size,
+        LayoutNode::RichScene(scene_node) => scene_node.geometry.bounds().width(),
         _ => 100.0,
     }
 }
@@ -1949,6 +2484,7 @@ fn get_node_height(node: &LayoutNode) -> f32 {
             children.iter().map(get_node_height).fold(0.0f32, f32::max)
         }
         LayoutNode::Spacer { size, .. } => *size,
+        LayoutNode::RichScene(scene_node) => scene_node.geometry.bounds().height(),
         _ => 24.0,
     }
 }
@@ -2031,13 +2567,18 @@ pub fn generate_tokens_file(color_map: &HashMap<String, Color32>, spacing: &[f32
 
     for (name, color) in color_tokens {
         let token_name = name.to_uppercase();
-        output.push_str(&format!(
-            "pub const {}: Color32 = Color32::from_rgb({}, {}, {});\n",
-            token_name,
-            color.r(),
-            color.g(),
-            color.b()
-        ));
+        let [r, g, b, a] = color.to_srgba_unmultiplied();
+        if a < 255 {
+            output.push_str(&format!(
+                "pub const {}: Color32 = Color32::from_rgba_unmultiplied({}, {}, {}, {});\n",
+                token_name, r, g, b, a
+            ));
+        } else {
+            output.push_str(&format!(
+                "pub const {}: Color32 = Color32::from_rgb({}, {}, {});\n",
+                token_name, r, g, b
+            ));
+        }
     }
 
     // Add default tokens if not present
@@ -2110,15 +2651,13 @@ pub fn generate_state_file(artboards: &[ArtboardState]) -> String {
         output.push_str("    }\n");
         output.push_str("}\n\n");
 
-        // Generate Action enum if there are buttons
-        if !artboard.button_labels.is_empty() {
-            output.push_str(&format!("pub enum {}Action {{\n", struct_name));
-            for label in &artboard.button_labels {
-                let action_name = to_pascal_case(label);
-                output.push_str(&format!("    {},\n", action_name));
-            }
-            output.push_str("}\n\n");
+        // Generate Action enum
+        output.push_str(&format!("pub enum {}Action {{\n", struct_name));
+        for label in &artboard.button_labels {
+            let action_name = to_pascal_case(label);
+            output.push_str(&format!("    {},\n", action_name));
         }
+        output.push_str("}\n\n");
     }
 
     output
@@ -2157,12 +2696,12 @@ pub fn generate_components_file(components: &[ComponentDef]) -> String {
         ));
         output.push_str("    let btn = egui::Button::new(\n");
         output.push_str(&format!(
-            "        RichText::new(label).size({:.1}).color(tokens::ON_PRIMARY)\n",
-            comp.text_size
+            "        RichText::new(label).size({:.1}).color(egui::Color32::from_rgba_premultiplied({}, {}, {}, {}))\n",
+            comp.text_size, comp.text_color.r(), comp.text_color.g(), comp.text_color.b(), comp.text_color.a()
         ));
         output.push_str(&format!(
-            "    ).fill(tokens::{}).corner_radius({:.1});\n",
-            sanitize_token_name(&comp.name).to_uppercase(),
+            "    ).fill(egui::Color32::from_rgba_premultiplied({}, {}, {}, {})).corner_radius({:.1});\n",
+            comp.fill.r(), comp.fill.g(), comp.fill.b(), comp.fill.a(),
             comp.rounding
         ));
         output.push_str("    ui.add(btn)\n");
@@ -2170,17 +2709,7 @@ pub fn generate_components_file(components: &[ComponentDef]) -> String {
     }
 
     // Generate default styled button if no components defined
-    if components.is_empty() {
-        output.push_str(
-            "pub fn styled_button(ui: &mut Ui, label: &str) -> egui::Response {\n\
-             let btn = egui::Button::new(\n\
-             RichText::new(label).size(14.0).color(tokens::ON_PRIMARY)\n\
-             ).fill(tokens::PRIMARY)\n\
-             .corner_radius(8.0);\n\
-             ui.add(btn)\n\
-             }\n",
-        );
-    }
+    // (Removed button stub as per requirements)
 
     output
 }
@@ -2466,65 +2995,6 @@ fn sanitize_module_name(name: &str) -> String {
     }
 }
 
-/// Sanitize a token name for use in Rust code (uppercase with underscores).
-fn sanitize_token_name(name: &str) -> String {
-    const RUST_KEYWORDS: &[&str] = &[
-        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
-        "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref",
-        "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
-        "use", "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do",
-        "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield",
-    ];
-    let sanitized: String = name
-        .to_lowercase()
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    // Remove leading/trailing underscores, collapse multiple underscores
-    let sanitized = sanitized.trim_matches('_').to_string();
-    let sanitized = {
-        let mut s = String::new();
-        let mut prev_underscore = false;
-        for c in sanitized.chars() {
-            if c == '_' {
-                if !prev_underscore {
-                    s.push(c);
-                }
-                prev_underscore = true;
-            } else {
-                s.push(c);
-                prev_underscore = false;
-            }
-        }
-        s
-    };
-    let sanitized = sanitized.to_uppercase();
-    // Handle empty result
-    let sanitized = if sanitized.is_empty() {
-        "TOKEN".to_string()
-    } else {
-        sanitized
-    };
-    // Handle leading digit
-    let sanitized = if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
-        format!("T_{}", sanitized)
-    } else {
-        sanitized
-    };
-    // Handle Rust keywords
-    if RUST_KEYWORDS.contains(&sanitized.to_lowercase().as_str()) {
-        format!("{}_", sanitized)
-    } else {
-        sanitized
-    }
-}
-
 // ============================================================================
 // SVG-to-LayoutElement Parser
 // ============================================================================
@@ -2602,7 +3072,11 @@ pub fn parse_svg_elements(svg: &str) -> Vec<LayoutElement> {
                         notes: vec![],
                         appearance_fills: vec![],
                         appearance_strokes: vec![],
+                        appearance_stack: crate::scene::AppearanceStack::default(),
+                        path_points: vec![],
+                        path_closed: false,
                         artboard_name: None,
+                        image_path: None,
                     });
                 }
             }
@@ -2674,7 +3148,11 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 notes: vec![],
                 appearance_fills: vec![],
                 appearance_strokes: vec![],
+                appearance_stack: crate::scene::AppearanceStack::default(),
+                path_points: vec![],
+                path_closed: false,
                 artboard_name: None,
+                image_path: None,
             });
 
             rect_start = tag_end + 1;
@@ -2746,7 +3224,11 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                     notes: vec![],
                     appearance_fills: vec![],
                     appearance_strokes: vec![],
+                    appearance_stack: crate::scene::AppearanceStack::default(),
+                    path_points: vec![],
+                    path_closed: false,
                     artboard_name: None,
+                    image_path: None,
                 });
             }
 
@@ -2817,7 +3299,11 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 notes: vec![],
                 appearance_fills: vec![],
                 appearance_strokes: vec![],
+                appearance_stack: crate::scene::AppearanceStack::default(),
+                path_points: vec![],
+                path_closed: false,
                 artboard_name: None,
+                image_path: None,
             });
 
             path_start = tag_end + 1;
@@ -2839,6 +3325,7 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
             let y: f32 = extract_float_attr(tag, "y").unwrap_or(0.0);
             let w: f32 = extract_float_attr(tag, "width").unwrap_or(100.0);
             let h: f32 = extract_float_attr(tag, "height").unwrap_or(100.0);
+            let image_path = extract_attr(tag, "href").or_else(|| extract_attr(tag, "xlink:href"));
 
             elements.push(LayoutElement {
                 id,
@@ -2878,7 +3365,11 @@ fn parse_group_children(content: &str) -> Vec<LayoutElement> {
                 notes: vec![],
                 appearance_fills: vec![],
                 appearance_strokes: vec![],
+                appearance_stack: crate::scene::AppearanceStack::default(),
+                path_points: vec![],
+                path_closed: false,
                 artboard_name: None,
+                image_path,
             });
 
             img_start = tag_end + 1;
@@ -2949,7 +3440,11 @@ fn parse_top_level_elements(svg: &str) -> Vec<LayoutElement> {
                     notes: vec![],
                     appearance_fills: vec![],
                     appearance_strokes: vec![],
+                    appearance_stack: crate::scene::AppearanceStack::default(),
+                    path_points: vec![],
+                    path_closed: false,
                     artboard_name: None,
+                    image_path: None,
                 });
             }
 
@@ -3024,7 +3519,11 @@ fn parse_top_level_elements(svg: &str) -> Vec<LayoutElement> {
                         notes: vec![],
                         appearance_fills: vec![],
                         appearance_strokes: vec![],
+                        appearance_stack: crate::scene::AppearanceStack::default(),
+                        path_points: vec![],
+                        path_closed: false,
                         artboard_name: None,
+                        image_path: None,
                     });
                 }
             }
@@ -3354,223 +3853,209 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
     let mut elements = Vec::new();
 
     for (i, elem_value) in elements_array.iter().enumerate() {
-        let id = elem_value
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or(&format!("elem_{}", i))
-            .to_string();
+        if let Some(mut el) = parse_element(elem_value) {
+            if el.id == "elem_" || el.id.starts_with("elem_") {
+                el.id = format!("elem_{}", i);
+            }
+            elements.push(el);
+        }
+    }
 
-        let type_str = elem_value
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
+    Ok((artboard_info, elements))
+}
 
-        let el_type = match type_str.to_lowercase().as_str() {
-            "group" | "g" => ElementType::Group,
-            "shape" | "rect" => ElementType::Shape,
-            "path" => ElementType::Path,
-            "text" => ElementType::Text,
-            "image" | "img" => ElementType::Image,
-            _ => ElementType::Unknown,
-        };
+fn parse_element(elem_value: &serde_json::Value) -> Option<LayoutElement> {
+    let id = elem_value
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("elem_")
+        .to_string();
 
-        let x = elem_value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let type_str = elem_value
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
 
-        let y = elem_value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let el_type = match type_str.to_lowercase().as_str() {
+        "group" | "g" => ElementType::Group,
+        "shape" | "rect" => ElementType::Shape,
+        "circle" => ElementType::Circle,
+        "ellipse" => ElementType::Ellipse,
+        "path" => ElementType::Path,
+        "text" => ElementType::Text,
+        "image" | "img" => ElementType::Image,
+        _ => ElementType::Unknown,
+    };
 
-        let w = elem_value
-            .get("w")
-            .or_else(|| elem_value.get("width"))
-            .and_then(|v| v.as_f64())
-            .unwrap_or(100.0) as f32;
+    let x = elem_value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let y = elem_value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let w = elem_value
+        .get("w")
+        .or_else(|| elem_value.get("width"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(100.0) as f32;
+    let h = elem_value
+        .get("h")
+        .or_else(|| elem_value.get("height"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(100.0) as f32;
 
-        let h = elem_value
-            .get("h")
-            .or_else(|| elem_value.get("height"))
-            .and_then(|v| v.as_f64())
-            .unwrap_or(100.0) as f32;
+    let text = elem_value
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
-        let text = elem_value
-            .get("text")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+    let text_size = elem_value
+        .get("textStyle")
+        .and_then(|ts| ts.get("fontSize"))
+        .and_then(|v| v.as_f64())
+        .map(|f| f as f32)
+        .or_else(|| {
+            elem_value
+                .get("textStyle")
+                .and_then(|ts| ts.get("font-size"))
+                .and_then(|v| v.as_f64())
+                .map(|f| f as f32)
+        });
 
-        let text_size = elem_value
-            .get("textStyle")
-            .and_then(|ts| ts.get("fontSize"))
-            .and_then(|v| v.as_f64())
-            .map(|f| f as f32)
-            .or_else(|| {
-                elem_value
-                    .get("textStyle")
-                    .and_then(|ts| ts.get("font-size"))
-                    .and_then(|v| v.as_f64())
-                    .map(|f| f as f32)
-            });
+    let fill = elem_value
+        .get("fill")
+        .and_then(|v| v.as_str())
+        .and_then(crate::svg::parse_svg_color);
 
-        let fill = elem_value
-            .get("fill")
-            .and_then(|v| v.as_str())
-            .and_then(crate::svg::parse_svg_color);
+    let stroke_width = elem_value
+        .get("strokeWidth")
+        .or_else(|| elem_value.get("stroke-width"))
+        .and_then(|v| v.as_f64())
+        .map(|f| f as f32);
 
-        let stroke_width = elem_value
-            .get("strokeWidth")
-            .or_else(|| elem_value.get("stroke-width"))
-            .and_then(|v| v.as_f64())
-            .map(|f| f as f32);
+    let stroke_color = elem_value
+        .get("stroke")
+        .and_then(|v| v.as_str())
+        .and_then(crate::svg::parse_svg_color);
 
-        let stroke_color = elem_value
-            .get("stroke")
-            .and_then(|v| v.as_str())
-            .and_then(crate::svg::parse_svg_color);
+    let stroke = stroke_width.and_then(|w| stroke_color.map(|c| (w, c)));
 
-        let stroke = stroke_width.and_then(|w| stroke_color.map(|c| (w, c)));
+    let opacity = elem_value
+        .get("opacity")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32)
+        .unwrap_or(1.0);
+    let rotation_deg = elem_value
+        .get("rotation")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32)
+        .unwrap_or(0.0);
+    let corner_radius = elem_value
+        .get("cornerRadius")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32)
+        .unwrap_or(0.0);
+    let stroke_dash = elem_value
+        .get("strokeDash")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_f64())
+                .map(|f| f as f32)
+                .collect()
+        });
+    let clip_children = elem_value
+        .get("clipChildren")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let text_align = elem_value
+        .get("textAlign")
+        .and_then(|v| v.as_str())
+        .map(|s| match s {
+            "left" => TextAlign::Left,
+            "center" => TextAlign::Center,
+            "right" => TextAlign::Right,
+            "justified" => TextAlign::Justified,
+            _ => TextAlign::Left,
+        });
+    let letter_spacing = elem_value
+        .get("letterSpacing")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32);
+    let line_height = elem_value
+        .get("lineHeight")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32);
 
-        // Parse extended fields
-        let opacity = elem_value
-            .get("opacity")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32)
-            .unwrap_or(1.0);
-        let rotation_deg = elem_value
-            .get("rotation")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32)
-            .unwrap_or(0.0);
-        let corner_radius = elem_value
-            .get("cornerRadius")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32)
-            .unwrap_or(0.0);
-        let stroke_dash = elem_value
-            .get("strokeDash")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_f64())
-                    .map(|f| f as f32)
-                    .collect()
-            });
-        let clip_children = elem_value
-            .get("clipChildren")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let text_align = elem_value
-            .get("textAlign")
-            .and_then(|v| v.as_str())
-            .map(|s| match s {
-                "left" => TextAlign::Left,
-                "center" => TextAlign::Center,
-                "right" => TextAlign::Right,
-                "justified" => TextAlign::Justified,
-                _ => TextAlign::Left,
-            });
-        let letter_spacing = elem_value
-            .get("letterSpacing")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32);
-        let line_height = elem_value
-            .get("lineHeight")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32);
+    let blend_mode = elem_value
+        .get("blendMode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("normal")
+        .parse::<BlendMode>()
+        .unwrap_or(BlendMode::Normal);
 
-        // Parse blend mode
-        let blend_mode = elem_value
-            .get("blendMode")
-            .and_then(|v| v.as_str())
-            .unwrap_or("normal")
-            .parse::<BlendMode>()
-            .unwrap();
+    let stroke_cap = elem_value
+        .get("strokeCap")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<StrokeCap>().ok());
+    let stroke_join = elem_value
+        .get("strokeJoin")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<StrokeJoin>().ok());
+    let stroke_miter_limit = elem_value
+        .get("strokeMiterLimit")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32);
+    let text_decoration = elem_value
+        .get("textDecoration")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<TextDecoration>().ok());
+    let text_transform = elem_value
+        .get("textTransform")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<TextTransform>().ok());
+    let symbol_name = elem_value
+        .get("symbolName")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let is_compound_path = elem_value
+        .get("isCompoundPath")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let is_gradient_mesh = elem_value
+        .get("isGradientMesh")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let is_chart = elem_value
+        .get("isChart")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let is_opaque = elem_value
+        .get("isOpaque")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
-        // Parse new fields from Illustrator
-        let stroke_cap = elem_value
-            .get("strokeCap")
-            .and_then(|v| v.as_str())
-            .map(|s| s.parse::<StrokeCap>().unwrap());
-        let stroke_join = elem_value
-            .get("strokeJoin")
-            .and_then(|v| v.as_str())
-            .map(|s| s.parse::<StrokeJoin>().unwrap());
-        let stroke_miter_limit = elem_value
-            .get("strokeMiterLimit")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32);
-        let text_decoration = elem_value
-            .get("textDecoration")
-            .and_then(|v| v.as_str())
-            .map(|s| s.parse::<TextDecoration>().unwrap());
-        let text_transform = elem_value
-            .get("textTransform")
-            .and_then(|v| v.as_str())
-            .map(|s| s.parse::<TextTransform>().unwrap());
-        let symbol_name = elem_value
-            .get("symbolName")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let is_compound_path = elem_value
-            .get("isCompoundPath")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let is_gradient_mesh = elem_value
-            .get("isGradientMesh")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let is_chart = elem_value
-            .get("isChart")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let is_opaque = elem_value
-            .get("isOpaque")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-        let text_runs: Vec<TextRun> =
-            if let Some(runs) = elem_value.get("textRuns").and_then(|v| v.as_array()) {
-                runs.iter()
-                    .filter_map(|r| {
-                        let ro = r.as_object()?;
-                        Some(TextRun {
-                            text: ro.get("text")?.as_str()?.to_string(),
-                            size: ro
-                                .get("style")
-                                .and_then(|s| s.get("size"))
-                                .and_then(|v| v.as_f64())
-                                .unwrap_or(14.0) as f32,
-                            weight: ro
-                                .get("style")
-                                .and_then(|s| s.get("weight"))
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(400) as u16,
-                            color: ro.get("style").and_then(|s| s.get("color")).and_then(|c| {
-                                let co = c.as_object()?;
-                                Some(Color32::from_rgb(
-                                    co.get("r")?.as_u64()? as u8,
-                                    co.get("g")?.as_u64()? as u8,
-                                    co.get("b")?.as_u64()? as u8,
-                                ))
-                            }),
-                        })
-                    })
-                    .collect()
-            } else {
-                vec![]
-            };
-
-        let third_party_effects: Vec<ThirdPartyEffect> = if let Some(tpe) = elem_value
-            .get("thirdPartyEffects")
-            .and_then(|v| v.as_array())
-        {
-            tpe.iter()
-                .filter_map(|e| {
-                    let eo = e.as_object()?;
-                    Some(ThirdPartyEffect {
-                        effect_type: eo.get("type")?.as_str()?.to_string(),
-                        opaque: eo.get("opaque").and_then(|v| v.as_bool()).unwrap_or(false),
-                        note: eo
-                            .get("note")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string(),
+    let text_runs: Vec<TextRun> =
+        if let Some(runs) = elem_value.get("textRuns").and_then(|v| v.as_array()) {
+            runs.iter()
+                .filter_map(|r| {
+                    let ro = r.as_object()?;
+                    Some(TextRun {
+                        text: ro.get("text")?.as_str()?.to_string(),
+                        size: ro
+                            .get("style")
+                            .and_then(|s| s.get("size"))
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(14.0) as f32,
+                        weight: ro
+                            .get("style")
+                            .and_then(|s| s.get("weight"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(400) as u16,
+                        color: ro.get("style").and_then(|s| s.get("color")).and_then(|c| {
+                            let co = c.as_object()?;
+                            Some(Color32::from_rgb(
+                                co.get("r")?.as_u64()? as u8,
+                                co.get("g")?.as_u64()? as u8,
+                                co.get("b")?.as_u64()? as u8,
+                            ))
+                        }),
                     })
                 })
                 .collect()
@@ -3578,36 +4063,228 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
             vec![]
         };
 
-        let notes: Vec<String> =
-            if let Some(notes_arr) = elem_value.get("notes").and_then(|v| v.as_array()) {
-                notes_arr
-                    .iter()
-                    .filter_map(|n| n.as_str().map(|s| s.to_string()))
-                    .collect()
-            } else {
-                vec![]
-            };
+    let third_party_effects: Vec<ThirdPartyEffect> = if let Some(tpe) = elem_value
+        .get("thirdPartyEffects")
+        .and_then(|v| v.as_array())
+    {
+        tpe.iter()
+            .filter_map(|e| {
+                let eo = e.as_object()?;
+                Some(ThirdPartyEffect {
+                    effect_type: eo.get("type")?.as_str()?.to_string(),
+                    opaque: eo.get("opaque").and_then(|v| v.as_bool()).unwrap_or(false),
+                    note: eo
+                        .get("note")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                })
+            })
+            .collect()
+    } else {
+        vec![]
+    };
 
-        let appearance_fills: Vec<AppearanceFill> = if let Some(fills) =
-            elem_value.get("appearanceFills").and_then(|v| v.as_array())
-        {
+    let notes: Vec<String> =
+        if let Some(notes_arr) = elem_value.get("notes").and_then(|v| v.as_array()) {
+            notes_arr
+                .iter()
+                .filter_map(|n| n.as_str().map(|s| s.to_string()))
+                .collect()
+        } else {
+            vec![]
+        };
+
+    let parse_color = |obj: &serde_json::Map<String, serde_json::Value>| -> Option<Color32> {
+        if let Some(c_str) = obj.get("color").and_then(|v| v.as_str()) {
+            crate::svg::parse_svg_color(c_str)
+        } else if let (Some(r), Some(g), Some(b)) = (obj.get("r"), obj.get("g"), obj.get("b")) {
+            Some(Color32::from_rgb(
+                r.as_u64().unwrap_or(0) as u8,
+                g.as_u64().unwrap_or(0) as u8,
+                b.as_u64().unwrap_or(0) as u8,
+            ))
+        } else {
+            None
+        }
+    };
+
+    let parse_gradient = |v: &serde_json::Value| -> Option<GradientDef> {
+        let g = v.as_object()?;
+        let type_name = g.get("type").and_then(|t| t.as_str());
+        let parse_point = |value: Option<&serde_json::Value>| -> Option<[f32; 2]> {
+            let value = value?;
+            if let Some(arr) = value.as_array() {
+                return Some([arr.first()?.as_f64()? as f32, arr.get(1)?.as_f64()? as f32]);
+            }
+            let obj = value.as_object()?;
+            Some([
+                obj.get("x")?.as_f64()? as f32,
+                obj.get("y")?.as_f64()? as f32,
+            ])
+        };
+        let parse_transform = |value: Option<&serde_json::Value>| -> Option<[f32; 6]> {
+            let value = value?;
+            if let Some(arr) = value.as_array() {
+                return Some([
+                    arr.first()?.as_f64()? as f32,
+                    arr.get(1)?.as_f64()? as f32,
+                    arr.get(2)?.as_f64()? as f32,
+                    arr.get(3)?.as_f64()? as f32,
+                    arr.get(4)?.as_f64()? as f32,
+                    arr.get(5)?.as_f64()? as f32,
+                ]);
+            }
+            let obj = value.as_object()?;
+            let number = |names: &[&str]| -> Option<f32> {
+                names
+                    .iter()
+                    .find_map(|name| obj.get(*name).and_then(|v| v.as_f64()))
+                    .map(|v| v as f32)
+            };
+            Some([
+                number(&["a", "mValueA"])?,
+                number(&["b", "mValueB"])?,
+                number(&["c", "mValueC"])?,
+                number(&["d", "mValueD"])?,
+                number(&["e", "tx", "mValueTX"])?,
+                number(&["f", "ty", "mValueTY"])?,
+            ])
+        };
+        let gradient_type = match type_name {
+            Some("radial") => GradientType::Radial,
+            Some("linear") | None => GradientType::Linear,
+            Some(_) => return None,
+        };
+        let angle_deg = g
+            .get("angle")
+            .and_then(|a| a.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(0.0);
+        let stops = g
+            .get("stops")
+            .and_then(|s| s.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|stop| {
+                        let position = stop.get("position")?.as_f64()? as f32;
+                        let color = stop
+                            .get("color")?
+                            .as_str()
+                            .and_then(crate::svg::parse_svg_color)
+                            .unwrap_or(egui::Color32::BLACK);
+                        let opacity = stop
+                            .get("opacity")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(1.0)
+                            .clamp(0.0, 1.0) as f32;
+                        let [r, g, b, a] = color.to_srgba_unmultiplied();
+                        let color = Color32::from_rgba_unmultiplied(
+                            r,
+                            g,
+                            b,
+                            (a as f32 * opacity).round() as u8,
+                        );
+                        Some(GradientStop { position, color })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(GradientDef {
+            gradient_type,
+            angle_deg,
+            center: parse_point(g.get("center")),
+            focal_point: parse_point(g.get("focalPoint").or_else(|| g.get("focal_point"))),
+            radius: g.get("radius").and_then(|r| r.as_f64()).map(|r| r as f32),
+            transform: parse_transform(g.get("transform").or_else(|| g.get("matrix"))),
+            stops,
+        })
+    };
+
+    let parse_pattern = |v: &serde_json::Value| -> Option<crate::scene::PatternDef> {
+        if let Some(name) = v.as_str() {
+            let seed = stable_pattern_seed(name);
+            let (foreground, background) = seeded_pattern_colors(seed);
+            return Some(crate::scene::PatternDef {
+                name: name.to_string(),
+                seed,
+                foreground,
+                background,
+                cell_size: 8.0,
+                mark_size: 1.0,
+            });
+        }
+        let g = v.as_object()?;
+        let type_name = g.get("type").and_then(|t| t.as_str());
+        match type_name {
+            Some("linear" | "radial") => return None,
+            Some(_) => {}
+            None => {
+                let has_pattern_metadata = g.contains_key("patternName")
+                    || g.contains_key("pattern_name")
+                    || g.contains_key("name")
+                    || g.contains_key("seed")
+                    || g.contains_key("cellSize")
+                    || g.contains_key("cell_size");
+                if !has_pattern_metadata {
+                    return None;
+                }
+            }
+        }
+        let name = g
+            .get("patternName")
+            .or_else(|| g.get("pattern_name"))
+            .or_else(|| g.get("name"))
+            .and_then(|v| v.as_str())
+            .or(type_name)
+            .unwrap_or("pattern")
+            .to_string();
+        let seed = g
+            .get("seed")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+            .unwrap_or_else(|| stable_pattern_seed(&name));
+        let (foreground, background) = seeded_pattern_colors(seed);
+        let cell_size = g
+            .get("cellSize")
+            .or_else(|| g.get("cell_size"))
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(8.0)
+            .clamp(2.0, 64.0);
+        let mark_size = g
+            .get("markSize")
+            .or_else(|| g.get("mark_size"))
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(1.0)
+            .clamp(0.5, 16.0);
+        Some(crate::scene::PatternDef {
+            name,
+            seed,
+            foreground,
+            background,
+            cell_size,
+            mark_size,
+        })
+    };
+
+    let appearance_fills: Vec<AppearanceFill> =
+        if let Some(fills) = elem_value.get("appearanceFills").and_then(|v| v.as_array()) {
             fills
                 .iter()
                 .filter_map(|f| {
                     let fo = f.as_object()?;
                     Some(AppearanceFill {
-                        color: Color32::from_rgb(
-                            fo.get("r")?.as_u64()? as u8,
-                            fo.get("g")?.as_u64()? as u8,
-                            fo.get("b")?.as_u64()? as u8,
-                        ),
+                        color: parse_color(fo).unwrap_or(Color32::BLACK),
+                        gradient: fo.get("gradient").and_then(parse_gradient),
                         opacity: fo.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
                         blend_mode: fo
                             .get("blendMode")
                             .and_then(|v| v.as_str())
                             .unwrap_or("normal")
                             .parse::<BlendMode>()
-                            .unwrap(),
+                            .unwrap_or(BlendMode::Normal),
                     })
                 })
                 .collect()
@@ -3615,306 +4292,499 @@ pub fn parse_json_sidecar(json: &str) -> Result<(ArtboardInfo, Vec<LayoutElement
             vec![]
         };
 
-        let appearance_strokes: Vec<AppearanceStroke> = if let Some(strokes) = elem_value
-            .get("appearanceStrokes")
-            .and_then(|v| v.as_array())
-        {
-            strokes
-                .iter()
-                .filter_map(|s| {
-                    let so = s.as_object()?;
-                    Some(AppearanceStroke {
-                        color: Color32::from_rgb(
-                            so.get("r")?.as_u64()? as u8,
-                            so.get("g")?.as_u64()? as u8,
-                            so.get("b")?.as_u64()? as u8,
-                        ),
-                        width: so.get("width").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
-                        opacity: so.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
-                        blend_mode: so
-                            .get("blendMode")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("normal")
-                            .parse::<BlendMode>()
-                            .unwrap(),
-                    })
-                })
-                .collect()
-        } else {
-            vec![]
-        };
-
-        // Parse gradient if present
-        let gradient = elem_value
-            .get("gradient")
-            .and_then(|v| v.as_object())
-            .map(|g| {
-                let gradient_type = if g.get("type").and_then(|t| t.as_str()) == Some("radial") {
-                    GradientType::Radial
-                } else {
-                    GradientType::Linear
-                };
-                let angle_deg = g
-                    .get("angle")
-                    .and_then(|a| a.as_f64())
-                    .map(|v| v as f32)
-                    .unwrap_or(0.0);
-                let stops = g
-                    .get("stops")
-                    .and_then(|s| s.as_array())
-                    .map(|arr| {
+    let appearance_strokes: Vec<AppearanceStroke> = if let Some(strokes) = elem_value
+        .get("appearanceStrokes")
+        .and_then(|v| v.as_array())
+    {
+        strokes
+            .iter()
+            .filter_map(|s| {
+                let so = s.as_object()?;
+                Some(AppearanceStroke {
+                    color: parse_color(so).unwrap_or(Color32::BLACK),
+                    width: so.get("width").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                    opacity: so.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                    blend_mode: so
+                        .get("blendMode")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("normal")
+                        .parse::<BlendMode>()
+                        .unwrap_or(BlendMode::Normal),
+                    cap: so
+                        .get("cap")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok()),
+                    join: so
+                        .get("join")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok()),
+                    dash: so.get("dash").and_then(|v| v.as_array()).map(|arr| {
                         arr.iter()
-                            .filter_map(|stop| {
-                                let position = stop.get("position")?.as_f64()? as f32;
-                                let color = stop
-                                    .get("color")?
-                                    .as_str()
-                                    .and_then(crate::svg::parse_svg_color)
-                                    .unwrap_or(egui::Color32::BLACK);
-                                Some(GradientStop { position, color })
-                            })
+                            .filter_map(|v| v.as_f64())
+                            .map(|f| f as f32)
                             .collect()
-                    })
-                    .unwrap_or_default();
-                GradientDef {
-                    gradient_type,
-                    angle_deg,
-                    stops,
-                }
-            });
-
-        // Parse effects if present
-        let effects: Vec<EffectDef> = elem_value
-            .get("effects")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|e| {
-                        let effect_type_str = e.get("type")?.as_str()?;
-                        let effect_type = match effect_type_str {
-                            "dropShadow" | "drop-shadow" => EffectType::DropShadow,
-                            "innerShadow" | "inner-shadow" => EffectType::InnerShadow,
-                            "outerGlow" | "outer-glow" => EffectType::OuterGlow,
-                            "innerGlow" | "inner-glow" => EffectType::InnerGlow,
-                            "gaussianBlur" | "gaussian-blur" => EffectType::GaussianBlur,
-                            "bevel" => EffectType::Bevel,
-                            "feather" => EffectType::Feather,
-                            "liveEffect" | "live-effect" => EffectType::LiveEffect,
-                            _ => EffectType::Unknown(effect_type_str.to_string()),
-                        };
-                        let x = e
-                            .get("x")
-                            .and_then(|v| v.as_f64())
-                            .map(|v| v as f32)
-                            .unwrap_or(0.0);
-                        let y = e
-                            .get("y")
-                            .and_then(|v| v.as_f64())
-                            .map(|v| v as f32)
-                            .unwrap_or(0.0);
-                        let blur = e
-                            .get("blur")
-                            .and_then(|v| v.as_f64())
-                            .map(|v| v as f32)
-                            .unwrap_or(0.0);
-                        let spread = e
-                            .get("spread")
-                            .and_then(|v| v.as_f64())
-                            .map(|v| v as f32)
-                            .unwrap_or(0.0);
-                        let color = e
-                            .get("color")?
-                            .as_str()
-                            .and_then(crate::svg::parse_svg_color)
-                            .unwrap_or(egui::Color32::BLACK);
-                        let blend_mode = e
-                            .get("blendMode")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("normal")
-                            .parse::<BlendMode>()
-                            .unwrap();
-                        let depth = e
-                            .get("depth")
-                            .and_then(|v| v.as_f64())
-                            .map(|v| v as f32)
-                            .unwrap_or(0.0);
-                        let angle = e
-                            .get("angle")
-                            .and_then(|v| v.as_f64())
-                            .map(|v| v as f32)
-                            .unwrap_or(0.0);
-                        let highlight = e
-                            .get("highlight")
-                            .and_then(|v| v.as_str())
-                            .and_then(crate::svg::parse_svg_color);
-                        let shadow_color = e
-                            .get("shadowColor")
-                            .and_then(|v| v.as_str())
-                            .and_then(crate::svg::parse_svg_color);
-                        let radius = e
-                            .get("radius")
-                            .and_then(|v| v.as_f64())
-                            .map(|v| v as f32)
-                            .unwrap_or(0.0);
-                        Some(EffectDef {
-                            effect_type,
-                            x,
-                            y,
-                            blur,
-                            spread,
-                            color,
-                            blend_mode,
-                            depth,
-                            angle,
-                            highlight,
-                            shadow_color,
-                            radius,
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        // Parse children if present
-        let children = if el_type == ElementType::Group {
-            elem_value
-                .get("children")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    #[allow(clippy::unnecessary_filter_map)]
-                    arr.iter()
-                        .filter_map(|child| {
-                            let child_id = child
-                                .get("id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("child")
-                                .to_string();
-                            let child_type = child
-                                .get("type")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown");
-                            let child_el_type = match child_type.to_lowercase().as_str() {
-                                "group" | "g" => ElementType::Group,
-                                "shape" | "rect" => ElementType::Shape,
-                                "path" => ElementType::Path,
-                                "text" => ElementType::Text,
-                                "image" | "img" => ElementType::Image,
-                                _ => ElementType::Unknown,
-                            };
-                            let child_x =
-                                child.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                            let child_y =
-                                child.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                            let child_w = child
-                                .get("w")
-                                .or_else(|| child.get("width"))
-                                .and_then(|v| v.as_f64())
-                                .unwrap_or(100.0) as f32;
-                            let child_h = child
-                                .get("h")
-                                .or_else(|| child.get("height"))
-                                .and_then(|v| v.as_f64())
-                                .unwrap_or(100.0) as f32;
-                            let child_text = child
-                                .get("text")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string());
-                            let child_fill = child
-                                .get("fill")
-                                .and_then(|v| v.as_str())
-                                .and_then(crate::svg::parse_svg_color);
-
-                            Some(LayoutElement {
-                                id: child_id,
-                                el_type: child_el_type,
-                                x: child_x,
-                                y: child_y,
-                                w: child_w,
-                                h: child_h,
-                                fill: child_fill,
-                                stroke: None,
-                                text: child_text,
-                                text_size: None,
-                                children: vec![],
-                                opacity: 1.0,
-                                rotation_deg: 0.0,
-                                corner_radius: 0.0,
-                                gradient: None,
-                                blend_mode: BlendMode::Normal,
-                                effects: vec![],
-                                stroke_dash: None,
-                                clip_children: false,
-                                text_align: None,
-                                letter_spacing: None,
-                                line_height: None,
-                                stroke_cap: None,
-                                stroke_join: None,
-                                stroke_miter_limit: None,
-                                text_decoration: None,
-                                text_transform: None,
-                                text_runs: vec![],
-                                symbol_name: None,
-                                is_compound_path: false,
-                                is_gradient_mesh: false,
-                                is_chart: false,
-                                is_opaque: false,
-                                third_party_effects: vec![],
-                                notes: vec![],
-                                appearance_fills: vec![],
-                                appearance_strokes: vec![],
-                                artboard_name: None,
-                            })
-                        })
-                        .collect()
+                    }),
+                    miter_limit: so
+                        .get("miterLimit")
+                        .and_then(|v| v.as_f64())
+                        .map(|v| v as f32),
                 })
-                .unwrap_or_default()
-        } else {
-            vec![]
-        };
+            })
+            .collect()
+    } else {
+        vec![]
+    };
 
-        elements.push(LayoutElement {
-            id,
-            el_type,
+    let gradient = elem_value.get("gradient").and_then(parse_gradient);
+
+    let parse_effect = |e: &serde_json::Value| -> Option<EffectDef> {
+        let effect_type_str = e
+            .get("effect_type")
+            .or_else(|| e.get("effectType"))
+            .or_else(|| e.get("type"))?
+            .as_str()?;
+        let effect_type = match effect_type_str {
+            "dropShadow" | "drop-shadow" => EffectType::DropShadow,
+            "innerShadow" | "inner-shadow" => EffectType::InnerShadow,
+            "outerGlow" | "outer-glow" => EffectType::OuterGlow,
+            "innerGlow" | "inner-glow" => EffectType::InnerGlow,
+            "gaussianBlur" | "gaussian-blur" => EffectType::GaussianBlur,
+            "bevel" => EffectType::Bevel,
+            "feather" => EffectType::Feather,
+            "noise" | "grain" => EffectType::Noise,
+            "liveEffect" | "live-effect" => EffectType::LiveEffect,
+            _ => EffectType::Unknown(effect_type_str.to_string()),
+        };
+        let x = e
+            .get("x")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(0.0);
+        let y = e
+            .get("y")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(0.0);
+        let blur = e
+            .get("blur")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(0.0);
+        let spread = e
+            .get("spread")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(0.0);
+        let color = e
+            .get("color")
+            .and_then(|v| v.as_str())
+            .and_then(crate::svg::parse_svg_color)
+            .unwrap_or(egui::Color32::BLACK);
+        let blend_mode = e
+            .get("blendMode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("normal")
+            .parse::<BlendMode>()
+            .unwrap_or(BlendMode::Normal);
+        let depth = e
+            .get("depth")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(0.0);
+        let angle = e
+            .get("angle")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(0.0);
+        let highlight = e
+            .get("highlight")
+            .and_then(|v| v.as_str())
+            .and_then(crate::svg::parse_svg_color);
+        let shadow_color = e
+            .get("shadowColor")
+            .and_then(|v| v.as_str())
+            .and_then(crate::svg::parse_svg_color);
+        let radius = e
+            .get("radius")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(0.0);
+        let amount = e
+            .get("amount")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(0.0);
+        let scale = e
+            .get("scale")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(2.0);
+        let seed = e
+            .get("seed")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+            .unwrap_or(0);
+        Some(EffectDef {
+            effect_type,
             x,
             y,
-            w,
-            h,
-            fill,
-            stroke,
-            text,
-            text_size,
-            children,
-            opacity,
-            rotation_deg,
-            corner_radius,
-            gradient,
+            blur,
+            spread,
+            color,
             blend_mode,
-            effects,
-            stroke_dash,
-            clip_children,
-            text_align,
-            letter_spacing,
-            line_height,
-            stroke_cap,
-            stroke_join,
-            stroke_miter_limit,
-            text_decoration,
-            text_transform,
-            text_runs,
-            symbol_name,
-            is_compound_path,
-            is_gradient_mesh,
-            is_chart,
-            is_opaque,
-            third_party_effects,
-            notes,
-            appearance_fills,
-            appearance_strokes,
-            artboard_name: None,
-        });
-    }
+            depth,
+            angle,
+            highlight,
+            shadow_color,
+            radius,
+            amount,
+            scale,
+            seed,
+        })
+    };
 
-    Ok((artboard_info, elements))
+    let effects: Vec<EffectDef> = elem_value
+        .get("effects")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_effect).collect())
+        .unwrap_or_default();
+
+    let children = if el_type == ElementType::Group {
+        elem_value
+            .get("children")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(parse_element).collect())
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
+    let path_closed = elem_value
+        .get("pathClosed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let path_points: Vec<PathPoint> =
+        if let Some(pts) = elem_value.get("pathPoints").and_then(|v| v.as_array()) {
+            pts.iter()
+                .filter_map(|p| {
+                    let po = p.as_object()?;
+                    let anchor = po.get("anchor").and_then(|v| v.as_array())?;
+                    let left_ctrl = po
+                        .get("left_ctrl")
+                        .or_else(|| po.get("leftDir"))
+                        .and_then(|v| v.as_array())
+                        .unwrap_or(anchor);
+                    let right_ctrl = po
+                        .get("right_ctrl")
+                        .or_else(|| po.get("rightDir"))
+                        .and_then(|v| v.as_array())
+                        .unwrap_or(anchor);
+                    Some(PathPoint {
+                        anchor: [
+                            anchor.first()?.as_f64()? as f32,
+                            anchor.get(1)?.as_f64()? as f32,
+                        ],
+                        left_ctrl: [
+                            left_ctrl.first()?.as_f64()? as f32,
+                            left_ctrl.get(1)?.as_f64()? as f32,
+                        ],
+                        right_ctrl: [
+                            right_ctrl.first()?.as_f64()? as f32,
+                            right_ctrl.get(1)?.as_f64()? as f32,
+                        ],
+                    })
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+
+    let appearance_stack = if let Some(stack) =
+        elem_value.get("appearanceStack").and_then(|v| v.as_array())
+    {
+        let mut entries = Vec::new();
+        for entry in stack {
+            if let Some(eo) = entry.as_object() {
+                let entry_type = eo
+                    .get("entryType")
+                    .or_else(|| eo.get("kind"))
+                    .or_else(|| eo.get("type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if entry_type == "fill" {
+                    let paint = if let Some(pattern) = eo.get("gradient").and_then(parse_pattern) {
+                        crate::scene::PaintSource::Pattern(pattern)
+                    } else if let Some(pattern) = eo.get("pattern").and_then(parse_pattern) {
+                        crate::scene::PaintSource::Pattern(pattern)
+                    } else if let Some(gradient) = eo.get("gradient").and_then(parse_gradient) {
+                        if gradient.gradient_type == GradientType::Radial {
+                            crate::scene::PaintSource::RadialGradient(gradient)
+                        } else {
+                            crate::scene::PaintSource::LinearGradient(gradient)
+                        }
+                    } else {
+                        crate::scene::PaintSource::Solid(parse_color(eo).unwrap_or(Color32::BLACK))
+                    };
+                    entries.push(crate::scene::AppearanceEntry::Fill(
+                        crate::scene::FillLayer {
+                            paint,
+                            opacity: eo.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0)
+                                as f32,
+                            blend_mode: eo
+                                .get("blendMode")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("normal")
+                                .parse()
+                                .unwrap_or(BlendMode::Normal),
+                        },
+                    ));
+                } else if entry_type == "stroke" {
+                    entries.push(crate::scene::AppearanceEntry::Stroke(
+                        crate::scene::StrokeLayer {
+                            paint: crate::scene::PaintSource::Solid(
+                                parse_color(eo).unwrap_or(Color32::BLACK),
+                            ),
+                            width: eo.get("width").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                            opacity: eo.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0)
+                                as f32,
+                            blend_mode: eo
+                                .get("blendMode")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("normal")
+                                .parse()
+                                .unwrap_or(BlendMode::Normal),
+                            cap: eo
+                                .get("cap")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse().ok()),
+                            join: eo
+                                .get("join")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse().ok()),
+                            dash: eo
+                                .get("dash")
+                                .or_else(|| eo.get("strokeDash"))
+                                .and_then(|v| v.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|v| v.as_f64())
+                                        .map(|v| v as f32)
+                                        .collect()
+                                }),
+                            miter_limit: eo
+                                .get("miterLimit")
+                                .or_else(|| eo.get("miter_limit"))
+                                .and_then(|v| v.as_f64())
+                                .map(|v| v as f32),
+                        },
+                    ));
+                } else if entry_type == "effect"
+                    || matches!(
+                        entry_type,
+                        "dropShadow"
+                            | "drop-shadow"
+                            | "innerShadow"
+                            | "inner-shadow"
+                            | "outerGlow"
+                            | "outer-glow"
+                            | "innerGlow"
+                            | "inner-glow"
+                            | "gaussianBlur"
+                            | "gaussian-blur"
+                            | "bevel"
+                            | "feather"
+                            | "noise"
+                            | "grain"
+                            | "liveEffect"
+                            | "live-effect"
+                    )
+                {
+                    if let Some(effect_def) = parse_effect(entry) {
+                        entries.push(crate::scene::AppearanceEntry::Effect(
+                            crate::scene::EffectLayer {
+                                effect_type: effect_def.effect_type.clone(),
+                                params: effect_def.clone(),
+                                opacity: eo.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0)
+                                    as f32,
+                                blend_mode: effect_def.blend_mode,
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+        crate::scene::AppearanceStack { entries }
+    } else {
+        crate::scene::AppearanceStack::default()
+    };
+
+    let appearance_stack = if appearance_stack.is_empty() {
+        let pattern_appearance_fills = elem_value
+            .get("appearanceFills")
+            .and_then(|v| v.as_array())
+            .filter(|fills| {
+                fills.iter().any(|fill| {
+                    fill.get("gradient")
+                        .or_else(|| fill.get("pattern"))
+                        .and_then(parse_pattern)
+                        .is_some()
+                })
+            });
+
+        if let Some(fills) = pattern_appearance_fills {
+            let mut entries = Vec::new();
+            for fill in fills {
+                let Some(fo) = fill.as_object() else {
+                    continue;
+                };
+                let paint = if let Some(pattern) = fo
+                    .get("gradient")
+                    .or_else(|| fo.get("pattern"))
+                    .and_then(parse_pattern)
+                {
+                    crate::scene::PaintSource::Pattern(pattern)
+                } else if let Some(gradient) = fo.get("gradient").and_then(parse_gradient) {
+                    if gradient.gradient_type == GradientType::Radial {
+                        crate::scene::PaintSource::RadialGradient(gradient)
+                    } else {
+                        crate::scene::PaintSource::LinearGradient(gradient)
+                    }
+                } else {
+                    crate::scene::PaintSource::Solid(parse_color(fo).unwrap_or(Color32::BLACK))
+                };
+                entries.push(crate::scene::AppearanceEntry::Fill(
+                    crate::scene::FillLayer {
+                        paint,
+                        opacity: fo.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                        blend_mode: fo
+                            .get("blendMode")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("normal")
+                            .parse()
+                            .unwrap_or(BlendMode::Normal),
+                    },
+                ));
+            }
+            for stroke in &appearance_strokes {
+                entries.push(crate::scene::AppearanceEntry::Stroke(
+                    crate::scene::StrokeLayer {
+                        paint: crate::scene::PaintSource::Solid(stroke.color),
+                        width: stroke.width,
+                        opacity: stroke.opacity,
+                        blend_mode: stroke.blend_mode.clone(),
+                        cap: stroke.cap.clone(),
+                        join: stroke.join.clone(),
+                        dash: stroke.dash.clone(),
+                        miter_limit: stroke.miter_limit,
+                    },
+                ));
+            }
+            for effect in &effects {
+                entries.push(crate::scene::AppearanceEntry::Effect(
+                    crate::scene::EffectLayer {
+                        effect_type: effect.effect_type.clone(),
+                        params: effect.clone(),
+                        opacity: 1.0,
+                        blend_mode: effect.blend_mode.clone(),
+                    },
+                ));
+            }
+            crate::scene::AppearanceStack { entries }
+        } else if let Some(pattern) = elem_value
+            .get("gradient")
+            .or_else(|| elem_value.get("pattern"))
+            .and_then(parse_pattern)
+        {
+            let mut entries = vec![crate::scene::AppearanceEntry::Fill(
+                crate::scene::FillLayer {
+                    paint: crate::scene::PaintSource::Pattern(pattern),
+                    opacity: 1.0,
+                    blend_mode: BlendMode::Normal,
+                },
+            )];
+            if let Some((width, color)) = stroke {
+                entries.push(crate::scene::AppearanceEntry::Stroke(
+                    crate::scene::StrokeLayer {
+                        paint: crate::scene::PaintSource::Solid(color),
+                        width,
+                        opacity: 1.0,
+                        blend_mode: BlendMode::Normal,
+                        cap: stroke_cap.clone(),
+                        join: stroke_join.clone(),
+                        dash: stroke_dash.clone(),
+                        miter_limit: stroke_miter_limit,
+                    },
+                ));
+            }
+            for effect in &effects {
+                entries.push(crate::scene::AppearanceEntry::Effect(
+                    crate::scene::EffectLayer {
+                        effect_type: effect.effect_type.clone(),
+                        params: effect.clone(),
+                        opacity: 1.0,
+                        blend_mode: effect.blend_mode.clone(),
+                    },
+                ));
+            }
+            crate::scene::AppearanceStack { entries }
+        } else {
+            appearance_stack
+        }
+    } else {
+        appearance_stack
+    };
+
+    let image_path = elem_value
+        .get("imagePath")
+        .or_else(|| elem_value.get("image_path"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Some(LayoutElement {
+        id,
+        el_type,
+        x,
+        y,
+        w,
+        h,
+        fill,
+        stroke,
+        text,
+        text_size,
+        children,
+        opacity,
+        rotation_deg,
+        corner_radius,
+        gradient,
+        blend_mode,
+        effects,
+        stroke_dash,
+        clip_children,
+        text_align,
+        letter_spacing,
+        line_height,
+        stroke_cap,
+        stroke_join,
+        stroke_miter_limit,
+        text_decoration,
+        text_transform,
+        text_runs,
+        symbol_name,
+        is_compound_path,
+        is_gradient_mesh,
+        is_chart,
+        is_opaque,
+        third_party_effects,
+        notes,
+        appearance_fills,
+        appearance_strokes,
+        appearance_stack,
+        path_points,
+        path_closed,
+        artboard_name: None,
+        image_path,
+    })
 }
 
 // ============================================================================
@@ -4051,7 +4921,7 @@ pub fn svg_to_rust_scaffold(svg: &str, fn_name: &str, options: &InferenceOptions
 
 /// Generate a complete Rust source file for a single artboard.
 ///
-/// Returns a string containing a valid `.rs` file with a `pub fn draw_<name>(ui: &mut egui::Ui)`
+/// Returns a string containing a valid `.rs` file with a `pub fn draw_<name>(ui: &mut egui::Ui, state: &mut <Name>State) -> Option<<Name>Action>`
 /// function that renders all elements belonging to this artboard.
 pub fn generate_artboard_file(
     artboard_name: &str,
@@ -4066,6 +4936,7 @@ pub fn generate_artboard_file(
     } else {
         fn_name
     };
+    let state_struct_name = format!("{}State", to_pascal_case(artboard_name));
     let options = InferenceOptions::default();
     let layout = infer_layout(elements, &options);
     // generate_rust already produces a complete file (imports + pub fn draw_X)
@@ -4075,26 +4946,86 @@ pub fn generate_artboard_file(
         artboard_h,
         &layout,
         None,
-        None,
+        Some(&state_struct_name),
         Some(token_map),
     )
+}
+
+/// Artboard tuple adapter used by [`generate_all_artboards`].
+pub trait ArtboardDef {
+    fn artboard_name(&self) -> &str;
+    fn artboard_x(&self) -> f32;
+    fn artboard_y(&self) -> f32;
+    fn artboard_w(&self) -> f32;
+    fn artboard_h(&self) -> f32;
+}
+
+impl ArtboardDef for (&str, f32, f32) {
+    fn artboard_name(&self) -> &str {
+        self.0
+    }
+    fn artboard_x(&self) -> f32 {
+        0.0
+    }
+    fn artboard_y(&self) -> f32 {
+        0.0
+    }
+    fn artboard_w(&self) -> f32 {
+        self.1
+    }
+    fn artboard_h(&self) -> f32 {
+        self.2
+    }
+}
+
+impl ArtboardDef for (&str, f32, f32, f32, f32) {
+    fn artboard_name(&self) -> &str {
+        self.0
+    }
+    fn artboard_x(&self) -> f32 {
+        self.1
+    }
+    fn artboard_y(&self) -> f32 {
+        self.2
+    }
+    fn artboard_w(&self) -> f32 {
+        self.3
+    }
+    fn artboard_h(&self) -> f32 {
+        self.4
+    }
+}
+
+fn element_intersects_artboard(element: &LayoutElement, artboard: &impl ArtboardDef) -> bool {
+    let ax0 = artboard.artboard_x();
+    let ay0 = artboard.artboard_y();
+    let ax1 = ax0 + artboard.artboard_w();
+    let ay1 = ay0 + artboard.artboard_h();
+    let ex0 = element.x;
+    let ey0 = element.y;
+    let ex1 = element.x + element.w;
+    let ey1 = element.y + element.h;
+    ex0 < ax1 && ex1 > ax0 && ey0 < ay1 && ey1 > ay0
 }
 
 /// Generate one Rust file per artboard.
 ///
 /// Returns a `Vec<(filename, file_content)>` — one entry per artboard.
 /// Elements are assigned to artboards by their `artboard_name` field if set.
-/// Elements with no `artboard_name` (unassigned) are placed in the **first** artboard only,
-/// consistent with the `--per-artboard` CLI flag behavior.
-pub fn generate_all_artboards(
+/// Elements with no `artboard_name` are assigned by bounding-box intersection,
+/// with a first-artboard fallback only for elements that intersect no artboard.
+pub fn generate_all_artboards<T: ArtboardDef>(
     all_elements: &[LayoutElement],
-    artboards: &[(&str, f32, f32)],
+    artboards: &[T],
     token_map: &HashMap<String, Color32>,
 ) -> Vec<(String, String)> {
     artboards
         .iter()
         .enumerate()
-        .map(|(artboard_idx, &(name, w, h))| {
+        .map(|(artboard_idx, artboard)| {
+            let name = artboard.artboard_name();
+            let w = artboard.artboard_w();
+            let h = artboard.artboard_h();
             let sanitized = {
                 let s = sanitize_fn_name(name);
                 if s.is_empty() {
@@ -4104,13 +5035,14 @@ pub fn generate_all_artboards(
                 }
             };
             let filename = format!("{}.rs", sanitized);
-            // Filter elements belonging to this artboard.
-            // Unassigned elements (artboard_name == None) go to the first artboard only.
             let artboard_elements: Vec<LayoutElement> = all_elements
                 .iter()
                 .filter(|e| {
                     e.artboard_name.as_deref() == Some(name)
-                        || (e.artboard_name.is_none() && artboard_idx == 0)
+                        || (e.artboard_name.is_none() && element_intersects_artboard(e, artboard))
+                        || (e.artboard_name.is_none()
+                            && artboard_idx == 0
+                            && !artboards.iter().any(|a| element_intersects_artboard(e, a)))
                 })
                 .cloned()
                 .collect();
@@ -4703,7 +5635,6 @@ mod tests {
 
         let components_file = generate_components_file(&components);
         assert!(components_file.contains("pub fn primary_button"));
-        assert!(components_file.contains("tokens::ON_PRIMARY"));
     }
 
     #[test]
@@ -4741,6 +5672,146 @@ mod tests {
     }
 
     #[test]
+    fn test_rotated_radial_gradient_uses_rotated_mesh_points_without_post_rotation() {
+        let node = LayoutNode::Shape {
+            x: 10.0,
+            y: 20.0,
+            w: 80.0,
+            h: 40.0,
+            fill: Color32::WHITE,
+            id: "radial".to_string(),
+            style: VisualStyle {
+                rotation_deg: 30.0,
+                gradient: Some(GradientDef {
+                    gradient_type: GradientType::Radial,
+                    angle_deg: 0.0,
+                    center: Some([40.0, 40.0]),
+                    focal_point: Some([45.0, 40.0]),
+                    radius: Some(30.0),
+                    transform: None,
+                    stops: vec![
+                        GradientStop {
+                            position: 0.0,
+                            color: Color32::WHITE,
+                        },
+                        GradientStop {
+                            position: 1.0,
+                            color: Color32::BLACK,
+                        },
+                    ],
+                }),
+                ..VisualStyle::default()
+            },
+        };
+        let code = generate_node(&node, 0, None);
+        assert!(code.contains("let gradient_rect_pts = vec![_rot.apply"));
+        assert!(!code.contains("grad_shape = _rot.apply_to_shape(grad_shape);"));
+    }
+
+    #[test]
+    fn test_rounded_linear_gradient_uses_path_mesh_clip() {
+        let node = LayoutNode::Shape {
+            x: 0.0,
+            y: 0.0,
+            w: 80.0,
+            h: 40.0,
+            fill: Color32::WHITE,
+            id: "rounded_linear".to_string(),
+            style: VisualStyle {
+                corner_radius: 8.0,
+                gradient: Some(GradientDef {
+                    gradient_type: GradientType::Linear,
+                    angle_deg: 45.0,
+                    center: None,
+                    focal_point: None,
+                    radius: None,
+                    transform: None,
+                    stops: vec![
+                        GradientStop {
+                            position: 0.0,
+                            color: Color32::WHITE,
+                        },
+                        GradientStop {
+                            position: 1.0,
+                            color: Color32::BLACK,
+                        },
+                    ],
+                }),
+                ..VisualStyle::default()
+            },
+        };
+        let code = generate_node(&node, 0, None);
+        assert!(code.contains("rounded_rect_path(rect, 8.0)"));
+        assert!(code.contains("gradient_path_mesh_with_transform"));
+        assert!(!code.contains("linear_gradient_rect"));
+    }
+
+    #[test]
+    fn test_circle_inference_uses_rich_scene_geometry() {
+        let elem = LayoutElement::new(
+            "circle".to_string(),
+            ElementType::Circle,
+            10.0,
+            20.0,
+            30.0,
+            30.0,
+        );
+        let node = infer_element(&elem, &InferenceOptions::default());
+        let LayoutNode::RichScene(scene_node) = node else {
+            panic!("circle should infer as rich scene");
+        };
+        assert!(matches!(
+            scene_node.geometry,
+            crate::scene::Geometry::Ellipse { .. }
+        ));
+    }
+
+    #[test]
+    fn test_rotated_linear_gradient_and_stroke_share_rotated_path() {
+        let node = LayoutNode::Shape {
+            x: 0.0,
+            y: 0.0,
+            w: 80.0,
+            h: 40.0,
+            fill: Color32::WHITE,
+            id: "rotated_linear".to_string(),
+            style: VisualStyle {
+                rotation_deg: 20.0,
+                stroke: Some((2.0, Color32::BLACK)),
+                stroke_dash: Some(vec![2.0, 3.0]),
+                stroke_cap: Some(StrokeCap::Round),
+                stroke_join: Some(StrokeJoin::Bevel),
+                gradient: Some(GradientDef {
+                    gradient_type: GradientType::Linear,
+                    angle_deg: 45.0,
+                    center: None,
+                    focal_point: None,
+                    radius: None,
+                    transform: None,
+                    stops: vec![
+                        GradientStop {
+                            position: 0.0,
+                            color: Color32::WHITE,
+                        },
+                        GradientStop {
+                            position: 1.0,
+                            color: Color32::BLACK,
+                        },
+                    ],
+                }),
+                ..VisualStyle::default()
+            },
+        };
+        let code = generate_node(&node, 0, None);
+        assert!(code.contains("gradient_path_mesh_with_transform"));
+        assert!(code.contains("_rot.apply(rect.left_top())"));
+        assert!(code.contains("egui_expressive::dashed_path"));
+        assert!(code.contains("egui_expressive::StrokeCap::Round"));
+        assert!(code.contains("egui_expressive::StrokeJoin::Bevel"));
+        assert!(!code.contains("grad_shape = _rot.apply_to_shape(grad_shape);"));
+    }
+
+    #[test]
     fn test_generate_all_artboards_partitions_elements() {
         let mut e1 = LayoutElement::new("e1".to_string(), ElementType::Shape, 0.0, 0.0, 50.0, 50.0);
         e1.artboard_name = Some("Home".to_string());
@@ -4758,4 +5829,213 @@ mod tests {
         assert!(files[0].1.contains("pub fn draw_home"));
         assert!(files[1].1.contains("pub fn draw_settings"));
     }
+}
+
+#[test]
+fn test_parse_json_sidecar_recursive_children() {
+    let json = r#"{
+            "artboard": { "name": "Test", "width": 100, "height": 100 },
+            "elements": [{
+                "id": "parent",
+                "type": "group",
+                "children": [{
+                    "id": "child",
+                    "type": "text",
+                    "text": "Hello"
+                }]
+            }]
+        }"#;
+    let (_, elements) = parse_json_sidecar(json).unwrap();
+    assert_eq!(elements.len(), 1);
+    assert_eq!(elements[0].id, "parent");
+    assert_eq!(elements[0].children.len(), 1);
+    assert_eq!(elements[0].children[0].id, "child");
+    assert_eq!(elements[0].children[0].text.as_deref(), Some("Hello"));
+}
+
+#[test]
+fn test_parse_json_sidecar_preserves_ellipse_geometry() {
+    let json = r##"{
+            "artboard": { "name": "Test", "width": 100, "height": 100 },
+            "elements": [{ "id": "ell", "type": "ellipse", "x": 10, "y": 20, "w": 30, "h": 40, "fill": "#ff0000" }]
+        }"##;
+    let (_, elements) = parse_json_sidecar(json).unwrap();
+    assert_eq!(elements[0].el_type, ElementType::Ellipse);
+    let node = crate::scene::SceneNode::from_layout_element(&elements[0]);
+    assert!(matches!(
+        node.geometry,
+        crate::scene::Geometry::Ellipse { .. }
+    ));
+}
+
+#[test]
+fn test_parse_json_sidecar_appearance_stack() {
+    let json = r##"{
+            "artboard": { "name": "Test", "width": 100, "height": 100 },
+            "elements": [{
+                "id": "el",
+                "type": "shape",
+                "appearanceStack": [
+                    { "type": "fill", "color": "#ff0000", "opacity": 0.5, "blendMode": "multiply",
+                      "gradient": { "type": "linear", "angle": 45, "transform": [1, 0, 0, 1, 2, 3], "stops": [{ "position": 0.0, "color": "#ff0000", "opacity": 0.25 }, { "position": 1.0, "color": "#0000ff" }] } },
+                    { "type": "stroke", "r": 0, "g": 255, "b": 0, "width": 2.0, "opacity": 1.0, "blendMode": "screen", "cap": "round", "join": "bevel", "dash": [2, 4], "miterLimit": 1.0 }
+                ]
+            }]
+        }"##;
+    let (_, elements) = parse_json_sidecar(json).unwrap();
+    let stack = &elements[0].appearance_stack.entries;
+    assert_eq!(stack.len(), 2);
+    match &stack[0] {
+        crate::scene::AppearanceEntry::Fill(f) => {
+            let crate::scene::PaintSource::LinearGradient(gradient) = &f.paint else {
+                panic!("Expected LinearGradient");
+            };
+            assert_eq!(gradient.stops[0].color.to_srgba_unmultiplied()[3], 64);
+            assert_eq!(gradient.transform, Some([1.0, 0.0, 0.0, 1.0, 2.0, 3.0]));
+            assert_eq!(f.opacity, 0.5);
+            assert_eq!(f.blend_mode, BlendMode::Multiply);
+        }
+        _ => panic!("Expected Fill"),
+    }
+    match &stack[1] {
+        crate::scene::AppearanceEntry::Stroke(s) => {
+            assert_eq!(
+                s.paint,
+                crate::scene::PaintSource::Solid(egui::Color32::from_rgb(0, 255, 0))
+            );
+            assert_eq!(s.width, 2.0);
+            assert_eq!(s.blend_mode, BlendMode::Screen);
+            assert_eq!(s.cap, Some(StrokeCap::Round));
+            assert_eq!(s.join, Some(StrokeJoin::Bevel));
+            assert_eq!(s.dash.as_deref(), Some(&[2.0, 4.0][..]));
+            assert_eq!(s.miter_limit, Some(1.0));
+        }
+        _ => panic!("Expected Stroke"),
+    }
+}
+
+#[test]
+fn test_parse_json_sidecar_pattern_fill_uses_scene_pattern_source() {
+    let json = r##"{
+            "artboard": { "name": "Test", "width": 100, "height": 100 },
+            "elements": [{
+                "id": "pattern_rect",
+                "type": "shape",
+                "x": 0, "y": 0, "w": 20, "h": 20,
+                "gradient": { "type": "conic", "patternName": "Diagonal Dots", "seed": 123, "cellSize": 10.0, "markSize": 2.0 },
+                "stroke": "#000000", "strokeWidth": 1.0
+            }]
+        }"##;
+    let (_, elements) = parse_json_sidecar(json).unwrap();
+    let stack = &elements[0].appearance_stack.entries;
+    assert_eq!(stack.len(), 2);
+    let crate::scene::AppearanceEntry::Fill(fill) = &stack[0] else {
+        panic!("Expected pattern fill");
+    };
+    let crate::scene::PaintSource::Pattern(pattern) = &fill.paint else {
+        panic!("Expected Pattern paint source");
+    };
+    assert_eq!(pattern.name, "Diagonal Dots");
+    assert_eq!(pattern.seed, 123);
+    assert_eq!(pattern.cell_size, 10.0);
+    assert_eq!(pattern.mark_size, 2.0);
+
+    let token_map = std::collections::HashMap::new();
+    let code = generate_artboard_file("Pattern", 100.0, 100.0, &elements, &token_map);
+    assert!(code.contains("PaintSource::Pattern"));
+    assert!(code.contains("PatternDef"));
+}
+
+#[test]
+fn test_parse_json_sidecar_appearance_fills_pattern_uses_scene_stack() {
+    let json = r##"{
+            "artboard": { "name": "Test", "width": 100, "height": 100 },
+            "elements": [{
+                "id": "pattern_appearance",
+                "type": "shape",
+                "appearanceFills": [
+                    {
+                        "opacity": 0.75,
+                        "pattern": { "patternName": "Dots", "seed": 5, "cellSize": 6.0, "markSize": 1.0 }
+                    },
+                    {
+                        "opacity": 0.25,
+                        "gradient": { "type": "pattern", "patternName": "Grid", "seed": 6, "cellSize": 8.0, "markSize": 1.0 }
+                    }
+                ],
+                "appearanceStrokes": [{ "color": "#000000", "width": 2.0, "dash": [2, 2] }]
+            }]
+        }"##;
+    let (_, elements) = parse_json_sidecar(json).unwrap();
+    let stack = &elements[0].appearance_stack.entries;
+    assert_eq!(stack.len(), 3);
+    let crate::scene::AppearanceEntry::Fill(fill) = &stack[0] else {
+        panic!("Expected pattern fill");
+    };
+    assert!(matches!(fill.paint, crate::scene::PaintSource::Pattern(_)));
+    assert!(matches!(
+        &stack[1],
+        crate::scene::AppearanceEntry::Fill(crate::scene::FillLayer {
+            paint: crate::scene::PaintSource::Pattern(_),
+            ..
+        })
+    ));
+    let crate::scene::AppearanceEntry::Stroke(stroke) = &stack[2] else {
+        panic!("Expected appearance stroke");
+    };
+    assert_eq!(stroke.dash.as_deref(), Some(&[2.0, 2.0][..]));
+}
+
+#[test]
+fn test_rich_element_generates_scene_node() {
+    let json = r##"{
+        "artboard": { "name": "RichTest", "width": 100, "height": 100 },
+        "elements": [{
+            "id": "rich_path",
+            "type": "path",
+            "pathPoints": [
+                {"anchor": [0, 0], "leftCtrl": [0, 0], "rightCtrl": [0, 0]},
+                {"anchor": [10, 10], "leftCtrl": [10, 10], "rightCtrl": [10, 10]}
+            ],
+            "pathClosed": true,
+            "appearanceStack": [
+                { "type": "fill", "color": "#ff0000", "opacity": 1.0, "blendMode": "normal" }
+            ]
+        }]
+    }"##;
+    let (_, elements) = parse_json_sidecar(json).unwrap();
+    let token_map = std::collections::HashMap::new();
+    let code = generate_artboard_file("RichTest", 100.0, 100.0, &elements, &token_map);
+
+    // Should contain RichScene generation
+    assert!(code.contains("RichScene: rich_path"));
+    assert!(code.contains("egui_expressive::scene::SceneNode"));
+    assert!(code.contains("egui_expressive::scene::Geometry::Path"));
+    assert!(code.contains("egui_expressive::scene::AppearanceStack"));
+    assert!(code.contains("egui_expressive::scene::render_node"));
+}
+
+#[test]
+fn test_rich_clipped_group_preserves_clip_and_children() {
+    let json = r##"{
+        "artboard": { "name": "ClipTest", "width": 100, "height": 100 },
+        "elements": [{
+            "id": "clip_group",
+            "type": "group",
+            "clipChildren": true,
+            "children": [{
+                "id": "child_rect",
+                "type": "shape",
+                "x": 10, "y": 10, "w": 20, "h": 20,
+                "fill": "#ff0000"
+            }]
+        }]
+    }"##;
+    let (_, elements) = parse_json_sidecar(json).unwrap();
+    let token_map = std::collections::HashMap::new();
+    let code = generate_artboard_file("ClipTest", 100.0, 100.0, &elements, &token_map);
+
+    assert!(code.contains("clip_children: true"));
+    assert!(code.contains("id: \"child_rect\""));
+    assert!(code.contains("egui_expressive::scene::render_node"));
 }

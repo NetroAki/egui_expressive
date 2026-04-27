@@ -20,7 +20,7 @@
       --error-container: rgba(242, 184, 181, 0.1);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { 
+    body {
       font-family: 'Segoe UI', system-ui, sans-serif;
       background: var(--surface);
       color: var(--on-surface);
@@ -30,7 +30,7 @@
       flex-direction: column;
       overflow: hidden;
     }
-    
+
     /* Header */
     .header {
       padding: 12px 16px 8px;
@@ -39,16 +39,16 @@
     }
     .header h1 { font-size: 14px; font-weight: 500; color: var(--primary); }
     .header p { font-size: 11px; color: var(--on-surface-variant); margin-top: 2px; }
-    
+
     /* Artboard list */
     .artboard-section {
       padding: 8px 12px;
       border-bottom: 1px solid var(--outline-variant);
       flex-shrink: 0;
     }
-    .section-label { 
-      font-size: 10px; 
-      text-transform: uppercase; 
+    .section-label {
+      font-size: 10px;
+      text-transform: uppercase;
       letter-spacing: 0.08em;
       color: var(--on-surface-variant);
       margin-bottom: 6px;
@@ -94,7 +94,7 @@
     .artboard-item:hover { background: var(--surface-container); }
     .artboard-item input[type=checkbox] { accent-color: var(--primary); }
     .artboard-item label { flex: 1; cursor: pointer; }
-    
+
     /* Options */
     .options-section {
       padding: 8px 12px;
@@ -127,7 +127,7 @@
       transition: left 0.2s;
     }
     .toggle.on::after { left: 18px; }
-    
+
     /* Export button */
     .export-btn {
       margin: 8px 12px;
@@ -149,14 +149,14 @@
       background: var(--primary-muted);
       color: rgba(230, 225, 229, 0.45);
     }
-    
+
     /* Main content area — split: file tree + code preview */
     .content-area {
       flex: 1;
       display: flex;
       overflow: hidden;
     }
-    
+
     /* File tree */
     .file-tree {
       width: 140px;
@@ -209,7 +209,7 @@
       opacity: 0;
     }
     .tree-file:hover .dl-btn { opacity: 1; }
-    
+
     /* Code preview */
     .code-preview {
       flex: 1;
@@ -230,7 +230,7 @@
     .code-preview .num { color: #f78c6c; }
     .code-preview .comment { color: #546e7a; font-style: italic; }
     .code-preview .type { color: #ffcb6b; }
-    
+
     /* Copy button */
     .copy-btn {
       position: sticky;
@@ -245,7 +245,7 @@
       cursor: pointer;
       margin-bottom: 4px;
     }
-    
+
     /* Warnings panel */
     .warnings-panel {
       background: var(--error-container);
@@ -266,7 +266,7 @@
       color: var(--on-surface-variant);
       padding: 1px 0;
     }
-    
+
     /* Status bar */
     .status-bar {
       padding: 6px 12px;
@@ -367,16 +367,14 @@
       background: var(--surface);
     }
   </style>
-  <!-- JSZip is loaded from CDN for online use; CEP panels without internet will fall back to individual file downloads -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
   <header class="header" role="banner">
     <h1>egui_expressive Export</h1>
     <p>Illustrator → Rust scaffold generator</p>
   </header>
-  
-  <div class="artboard-section">
+
+  <section class="artboard-section" aria-label="Artboards">
     <div class="section-header">
       <div class="section-label">Artboards <span id="artboard-count"></span></div>
       <div class="section-actions">
@@ -387,29 +385,31 @@
     <div class="artboard-list" id="artboard-list">
       <div style="color:var(--on-surface-variant);font-size:11px;padding:4px 0;">Loading artboards...</div>
     </div>
-  </div>
-  
-  <div class="options-section">
+  </section>
+
+  <section class="options-section" aria-label="Export Options">
     <div class="option-row">
       <label>Use naming conventions</label>
-      <div class="toggle on" id="toggle-naming" role="button" tabindex="0" aria-label="Use naming conventions" onclick="toggleOption('naming')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('naming')}"></div>
+      <div class="toggle on" id="toggle-naming" role="button" aria-pressed="true" tabindex="0" aria-label="Use naming conventions" onclick="toggleOption('naming')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('naming')}"></div>
     </div>
     <div class="option-row">
-      <label>Infer gaps</label>
-      <div class="toggle on" id="toggle-gaps" role="button" tabindex="0" aria-label="Infer gaps between elements" onclick="toggleOption('gaps')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('gaps')}"></div>
+      <label for="toggle-gaps">Infer Gaps</label>
+      <div class="toggle on" id="toggle-gaps" role="button" aria-pressed="true" tabindex="0" aria-label="Infer gaps between elements" onclick="toggleOption('gaps')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('gaps')}"></div>
     </div>
     <div class="option-row">
-      <label>JSON sidecar</label>
-      <div class="toggle on" id="toggle-sidecar" role="button" tabindex="0" aria-label="Include sidecar JSON" onclick="toggleOption('sidecar')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('sidecar')}"></div>
+      <label for="toggle-sidecar">Include Sidecar JSON</label>
+      <div class="toggle on" id="toggle-sidecar" role="button" aria-pressed="true" tabindex="0" aria-label="Include sidecar JSON" onclick="toggleOption('sidecar')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('sidecar')}"></div>
     </div>
     <div class="option-row">
-      <label>Library-native emit</label>
-      <div class="toggle on" id="toggle-native" role="button" tabindex="0" aria-label="Use library-native emit" onclick="toggleOption('native')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('native')}"></div>
+      <label for="toggle-native">Library-Native Emit</label>
+      <div class="toggle on" id="toggle-native" role="button" aria-pressed="true" tabindex="0" aria-label="Use library-native emit" onclick="toggleOption('native')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('native')}"></div>
     </div>
+  </section>
+
+  <div role="region" aria-label="Export Action">
+    <button class="export-btn" id="export-btn" onclick="doExport()">Export Selected Artboards</button>
   </div>
-  
-  <button class="export-btn" id="export-btn" onclick="doExport()">Export Selected Artboards</button>
-  
+
   <main class="content-area">
     <div class="file-tree" id="file-tree">
       <div class="empty-state">
@@ -424,12 +424,12 @@
       </div>
     </div>
   </main>
-  
+
   <section class="warnings-panel" id="warnings-panel" style="display:none;" aria-label="Warnings">
-    <div class="warn-title">Elements requiring manual attention</div>
+    <div class="warn-title">Fidelity notes</div>
     <div id="warnings-list"></div>
   </section>
-  
+
   <section class="status-bar" id="status-bar" aria-label="Status" role="status" aria-live="polite">
     <span class="status-text" id="status-text">Ready</span>
     <span class="ai-parser-status" id="ai-parser-status" title="Project file analysis via ai-parser"></span>
@@ -446,15 +446,25 @@
     const CEP_HOST_ERROR_PREFIX = '__HOST_ERROR__:';
     const CEP_HOST_INIT_ATTEMPTS = 6;
     const CEP_HOST_INIT_DELAY_MS = 250;
+    var EGUI_EXPORT_CHANNEL = 'egui_expressive_exporter';
     let generatedFiles = {};
     let activeFile = null;
-    
+
+    function localTargetOrigin() {
+      return '/';
+    }
+
+    function postPluginMessage(message) {
+      window.postMessage(Object.assign({}, message, { channel: EGUI_EXPORT_CHANNEL }), localTargetOrigin());
+    }
+
     function toggleOption(key) {
       options[key] = !options[key];
       const el = document.getElementById('toggle-' + key);
       el.classList.toggle('on', options[key]);
+      el.setAttribute('aria-pressed', options[key] ? 'true' : 'false');
     }
-    
+
     function selectAll(val) {
       document.querySelectorAll('#artboard-list input[type=checkbox]').forEach(cb => cb.checked = val);
     }
@@ -462,7 +472,7 @@
     function setStatus(msg) {
       document.getElementById('status-text').textContent = msg;
     }
-    
+
     function showArtboardError(msg, tone = 'error', title = '', detail = '') {
       const list = document.getElementById('artboard-list');
       const safeTitle = title || (tone === 'error' ? 'Unable to load artboards' : 'Status');
@@ -507,15 +517,15 @@
           try {
             const fromString = window.__adobe_cep__.getSystemPath('extension');
             if (fromString) return fromString;
-          } catch (e) {}
+          } catch (e) { setStatus('Extension path lookup fallback: ' + e.message); }
           try {
             if (typeof SystemPath !== 'undefined' && SystemPath.EXTENSION) {
               const fromConstant = window.__adobe_cep__.getSystemPath(SystemPath.EXTENSION);
               if (fromConstant) return fromConstant;
             }
-          } catch (e) {}
+          } catch (e) { setStatus('Extension path constant fallback: ' + e.message); }
         }
-      } catch (e) {}
+      } catch (e) { setStatus('CEP extension path lookup failed: ' + e.message); }
 
       try {
         const href = window.location.href.split(/[?#]/)[0];
@@ -649,7 +659,7 @@
           'CEP connected, but Illustrator rejected the first diagnostics call.',
           'error',
           'evalScript failed',
-          'Restart Illustrator, reinstall the latest build, and rerun install_zxp.bat only if the panel still fails after reinstall.'
+          'Restart Illustrator, reinstall the latest build, and rerun the matching installer helper from this package only if the panel still fails after reinstall.'
         );
         setStatus('CEP evalScript failed');
         return;
@@ -706,7 +716,7 @@
         setStatus('Error parsing artboard data: ' + e.message);
       }
     }
-    
+
     // Request artboard list on load
     window.addEventListener('load', async () => {
       try {
@@ -719,7 +729,7 @@
           }
         } else {
           // UXP path: postMessage
-          window.postMessage({ type: 'GET_ARTBOARDS' }, '*');
+          postPluginMessage({ type: 'GET_ARTBOARDS' });
         }
       } catch(e) {
         showArtboardError('Plugin load error: ' + e.message, 'error', 'Plugin load error');
@@ -727,9 +737,9 @@
       }
       checkAiParser();
     });
-    
+
     function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
-    
+
     function loadArtboards(data) {
       const list = document.getElementById('artboard-list');
       const artboards = typeof data === 'string' ? JSON.parse(data) : data;
@@ -745,25 +755,19 @@
         </div>
       `).join('');
     }
-    
+
     function doExport() {
       const selected = Array.from(document.querySelectorAll('#artboard-list input:checked'))
         .map(cb => parseInt(cb.id.replace('ab-', '')));
-      const selectedTiles = Array.from(document.querySelectorAll('#tile-list input:checked'))
-        .map(cb => {
-          const idx = parseInt(cb.id.replace('tile-', ''));
-          return currentTiles[idx];
-        });
-      if (!selected.length && !selectedTiles.length) { setStatus('Select at least one artboard or page tile'); return; }
-      
+      if (!selected.length) { setStatus('Select at least one artboard'); return; }
+
       document.getElementById('export-btn').disabled = true;
       setStatus('Exporting...');
-      
+
       var exportPayload = {
-        selected: selected,
-        selectedTiles: selectedTiles
+        selected: selected
       };
-      
+
       try {
         if (window.__adobe_cep__) {
           (async () => {
@@ -803,8 +807,15 @@
                 setStatus('Illustrator error: ' + rawData.error);
                 return;
               }
-              const exportResult = exportFromRawData(rawData, options);
-              handleExportResult({ payload: { files: exportResult.files, filesArray: Object.entries(exportResult.files).map(([filename, content]) => ({filename, content})), colorMap: exportResult.colorMap, warnings: exportResult.warnings || [] } });
+              const docPath = Array.isArray(rawData) && rawData.length ? rawData[0].documentPath : null;
+              const hostDiagnostics = Array.isArray(rawData)
+                ? rawData.flatMap(entry => Array.isArray(entry.hostDiagnostics) ? entry.hostDiagnostics : [])
+                : [];
+              const enrichedData = typeof extractFromProjectFile === 'function'
+                ? await extractFromProjectFile(rawData, docPath)
+                : rawData;
+              const exportResult = exportFromRawData(enrichedData, Object.assign({}, options, { parserDiagnostics: hostDiagnostics }));
+              handleExportResult({ payload: { files: exportResult.files, assets: exportResult.assets, filesArray: Object.entries(exportResult.files).map(([filename, content]) => ({filename, content})), colorMap: exportResult.colorMap, warnings: exportResult.warnings || [] } });
               document.getElementById('export-btn').disabled = false;
               setStatus('Exported ' + Object.keys(exportResult.files).length + ' files');
             } catch(e) {
@@ -817,23 +828,23 @@
           });
         } else {
           // UXP path: postMessage
-          window.postMessage({ 
-            type: 'EXPORT', 
+          postPluginMessage({
+            type: 'EXPORT',
             selectedIndices: selected,
-            selectedTiles: selectedTiles,
-            options 
-          }, '*');
+            options
+          });
         }
       } catch(e) {
         setStatus('Error: ' + e.message);
         document.getElementById('export-btn').disabled = false;
       }
     }
-    
+
     // Handle messages from plugin.js
     window.addEventListener('message', (event) => {
+      if (event.source !== window) return;
       const msg = event.data;
-      if (!msg) return;
+      if (!msg || msg.channel !== EGUI_EXPORT_CHANNEL) return;
 
       if (msg.type === 'ARTBOARDS_RESULT') {
         if (!msg.artboards || msg.artboards.length === 0) {
@@ -846,7 +857,7 @@
       } else if (msg.type === 'EXPORT_RESULT') {
         handleExportResult(msg);
       } else if (msg.type === 'AI_PARSER_STATUS') {
-        updateAiParserStatus(msg.available);
+        updateAiParserStatus(msg.status || msg.available);
       } else if (msg.type === 'ERROR') {
         document.getElementById('export-btn').disabled = false;
         setStatus('Error: ' + (msg.message || 'Unknown error'));
@@ -857,32 +868,40 @@
     // Check ai-parser availability on load
     function checkAiParser() {
       try {
-        if (typeof window.__adobe_cep__ === 'undefined') {
-          window.postMessage({ type: 'CHECK_AI_PARSER' }, '*');
+        if (typeof window.__adobe_cep__ !== 'undefined' && typeof getAiParserStatus === 'function') {
+          updateAiParserStatus(getAiParserStatus());
+        } else {
+          postPluginMessage({ type: 'CHECK_AI_PARSER' });
         }
       } catch(e) {
         setStatus('ai-parser check failed: ' + e.message);
       }
     }
 
-    function updateAiParserStatus(available) {
+    function updateAiParserStatus(status) {
       const el = document.getElementById('ai-parser-status');
       if (!el) return;
+      const available = typeof status === 'object' ? !!status.available : !!status;
+      const title = typeof status === 'object' && status.diagnostics && status.diagnostics.length
+        ? status.diagnostics.map(d => d.note).join('\n')
+        : 'Project file analysis via bundled ai-parser';
       el.className = 'ai-parser-status ' + (available ? 'available' : 'unavailable');
+      el.title = title;
       el.innerHTML = `<span class="dot"></span>Project file analysis: ${available ? 'Available' : 'Not available'}`;
     }
-    
+
     function handleExportResult(msg) {
       document.getElementById('export-btn').disabled = false;
-      
+
       const result = msg.payload || msg;
       if (result.error) {
         setStatus('Error: ' + result.error);
         return;
       }
-      
+
       // Build file map
       generatedFiles = {};
+      window.generatedAssets = result.assets || {};
       if (result.files) {
         if (Array.isArray(result.files)) {
           result.files.forEach(f => { generatedFiles[f.filename] = f.content; });
@@ -893,7 +912,7 @@
       } else if (result.filesArray) {
         result.filesArray.forEach(f => { generatedFiles[f.filename] = f.content; });
       }
-      
+
       // Show warnings
       const warnings = result.warnings || [];
       const wp = document.getElementById('warnings-panel');
@@ -911,30 +930,32 @@
         wp.style.display = 'none';
         document.getElementById('warnings-list').innerHTML = '';
       }
-      
+
       // Build file tree
       renderFileTree(generatedFiles);
-      
+
       // Select first file
       const firstFile = Object.keys(generatedFiles)[0];
       if (firstFile) showFile(firstFile);
-      
+
       setStatus(`Exported ${Object.keys(generatedFiles).length} files`);
     }
-    
+
     function renderFileTree(files) {
       const tree = document.getElementById('file-tree');
       const fileNames = Object.keys(files);
-      
+
       if (!fileNames.length) {
         tree.innerHTML = '<div class="empty-state"><div>No files generated</div></div>';
         return;
       }
-      
-      const saveBtn = window.__adobe_cep__ 
+
+      const saveBtn = window.__adobe_cep__
         ? `<button onclick="saveToFolder()" title="Save all to folder">Save to Folder</button>`
-        : `<button onclick="downloadZip()" title="Download all as ZIP">Get ZIP</button>`;
-      
+        : (typeof JSZip !== 'undefined'
+          ? `<button onclick="downloadZip()" title="Download all as ZIP">Get ZIP</button>`
+          : `<button onclick="downloadZip()" title="Download generated files individually">Download Files</button>`);
+
       tree.innerHTML = `
         <div class="file-tree-header">
           <span>generated/</span>
@@ -948,45 +969,46 @@
         `).join('')}
       `;
     }
-    
+
     function showFile(filename) {
       activeFile = filename;
       const content = generatedFiles[filename] || '';
-      
+
       // Update active state in tree
       document.querySelectorAll('.tree-file').forEach(el => el.classList.remove('active'));
       const treeEl = document.getElementById('tree-' + filename.replace(/[^a-z0-9]/gi,'_'));
       if (treeEl) treeEl.classList.add('active');
-      
+
       // Syntax highlight
       const highlighted = highlightCode(content, filename.endsWith('.rs') ? 'rust' : 'json');
-      
+
       document.getElementById('code-preview').innerHTML = `
         <button class="copy-btn" onclick="copyCode()">Copy</button>
         <pre>${highlighted}</pre>
       `;
     }
-    
+
     function highlightCode(code, lang) {
       const escaped = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       if (lang !== 'rust') return escaped;
-      
-      return escaped
-        .replace(/\/\/[^\n]*/g, m => `<span class="comment">${m}</span>`)
-        .replace(/\b(pub|fn|let|mut|use|struct|enum|impl|match|if|else|for|while|return|mod|super|self|true|false|Some|None|Ok|Err)\b/g, 
-          m => `<span class="kw">${m}</span>`)
-        .replace(/"[^"]*"/g, m => `<span class="str">${m}</span>`)
-        .replace(/\b\d+\.?\d*\b/g, m => `<span class="num">${m}</span>`)
-        .replace(/\b([A-Z][a-zA-Z0-9]*)\b/g, m => `<span class="type">${m}</span>`);
+
+      return escaped.replace(/(\/\/[^\n]*)|("[^"]*")|\b(pub|fn|let|mut|use|struct|enum|impl|match|if|else|for|while|return|mod|super|self|true|false|Some|None|Ok|Err)\b|\b([A-Z][a-zA-Z0-9]*)\b|\b(\d+\.?\d*)\b/g, (m, comment, str, kw, type, num) => {
+        if (comment) return `<span class="comment">${comment}</span>`;
+        if (str) return `<span class="str">${str}</span>`;
+        if (kw) return `<span class="kw">${kw}</span>`;
+        if (type) return `<span class="type">${type}</span>`;
+        if (num) return `<span class="num">${num}</span>`;
+        return m;
+      });
     }
-    
+
     function copyCode() {
       if (!activeFile) return;
       navigator.clipboard?.writeText(generatedFiles[activeFile] || '')
         .then(() => setStatus('Copied to clipboard'))
         .catch(() => setStatus('Copy failed'));
     }
-    
+
     function downloadFile(filename) {
       const content = generatedFiles[filename] || '';
       const blob = new Blob([content], { type: 'text/plain' });
@@ -996,7 +1018,7 @@
       a.click();
       URL.revokeObjectURL(url);
     }
-    
+
     function downloadZip() {
       if (typeof JSZip === 'undefined') {
         // fallback: download individually
@@ -1004,7 +1026,7 @@
         setStatus('JSZip not available — files downloaded individually');
         return;
       }
-      
+
       const zip = new JSZip();
       const folder = zip.folder('generated');
       Object.entries(generatedFiles).forEach(([name, content]) => {
@@ -1025,18 +1047,18 @@
         setStatus('Save to folder is only available in Illustrator');
         return;
       }
-      
+
       setStatus('Select a folder...');
-      const payload = { files: generatedFiles };
+      const payload = { files: generatedFiles, assets: window.generatedAssets || {} };
       // Double stringify: once for the JSON payload, once to escape it as a string literal for evalScript
       const script = 'saveFilesToFolderJSON(' + JSON.stringify(JSON.stringify(payload)) + ')';
       const result = await evalCepScript(script);
-      
+
       if (!result.ok) {
         setStatus('Failed to save: ' + result.error);
         return;
       }
-      
+
       try {
         const parsed = JSON.parse(result.result);
         if (parsed.canceled) {

@@ -5,6 +5,29 @@ use egui::{
     Color32, CornerRadius, Id, LayerId, Order, Pos2, Rect, Shape, Stroke,
 };
 
+pub fn with_clip_path(painter: &egui::Painter, path: Vec<egui::Pos2>) -> egui::Painter {
+    let Some(first) = path.first().copied() else {
+        return painter.clone();
+    };
+
+    let bounds = path
+        .iter()
+        .skip(1)
+        .fold(Rect::from_min_max(first, first), |rect, point| {
+            rect.union(Rect::from_min_max(*point, *point))
+        });
+
+    // egui Painter supports rectangular clipping only. Arbitrary polygon masks are
+    // handled by `clipped_layers_gpu`; this scoped helper still applies the tight
+    // path bounds so generated code is clipped instead of silently unbounded.
+    painter.with_clip_rect(painter.clip_rect().intersect(bounds))
+}
+
+pub fn with_blend_mode(painter: &egui::Painter, _mode: crate::codegen::BlendMode) -> egui::Painter {
+    // egui doesn't support blend modes on painters yet
+    painter.clone()
+}
+
 // ---------------------------------------------------------------------------
 // LayeredPainter
 // ---------------------------------------------------------------------------
@@ -367,6 +390,72 @@ pub fn inner_shadow(rect: egui::Rect, color: egui::Color32, blur_radius: f32) ->
     shapes
 }
 
+/// Load an image file at runtime and paint it into `rect`.
+///
+/// This is intended for generated Illustrator preview code where linked raster
+/// assets are known only at export time. It returns `false` when the file cannot
+/// be read or decoded so generated code can draw a visible fallback instead.
+pub fn paint_image_from_path(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    path: &str,
+    texture_id: &str,
+    tint: egui::Color32,
+) -> bool {
+    let cache_id = egui::Id::new(("egui_expressive_image_texture", texture_id, path));
+    let texture = if let Some(texture) = ui
+        .ctx()
+        .data(|data| data.get_temp::<egui::TextureHandle>(cache_id))
+    {
+        texture
+    } else {
+        let path_obj = std::path::Path::new(path);
+        let mut bytes = std::fs::read(path_obj);
+        if bytes.is_err() {
+            if let Some(file_name) = path_obj.file_name() {
+                bytes = std::fs::read(file_name);
+                if bytes.is_err() {
+                    bytes = std::fs::read(std::path::Path::new("generated").join(file_name));
+                }
+                if bytes.is_err() {
+                    bytes = std::fs::read(std::path::Path::new("assets").join(file_name));
+                }
+                if bytes.is_err() {
+                    bytes = std::fs::read(
+                        std::path::Path::new("generated")
+                            .join("assets")
+                            .join(file_name),
+                    );
+                }
+            }
+        }
+        let Ok(bytes) = bytes else {
+            return false;
+        };
+        let Ok(dynamic_image) = image::load_from_memory(&bytes) else {
+            return false;
+        };
+        let rgba = dynamic_image.to_rgba8();
+        let size = [rgba.width() as usize, rgba.height() as usize];
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+        let texture = ui
+            .ctx()
+            .load_texture(texture_id, color_image, egui::TextureOptions::LINEAR);
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(cache_id, texture.clone()));
+        texture
+    };
+
+    painter.image(
+        texture.id(),
+        rect,
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        tint,
+    );
+    true
+}
+
 // ─── Gradients ────────────────────────────────────────────────────────────────
 
 /// Direction for linear gradients.
@@ -473,6 +562,533 @@ pub fn linear_gradient_rect(
 /// Convenience: two-stop gradient from `top` to `bottom` color.
 pub fn gradient_rect(rect: egui::Rect, top: egui::Color32, bottom: egui::Color32) -> egui::Shape {
     linear_gradient_rect(rect, &[(0.0, top), (1.0, bottom)], GradientDir::TopToBottom)
+}
+
+/// Build a gradient mesh clipped to a sampled closed path.
+///
+/// This supports editable Illustrator-style gradient fills for circles, ellipses, and arbitrary
+/// closed paths without raster snapshots. Concave polygons are triangulated with ear clipping.
+pub fn gradient_path_mesh(
+    points: &[egui::Pos2],
+    stops: &[(f32, egui::Color32)],
+    angle_deg: f32,
+    radial: bool,
+) -> Option<egui::Shape> {
+    gradient_path_mesh_with_geometry(points, stops, angle_deg, radial, None, None, None)
+}
+
+/// Build a gradient mesh clipped to a sampled closed path with explicit radial geometry.
+///
+/// For radial gradients, `center`, `focal_point`, and `radius` preserve Illustrator gradient
+/// geometry when available. Missing values fall back to the clipped path bounds.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GradientPathGeometry {
+    pub center: Option<egui::Pos2>,
+    pub focal_point: Option<egui::Pos2>,
+    pub radius: Option<f32>,
+    pub transform: Option<Transform2D>,
+}
+
+pub fn gradient_path_mesh_with_geometry(
+    points: &[egui::Pos2],
+    stops: &[(f32, egui::Color32)],
+    angle_deg: f32,
+    radial: bool,
+    center: Option<egui::Pos2>,
+    focal_point: Option<egui::Pos2>,
+    radius: Option<f32>,
+) -> Option<egui::Shape> {
+    gradient_path_mesh_with_transform(
+        points,
+        stops,
+        angle_deg,
+        radial,
+        GradientPathGeometry {
+            center,
+            focal_point,
+            radius,
+            transform: None,
+        },
+    )
+}
+
+/// Build a gradient mesh clipped to a sampled closed path with optional gradient transform.
+pub fn gradient_path_mesh_with_transform(
+    points: &[egui::Pos2],
+    stops: &[(f32, egui::Color32)],
+    angle_deg: f32,
+    radial: bool,
+    geometry: GradientPathGeometry,
+) -> Option<egui::Shape> {
+    if points.len() < 3 || stops.is_empty() {
+        return None;
+    }
+
+    let mut polygon = points.to_vec();
+    if polygon.len() > 3 && polygon.first() == polygon.last() {
+        polygon.pop();
+    }
+    if polygon.len() < 3 {
+        return None;
+    }
+
+    let inverse_transform = geometry.transform.and_then(|t| t.inverse());
+    let sample_point =
+        |point: egui::Pos2| inverse_transform.map(|t| t.apply(point)).unwrap_or(point);
+    let sample_polygon: Vec<egui::Pos2> = polygon.iter().copied().map(sample_point).collect();
+
+    let display_bounds = bounds_for_points(&polygon);
+    let sample_bounds = bounds_for_points(&sample_polygon);
+    let display_center = geometry.center.unwrap_or_else(|| display_bounds.center());
+    let display_focal_point = geometry.focal_point.unwrap_or(display_center);
+    let sample_center = geometry
+        .center
+        .map(sample_point)
+        .unwrap_or_else(|| sample_bounds.center());
+    let sample_focal_point = geometry
+        .focal_point
+        .map(sample_point)
+        .unwrap_or(sample_center);
+    let angle = angle_deg.to_radians();
+    let dir = egui::vec2(angle.cos(), angle.sin());
+    let projections: Vec<f32> = sample_polygon
+        .iter()
+        .map(|p| p.to_vec2().dot(dir))
+        .collect();
+    let min_proj = projections.iter().copied().fold(f32::INFINITY, f32::min);
+    let max_proj = projections
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
+    let proj_span = (max_proj - min_proj).max(0.001);
+    let max_radius = geometry
+        .radius
+        .unwrap_or_else(|| {
+            polygon
+                .iter()
+                .map(|p| (sample_point(*p) - sample_center).length())
+                .fold(0.0f32, f32::max)
+        })
+        .max(0.001);
+    let indices = triangulate_polygon(&polygon)?;
+
+    let mut mesh = egui::epaint::Mesh::default();
+    if radial {
+        for triangle in indices.chunks_exact(3) {
+            let a = polygon[triangle[0] as usize];
+            let b = polygon[triangle[1] as usize];
+            let c = polygon[triangle[2] as usize];
+            let inner = if point_in_triangle(display_focal_point, a, b, c) {
+                display_focal_point
+            } else if point_in_triangle(display_center, a, b, c) {
+                display_center
+            } else {
+                egui::pos2((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0)
+            };
+            let base = mesh.vertices.len() as u32;
+            for point in [a, b, c, inner] {
+                mesh.vertices.push(egui::epaint::Vertex {
+                    pos: point,
+                    uv: egui::epaint::WHITE_UV,
+                    color: sample_gradient_color(
+                        stops,
+                        radial_gradient_t(
+                            sample_point(point),
+                            sample_center,
+                            sample_focal_point,
+                            max_radius,
+                        ),
+                    ),
+                });
+            }
+            mesh.indices.extend_from_slice(&[
+                base,
+                base + 1,
+                base + 3,
+                base + 1,
+                base + 2,
+                base + 3,
+                base + 2,
+                base,
+                base + 3,
+            ]);
+        }
+        return Some(egui::Shape::mesh(mesh));
+    }
+
+    for (idx, point) in polygon.iter().enumerate() {
+        let t = (projections[idx] - min_proj) / proj_span;
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: *point,
+            uv: egui::epaint::WHITE_UV,
+            color: sample_gradient_color(stops, t),
+        });
+    }
+    mesh.indices = indices;
+    Some(egui::Shape::mesh(mesh))
+}
+
+fn bounds_for_points(points: &[egui::Pos2]) -> egui::Rect {
+    let mut min = points[0];
+    let mut max = points[0];
+    for point in points.iter().skip(1) {
+        min.x = min.x.min(point.x);
+        min.y = min.y.min(point.y);
+        max.x = max.x.max(point.x);
+        max.y = max.y.max(point.y);
+    }
+    egui::Rect::from_min_max(min, max)
+}
+
+fn triangulate_polygon(points: &[egui::Pos2]) -> Option<Vec<u32>> {
+    if points.len() < 3 {
+        return None;
+    }
+    let ccw = signed_area(points) > 0.0;
+    let mut remaining: Vec<usize> = (0..points.len()).collect();
+    let mut indices = Vec::with_capacity((points.len() - 2) * 3);
+    let mut guard = 0usize;
+    while remaining.len() > 3 && guard < points.len() * points.len() {
+        guard += 1;
+        let mut clipped = false;
+        for i in 0..remaining.len() {
+            let prev = remaining[(i + remaining.len() - 1) % remaining.len()];
+            let curr = remaining[i];
+            let next = remaining[(i + 1) % remaining.len()];
+            if !is_convex(points[prev], points[curr], points[next], ccw) {
+                continue;
+            }
+            let contains_point = remaining.iter().any(|&idx| {
+                idx != prev
+                    && idx != curr
+                    && idx != next
+                    && point_in_triangle(points[idx], points[prev], points[curr], points[next])
+            });
+            if contains_point {
+                continue;
+            }
+            if ccw {
+                indices.extend_from_slice(&[prev as u32, curr as u32, next as u32]);
+            } else {
+                indices.extend_from_slice(&[prev as u32, next as u32, curr as u32]);
+            }
+            remaining.remove(i);
+            clipped = true;
+            break;
+        }
+        if !clipped {
+            return None;
+        }
+    }
+    if remaining.len() == 3 {
+        if ccw {
+            indices.extend_from_slice(&[
+                remaining[0] as u32,
+                remaining[1] as u32,
+                remaining[2] as u32,
+            ]);
+        } else {
+            indices.extend_from_slice(&[
+                remaining[0] as u32,
+                remaining[2] as u32,
+                remaining[1] as u32,
+            ]);
+        }
+    }
+    Some(indices)
+}
+
+fn signed_area(points: &[egui::Pos2]) -> f32 {
+    points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .take(points.len())
+        .map(|(a, b)| a.x * b.y - b.x * a.y)
+        .sum::<f32>()
+        * 0.5
+}
+
+fn is_convex(a: egui::Pos2, b: egui::Pos2, c: egui::Pos2, ccw: bool) -> bool {
+    let cross = cross2(b - a, c - b);
+    if ccw {
+        cross > 0.0
+    } else {
+        cross < 0.0
+    }
+}
+
+fn point_in_triangle(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2, c: egui::Pos2) -> bool {
+    let area = |p1: egui::Pos2, p2: egui::Pos2, p3: egui::Pos2| cross2(p2 - p1, p3 - p1);
+    let d1 = area(p, a, b);
+    let d2 = area(p, b, c);
+    let d3 = area(p, c, a);
+    let has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+    let has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+    !(has_neg && has_pos)
+}
+
+fn cross2(a: egui::Vec2, b: egui::Vec2) -> f32 {
+    a.x * b.y - a.y * b.x
+}
+
+fn radial_gradient_t(
+    point: egui::Pos2,
+    center: egui::Pos2,
+    focal_point: egui::Pos2,
+    radius: f32,
+) -> f32 {
+    let sample = point - focal_point;
+    let sample_distance = sample.length();
+    if sample_distance <= 0.001 {
+        return 0.0;
+    }
+
+    let direction = sample / sample_distance;
+    let focal_to_center = focal_point - center;
+    let b = focal_to_center.dot(direction);
+    let c = focal_to_center.dot(focal_to_center) - radius * radius;
+    let discriminant = b * b - c;
+    if discriminant <= 0.0 {
+        return sample_distance / radius.max(0.001);
+    }
+
+    let outer_distance = -b + discriminant.sqrt();
+    sample_distance / outer_distance.max(0.001)
+}
+
+fn sample_gradient_color(stops: &[(f32, egui::Color32)], t: f32) -> egui::Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let mut sorted = stops.to_vec();
+    sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
+    if t <= sorted[0].0 {
+        return sorted[0].1;
+    }
+    for pair in sorted.windows(2) {
+        let (a_pos, a_color) = pair[0];
+        let (b_pos, b_color) = pair[1];
+        if t <= b_pos {
+            let span = (b_pos - a_pos).max(0.001);
+            let local = ((t - a_pos) / span).clamp(0.0, 1.0);
+            let [ar, ag, ab, aa] = a_color.to_srgba_unmultiplied();
+            let [br, bg, bb, ba] = b_color.to_srgba_unmultiplied();
+            let lerp = |x: u8, y: u8| x as f32 + (y as f32 - x as f32) * local;
+            return egui::Color32::from_rgba_unmultiplied(
+                lerp(ar, br).round() as u8,
+                lerp(ag, bg).round() as u8,
+                lerp(ab, bb).round() as u8,
+                lerp(aa, ba).round() as u8,
+            );
+        }
+    }
+    sorted.last().map(|(_, color)| *color).unwrap_or_default()
+}
+
+/// Build a bilinear gradient mesh patch as an `egui::Shape::Mesh`.
+///
+/// This is the code-output primitive for Illustrator-style gradient mesh cells. The corner order is
+/// top-left, top-right, bottom-right, bottom-left. Complex Illustrator meshes should be emitted as a
+/// sequence of these patches, keeping the call immediate-mode and avoiding raster snapshots.
+pub fn mesh_gradient_patch(
+    corners: [egui::Pos2; 4],
+    colors: [egui::Color32; 4],
+    subdivisions: usize,
+) -> egui::Shape {
+    use egui::epaint::Mesh;
+
+    let subdivisions = subdivisions.clamp(1, 64);
+    let stride = subdivisions + 1;
+    let mut mesh = Mesh::default();
+
+    for y in 0..=subdivisions {
+        let v = y as f32 / subdivisions as f32;
+        for x in 0..=subdivisions {
+            let u = x as f32 / subdivisions as f32;
+            mesh.colored_vertex(bilerp_pos(corners, u, v), bilerp_color(colors, u, v));
+        }
+    }
+
+    for y in 0..subdivisions {
+        for x in 0..subdivisions {
+            let a = (y * stride + x) as u32;
+            let b = a + 1;
+            let c = ((y + 1) * stride + x) as u32;
+            let d = c + 1;
+            mesh.add_triangle(a, b, c);
+            mesh.add_triangle(b, d, c);
+        }
+    }
+
+    egui::Shape::Mesh(mesh.into())
+}
+
+/// Build an editable procedural pattern fill clipped to a sampled path.
+///
+/// Illustrator pattern swatch internals are not exposed consistently through CEP/UXP, so exporters
+/// pass the swatch name as a stable seed and keep the result as vector shapes instead of rasterizing
+/// the artboard. The returned shapes are deterministic, editable, and clipped by point sampling to
+/// the provided polygon.
+pub fn pattern_fill_path(
+    points: &[egui::Pos2],
+    seed: u32,
+    foreground: egui::Color32,
+    background: egui::Color32,
+    cell_size: f32,
+    mark_size: f32,
+) -> Vec<egui::Shape> {
+    if points.len() < 3 {
+        return Vec::new();
+    }
+
+    let mut polygon = points.to_vec();
+    if polygon.len() > 3 && polygon.first() == polygon.last() {
+        polygon.pop();
+    }
+    if polygon.len() < 3 {
+        return Vec::new();
+    }
+
+    let bounds = bounds_for_points(&polygon);
+    if bounds.is_negative() || bounds.width() <= 0.0 || bounds.height() <= 0.0 {
+        return Vec::new();
+    }
+
+    let cell_size = cell_size.max(2.0);
+    let mark_size = mark_size.clamp(0.5, cell_size * 0.45);
+    let stroke = Stroke::new(mark_size.max(0.5), foreground);
+    let cols = (bounds.width() / cell_size).ceil() as u32 + 1;
+    let rows = (bounds.height() / cell_size).ceil() as u32 + 1;
+    let mut shapes = Vec::with_capacity((cols * rows) as usize + 1);
+
+    if background != egui::Color32::TRANSPARENT {
+        shapes.push(egui::Shape::Path(PathShape {
+            points: polygon.clone(),
+            closed: true,
+            fill: background,
+            stroke: PathStroke::NONE,
+        }));
+    }
+
+    for row in 0..rows {
+        for col in 0..cols {
+            let jitter = hash_noise(seed, col, row) as f32 / 255.0 - 0.5;
+            let center = egui::pos2(
+                bounds.min.x + (col as f32 + 0.5 + jitter * 0.18) * cell_size,
+                bounds.min.y + (row as f32 + 0.5 - jitter * 0.18) * cell_size,
+            );
+            if !point_in_polygon(center, &polygon) {
+                continue;
+            }
+
+            let half = cell_size * 0.28;
+            match (seed.wrapping_add(row).wrapping_add(col)) % 3 {
+                0 => {
+                    let a = center + egui::vec2(-half, -half);
+                    let b = center + egui::vec2(half, half);
+                    if point_in_polygon(a, &polygon) && point_in_polygon(b, &polygon) {
+                        shapes.push(egui::Shape::line_segment([a, b], stroke));
+                    }
+                }
+                1 => {
+                    let a = center + egui::vec2(-half, half);
+                    let b = center + egui::vec2(half, -half);
+                    if point_in_polygon(a, &polygon) && point_in_polygon(b, &polygon) {
+                        shapes.push(egui::Shape::line_segment([a, b], stroke));
+                    }
+                }
+                _ => {
+                    let radius = mark_size.max(1.0);
+                    let inside = [
+                        center + egui::vec2(radius, 0.0),
+                        center + egui::vec2(-radius, 0.0),
+                        center + egui::vec2(0.0, radius),
+                        center + egui::vec2(0.0, -radius),
+                    ]
+                    .into_iter()
+                    .all(|point| point_in_polygon(point, &polygon));
+                    if inside {
+                        shapes.push(egui::Shape::circle_filled(center, radius, foreground));
+                    }
+                }
+            }
+        }
+    }
+
+    shapes
+}
+
+fn bilerp_pos(corners: [egui::Pos2; 4], u: f32, v: f32) -> egui::Pos2 {
+    let top = egui::pos2(
+        corners[0].x + (corners[1].x - corners[0].x) * u,
+        corners[0].y + (corners[1].y - corners[0].y) * u,
+    );
+    let bottom = egui::pos2(
+        corners[3].x + (corners[2].x - corners[3].x) * u,
+        corners[3].y + (corners[2].y - corners[3].y) * u,
+    );
+    egui::pos2(
+        top.x + (bottom.x - top.x) * v,
+        top.y + (bottom.y - top.y) * v,
+    )
+}
+
+fn bilerp_color(colors: [egui::Color32; 4], u: f32, v: f32) -> egui::Color32 {
+    let [tl, tr, br, bl] = colors.map(|c| c.to_srgba_unmultiplied());
+    let channel = |idx: usize| {
+        let top = tl[idx] as f32 + (tr[idx] as f32 - tl[idx] as f32) * u;
+        let bottom = bl[idx] as f32 + (br[idx] as f32 - bl[idx] as f32) * u;
+        (top + (bottom - top) * v).round().clamp(0.0, 255.0) as u8
+    };
+    egui::Color32::from_rgba_unmultiplied(channel(0), channel(1), channel(2), channel(3))
+}
+
+/// Deterministic procedural noise overlay for code-only Illustrator grain/noise effects.
+///
+/// This emits tiny translucent rectangles instead of loading a raster texture. It is intended as
+/// the CPU/immediate-mode fallback for Illustrator appearance stacks; GPU builds can replace the
+/// same semantic primitive with a shader pass.
+pub fn noise_rect(rect: egui::Rect, seed: u32, cell_size: f32, opacity: f32) -> Vec<egui::Shape> {
+    let cell_size = cell_size.max(1.0);
+    let opacity = opacity.clamp(0.0, 1.0);
+    if rect.is_negative() || opacity <= 0.0 {
+        return Vec::new();
+    }
+
+    let cols = (rect.width() / cell_size).ceil().max(1.0) as u32;
+    let rows = (rect.height() / cell_size).ceil().max(1.0) as u32;
+    let mut shapes = Vec::with_capacity((cols * rows) as usize);
+
+    for row in 0..rows {
+        for col in 0..cols {
+            let x = rect.min.x + col as f32 * cell_size;
+            let y = rect.min.y + row as f32 * cell_size;
+            let r = egui::Rect::from_min_max(
+                egui::pos2(x, y),
+                egui::pos2(
+                    (x + cell_size).min(rect.max.x),
+                    (y + cell_size).min(rect.max.y),
+                ),
+            );
+            let value = hash_noise(seed, col, row);
+            let alpha = (value as f32 / 255.0 * opacity * 255.0).round() as u8;
+            shapes.push(egui::Shape::rect_filled(
+                r,
+                0.0,
+                egui::Color32::from_white_alpha(alpha),
+            ));
+        }
+    }
+
+    shapes
+}
+
+fn hash_noise(seed: u32, x: u32, y: u32) -> u8 {
+    let mut n = seed ^ x.wrapping_mul(0x9E37_79B9) ^ y.wrapping_mul(0x85EB_CA6B);
+    n ^= n >> 16;
+    n = n.wrapping_mul(0x7FEB_352D);
+    n ^= n >> 15;
+    n = n.wrapping_mul(0x846C_A68B);
+    n ^= n >> 16;
+    (n & 0xFF) as u8
 }
 
 /// Convert RGB (0.0–1.0) to HSL (hue 0.0–360.0, saturation 0.0–1.0, lightness 0.0–1.0).
@@ -838,6 +1454,109 @@ pub fn radial_gradient_rect(
     egui::Shape::Mesh(std::sync::Arc::new(mesh))
 }
 
+/// Multi-stop radial gradient clipped to a rectangle (elliptical).
+///
+/// Unlike [`radial_gradient_rect`], this preserves all Illustrator radial-gradient stops by
+/// emitting concentric mesh rings. Stop positions are clamped to `0.0..=1.0`; missing stops produce
+/// [`egui::Shape::Noop`].
+pub fn radial_gradient_rect_stops(
+    rect: egui::Rect,
+    stops: &[(f32, egui::Color32)],
+    segments: u32,
+) -> egui::Shape {
+    use egui::epaint::Mesh;
+
+    if stops.is_empty() {
+        return egui::Shape::Noop;
+    }
+
+    let mut stops = stops.to_vec();
+    stops.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    for (pos, _) in &mut stops {
+        *pos = pos.clamp(0.0, 1.0);
+    }
+
+    let ring_count = stops.len().max(2);
+    let segments = segments.max(8);
+    let center = rect.center();
+    let rx = rect.width() * 0.5;
+    let ry = rect.height() * 0.5;
+    let mut mesh = Mesh::default();
+
+    for ring in 0..ring_count {
+        let t = if ring_count == 1 {
+            0.0
+        } else {
+            ring as f32 / (ring_count - 1) as f32
+        };
+        let color = sample_stops(&stops, t);
+
+        if ring == 0 {
+            mesh.colored_vertex(center, color);
+        } else {
+            for i in 0..=segments {
+                let angle = (i as f32 / segments as f32) * std::f32::consts::TAU;
+                mesh.colored_vertex(
+                    center + egui::vec2(angle.cos() * rx * t, angle.sin() * ry * t),
+                    color,
+                );
+            }
+        }
+    }
+
+    // Center fan.
+    for i in 0..segments {
+        mesh.add_triangle(0, i + 1, i + 2);
+    }
+
+    // Ring strips.
+    let ring_stride = segments + 1;
+    for ring in 1..(ring_count - 1) as u32 {
+        let inner_start = 1 + (ring - 1) * ring_stride;
+        let outer_start = 1 + ring * ring_stride;
+        for i in 0..segments {
+            let a = inner_start + i;
+            let b = inner_start + i + 1;
+            let c = outer_start + i;
+            let d = outer_start + i + 1;
+            mesh.add_triangle(a, b, c);
+            mesh.add_triangle(b, d, c);
+        }
+    }
+
+    egui::Shape::Mesh(std::sync::Arc::new(mesh))
+}
+
+fn sample_stops(stops: &[(f32, egui::Color32)], t: f32) -> egui::Color32 {
+    let t = t.clamp(0.0, 1.0);
+    if stops.len() == 1 || t <= stops[0].0 {
+        return stops[0].1;
+    }
+    for pair in stops.windows(2) {
+        let (a_t, a) = pair[0];
+        let (b_t, b) = pair[1];
+        if t <= b_t {
+            let local = if (b_t - a_t).abs() < f32::EPSILON {
+                0.0
+            } else {
+                (t - a_t) / (b_t - a_t)
+            };
+            return lerp_color(a, b, local);
+        }
+    }
+    stops
+        .last()
+        .map(|(_, c)| *c)
+        .unwrap_or(egui::Color32::TRANSPARENT)
+}
+
+fn lerp_color(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
+    let a = a.to_srgba_unmultiplied();
+    let b = b.to_srgba_unmultiplied();
+    let channel = |idx: usize| (a[idx] as f32 + (b[idx] as f32 - a[idx] as f32) * t).round() as u8;
+    egui::Color32::from_rgba_unmultiplied(channel(0), channel(1), channel(2), channel(3))
+}
+
 // ─── Scan Lines & Overlays ───────────────────────────────────────────────────
 
 /// Render a CRT-style scan line overlay over a rect.
@@ -960,35 +1679,34 @@ impl RichStroke {
 
 /// Render a path with a rich stroke (supports dashes).
 pub fn dashed_path(painter: &egui::Painter, points: &[Pos2], stroke: &RichStroke) {
+    for shape in dashed_path_shapes(points, stroke) {
+        painter.add(shape);
+    }
+}
+
+pub fn dashed_path_shapes(points: &[Pos2], stroke: &RichStroke) -> Vec<egui::Shape> {
+    let mut shapes = Vec::new();
     if points.len() < 2 {
-        return;
+        return shapes;
     }
     match &stroke.dash {
         None => {
-            // Solid stroke — use egui's native line
-            for i in 0..points.len() - 1 {
-                painter.line_segment(
-                    [points[i], points[i + 1]],
-                    Stroke::new(stroke.width, stroke.color),
-                );
-            }
+            draw_dash(&mut shapes, points, stroke);
         }
         Some(pattern) => {
-            // Dashed stroke — walk the path, emit segments
             let total_len: f32 = points.windows(2).map(|w| (w[1] - w[0]).length()).sum();
             if total_len <= 0.0 {
-                return;
+                return shapes;
             }
             let cycle_len: f32 = pattern.dashes.iter().sum();
             if cycle_len <= 0.0 {
-                return;
+                return shapes;
             }
 
             let mut dist = pattern.offset % cycle_len;
             let mut phase = 0usize;
             let mut drawing = true;
 
-            // Advance to correct phase based on initial dist
             let mut d = dist;
             while d >= pattern.dashes[phase] {
                 d -= pattern.dashes[phase];
@@ -997,8 +1715,12 @@ pub fn dashed_path(painter: &egui::Painter, points: &[Pos2], stroke: &RichStroke
             }
             dist = d;
 
-            let mut seg_start: Option<Pos2> = None;
+            let mut current_dash = Vec::new();
             let mut current_pos = points[0];
+
+            if drawing {
+                current_dash.push(current_pos);
+            }
 
             for i in 0..points.len() - 1 {
                 let seg_vec = points[i + 1] - points[i];
@@ -1014,50 +1736,141 @@ pub fn dashed_path(painter: &egui::Painter, points: &[Pos2], stroke: &RichStroke
                     let step = remaining_in_phase.min(seg_len - walked);
                     let next_pos = points[i] + seg_dir * (walked + step);
 
-                    if drawing {
-                        if seg_start.is_none() {
-                            seg_start = Some(current_pos);
-                        }
-                    } else if let Some(start) = seg_start.take() {
-                        painter.line_segment(
-                            [start, current_pos],
-                            Stroke::new(stroke.width, stroke.color),
-                        );
-                    }
-
                     current_pos = next_pos;
                     walked += step;
                     dist += step;
 
                     if dist >= pattern.dashes[phase] {
                         if drawing {
-                            if let Some(start) = seg_start.take() {
-                                painter.line_segment(
-                                    [start, current_pos],
-                                    Stroke::new(stroke.width, stroke.color),
-                                );
-                            }
+                            current_dash.push(current_pos);
+                            draw_dash(&mut shapes, &current_dash, stroke);
+                            current_dash.clear();
                         }
                         dist = 0.0;
                         phase = (phase + 1) % pattern.dashes.len();
                         drawing = !drawing;
+                        if drawing {
+                            current_dash.push(current_pos);
+                        }
+                    } else if walked >= seg_len && drawing {
+                        current_dash.push(current_pos);
                     }
                 }
             }
-            // Emit any remaining dash
-            if drawing {
-                if let Some(start) = seg_start {
-                    painter.line_segment(
-                        [start, current_pos],
-                        Stroke::new(stroke.width, stroke.color),
-                    );
-                }
+            if drawing && current_dash.len() > 1 {
+                draw_dash(&mut shapes, &current_dash, stroke);
             }
+        }
+    }
+    shapes
+}
+
+fn draw_dash(shapes: &mut Vec<egui::Shape>, dash_points: &[Pos2], stroke: &RichStroke) {
+    if dash_points.len() < 2 {
+        return;
+    }
+    if stroke.join == StrokeJoin::Bevel && dash_points.len() > 2 {
+        for pair in dash_points.windows(2) {
+            shapes.push(egui::Shape::line_segment(
+                [pair[0], pair[1]],
+                Stroke::new(stroke.width, stroke.color),
+            ));
+        }
+    } else {
+        shapes.push(egui::Shape::line(
+            dash_points.to_vec(),
+            Stroke::new(stroke.width, stroke.color),
+        ));
+    }
+
+    if stroke.cap == StrokeCap::Round {
+        shapes.push(egui::Shape::circle_filled(
+            dash_points[0],
+            stroke.width * 0.5,
+            stroke.color,
+        ));
+        shapes.push(egui::Shape::circle_filled(
+            *dash_points.last().unwrap(),
+            stroke.width * 0.5,
+            stroke.color,
+        ));
+    } else if stroke.cap == StrokeCap::Square {
+        let d0 = dash_points[1] - dash_points[0];
+        let len0 = d0.length();
+        if len0 > 0.0 {
+            let dir0 = d0 / len0;
+            let p0 = dash_points[0] - dir0 * (stroke.width * 0.5);
+            shapes.push(egui::Shape::line_segment(
+                [p0, dash_points[0]],
+                Stroke::new(stroke.width, stroke.color),
+            ));
+        }
+        let n = dash_points.len();
+        let d1 = dash_points[n - 1] - dash_points[n - 2];
+        let len1 = d1.length();
+        if len1 > 0.0 {
+            let dir1 = d1 / len1;
+            let p1 = dash_points[n - 1] + dir1 * (stroke.width * 0.5);
+            shapes.push(egui::Shape::line_segment(
+                [dash_points[n - 1], p1],
+                Stroke::new(stroke.width, stroke.color),
+            ));
+        }
+    }
+
+    if stroke.join == StrokeJoin::Round {
+        for &p in &dash_points[1..dash_points.len() - 1] {
+            shapes.push(egui::Shape::circle_filled(
+                p,
+                stroke.width * 0.5,
+                stroke.color,
+            ));
         }
     }
 }
 
 // ─── 2D Transform ─────────────────────────────────────────────────────────────
+
+pub fn rounded_rect_path(rect: egui::Rect, rounding: f32) -> Vec<egui::Pos2> {
+    let mut points = Vec::new();
+    let r = rounding.min(rect.width() * 0.5).min(rect.height() * 0.5);
+    if r <= 0.0 {
+        return vec![
+            rect.min,
+            egui::pos2(rect.max.x, rect.min.y),
+            rect.max,
+            egui::pos2(rect.min.x, rect.max.y),
+        ];
+    }
+    let n = adaptive_arc_segments(r);
+    let c = egui::pos2(rect.max.x - r, rect.min.y + r);
+    for i in 0..=n {
+        let a = std::f32::consts::FRAC_PI_2 * (i as f32 / n as f32);
+        points.push(c + egui::vec2(a.sin() * r, -a.cos() * r));
+    }
+    let c = egui::pos2(rect.max.x - r, rect.max.y - r);
+    for i in 0..=n {
+        let a = std::f32::consts::FRAC_PI_2 * (i as f32 / n as f32);
+        points.push(c + egui::vec2(a.cos() * r, a.sin() * r));
+    }
+    let c = egui::pos2(rect.min.x + r, rect.max.y - r);
+    for i in 0..=n {
+        let a = std::f32::consts::FRAC_PI_2 * (i as f32 / n as f32);
+        points.push(c + egui::vec2(-a.sin() * r, a.cos() * r));
+    }
+    let c = egui::pos2(rect.min.x + r, rect.min.y + r);
+    for i in 0..=n {
+        let a = std::f32::consts::FRAC_PI_2 * (i as f32 / n as f32);
+        points.push(c + egui::vec2(-a.cos() * r, -a.sin() * r));
+    }
+    points
+}
+
+fn adaptive_arc_segments(radius: f32) -> usize {
+    ((radius * std::f32::consts::FRAC_PI_2) / 3.0)
+        .ceil()
+        .clamp(8.0, 32.0) as usize
+}
 
 /// 2D affine transform (SVG matrix convention: [a, b, c, d, e, f]).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1140,6 +1953,23 @@ impl Transform2D {
         }
     }
 
+    /// Invert the transform, returning `None` for singular matrices.
+    pub fn inverse(self) -> Option<Self> {
+        let det = self.a * self.d - self.b * self.c;
+        if det.abs() <= 0.000001 {
+            return None;
+        }
+        let inv_det = 1.0 / det;
+        Some(Self {
+            a: self.d * inv_det,
+            b: -self.b * inv_det,
+            c: -self.c * inv_det,
+            d: self.a * inv_det,
+            e: (self.c * self.f - self.d * self.e) * inv_det,
+            f: (self.b * self.e - self.a * self.f) * inv_det,
+        })
+    }
+
     /// Apply transform to a point.
     pub fn apply(&self, p: Pos2) -> Pos2 {
         Pos2::new(
@@ -1213,6 +2043,13 @@ pub fn transform_shape(shape: Shape, t: &Transform2D) -> Shape {
             points: [t.apply(a), t.apply(b)],
             stroke,
         },
+        Shape::Mesh(mut m) => {
+            let m_mut = std::sync::Arc::make_mut(&mut m);
+            for v in &mut m_mut.vertices {
+                v.pos = t.apply(v.pos);
+            }
+            Shape::Mesh(m)
+        }
         other => other,
     }
 }
@@ -1225,7 +2062,7 @@ pub fn transform_shape(shape: Shape, t: &Transform2D) -> Shape {
 /// true rounded clipping isn't possible. The `rounding` parameter is accepted
 /// for API compatibility but has no effect on the clipping shape. Content is
 /// clipped to the rectangular intersection of the clip rect and the given rect.
-pub fn clipped_rounded_rect(
+pub fn clipped_to_bounding_rect(
     ui: &mut egui::Ui,
     rect: Rect,
     _rounding: f32,
@@ -1237,8 +2074,17 @@ pub fn clipped_rounded_rect(
     content(&mut child_ui);
 }
 
+pub fn clipped_rounded_rect(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    rounding: f32,
+    content: impl FnOnce(&mut egui::Ui),
+) {
+    clipped_to_bounding_rect(ui, rect, rounding, content)
+}
+
 // ---------------------------------------------------------------------------
-// ClipScope — clip children to arbitrary shapes
+// ClipScope — clip children to shape bounds/approximations
 // ---------------------------------------------------------------------------
 
 /// Shape to clip content to.
@@ -1274,16 +2120,16 @@ impl ClipShape {
 /// # Example
 /// ```rust,ignore
 /// // Clip an image to a circle (approximate — clips to bounding square)
-/// clip_to(ui, ClipShape::Circle(center, 32.0), |ui| {
+/// clip_to_bounding_rect(ui, ClipShape::Circle(center, 32.0), |ui| {
 ///     ui.image(texture_id, Vec2::splat(64.0));
 /// });
 ///
 /// // Clip content to a rounded card
-/// clip_to(ui, ClipShape::RoundedRect(card_rect, CornerRadius::same(8)), |ui| {
+/// clip_to_bounding_rect(ui, ClipShape::RoundedRect(card_rect, CornerRadius::same(8)), |ui| {
 ///     ui.label("Clipped content");
 /// });
 /// ```
-pub fn clip_to(
+pub fn clip_to_bounding_rect(
     ui: &mut egui::Ui,
     shape: ClipShape,
     content: impl FnOnce(&mut egui::Ui),
@@ -1295,6 +2141,14 @@ pub fn clip_to(
     let response = ui.scope(content).response;
     ui.set_clip_rect(old_clip);
     response
+}
+
+pub fn clip_to(
+    ui: &mut egui::Ui,
+    shape: ClipShape,
+    content: impl FnOnce(&mut egui::Ui),
+) -> egui::Response {
+    clip_to_bounding_rect(ui, shape, content)
 }
 
 // ---------------------------------------------------------------------------
@@ -1407,17 +2261,22 @@ pub fn zstack_layers(ui: &mut egui::Ui, layers: Vec<LayerFn>) -> egui::Response 
 pub struct BlendLayer {
     /// Shapes to render in this layer.
     pub shapes: Vec<egui::Shape>,
+    /// Optional polygon masks applied to this layer before it is blended.
+    pub clip_polygons: Vec<Vec<egui::Pos2>>,
     /// Blend mode for compositing this layer over the layers below it.
     pub blend_mode: crate::codegen::BlendMode,
     /// Overall opacity of this layer (0.0–1.0).
     pub opacity: f32,
 }
 
+type RasterizedBlendGroup = (egui::Rect, [u32; 2], Vec<egui::Color32>, Vec<egui::Shape>);
+
 impl BlendLayer {
     /// Create a new blend layer with Normal blend mode and full opacity.
     pub fn new(shapes: Vec<egui::Shape>) -> Self {
         Self {
             shapes,
+            clip_polygons: Vec::new(),
             blend_mode: crate::codegen::BlendMode::Normal,
             opacity: 1.0,
         }
@@ -1434,106 +2293,907 @@ impl BlendLayer {
         self.opacity = opacity.clamp(0.0, 1.0);
         self
     }
+
+    /// Apply a polygon clip mask to this layer before compositing.
+    pub fn clip_polygon(mut self, polygon: Vec<egui::Pos2>) -> Self {
+        if polygon.len() >= 3 {
+            self.clip_polygons.push(polygon);
+        }
+        self
+    }
 }
 
-/// Composite multiple [`BlendLayer`]s using CPU-side blend math.
+/// Composite multiple [`BlendLayer`]s bottom-to-top using per-pixel blend math.
 ///
-/// Layers are composited bottom-to-top. For `Normal` blend mode at full opacity,
-/// shapes are painted directly. For other blend modes, shape fill/stroke colors
-/// are blended against the theme background color as an approximation.
-///
-/// # Limitations
-/// This implementation approximates blend modes by blending each shape's color
-/// against `ui.visuals().window_fill()`. It does **not** perform true per-pixel
-/// compositing against the actual rendered content beneath the shapes. For
-/// accurate Multiply/Screen/Overlay compositing, a `PaintCallback` with a custom
-/// wgpu fragment shader is required (planned for a future release).
-///
-/// For Normal blend mode at full opacity, behavior is exact.
+/// Solid rect, circle, and filled path shapes are rasterized into layer buffers,
+/// then composited with the same W3C/Illustrator-style blend equations exposed by
+/// [`blend_color`]. This preserves Multiply/Screen/Overlay/etc between supplied
+/// layers instead of blending against the theme background. Unsupported egui shape
+/// variants are ignored by the rasterizer and should be emitted as vector shapes
+/// outside the blend group by callers that need them.
 pub fn composite_layers(ui: &mut egui::Ui, layers: Vec<BlendLayer>) {
     if layers.is_empty() {
         return;
     }
-    for layer in layers {
-        let opacity = layer.opacity;
-        if (opacity - 1.0).abs() < 0.001 && layer.blend_mode == crate::codegen::BlendMode::Normal {
-            // Fast path: normal blend at full opacity
+    let Some((rect, size, pixels, unhandled)) = rasterize_composited_layers(&layers) else {
+        for layer in layers {
             for shape in layer.shapes {
                 ui.painter().add(shape);
             }
-        } else {
-            // Apply opacity to each shape's colors.
-            // Note: blend modes other than Normal are approximated by blending against
-            // the theme background color. Full per-pixel compositing against actual
-            // rendered content requires a PaintCallback + wgpu offscreen texture
-            // (planned for a future release).
-            let bg = ui.visuals().window_fill();
-            for shape in layer.shapes {
-                let blended = apply_blend_to_shape(shape, bg, &layer.blend_mode, opacity);
-                ui.painter().add(blended);
+        }
+        return;
+    };
+
+    let image = egui::ColorImage {
+        size: [size[0] as usize, size[1] as usize],
+        pixels,
+        source_size: egui::vec2(size[0] as f32, size[1] as f32),
+    };
+    let texture = ui.ctx().load_texture(
+        format!(
+            "__egui_expressive_composite_{:x}",
+            blend_layers_hash(&layers, &image.pixels)
+        ),
+        image,
+        egui::TextureOptions::LINEAR,
+    );
+    ui.painter().image(
+        texture.id(),
+        rect,
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        egui::Color32::WHITE,
+    );
+    for shape in unhandled {
+        ui.painter().add(shape);
+    }
+}
+
+/// Composite layers through an egui-wgpu [`PaintCallback`] when the `wgpu`
+/// feature is enabled. Call [`crate::init_gpu_effects`] once during app startup
+/// before using this path. Without `wgpu`, this falls back to [`composite_layers`].
+#[cfg(feature = "wgpu")]
+pub fn composite_layers_gpu(ui: &mut egui::Ui, layers: Vec<BlendLayer>) {
+    let Some((rect, size, pixels, unhandled)) = rasterize_composited_layers(&layers) else {
+        composite_layers(ui, layers);
+        return;
+    };
+    let rgba = pixels_to_rgba(&pixels);
+    let id = blend_layers_hash(&layers, &pixels);
+    let callback = egui_wgpu::Callback::new_paint_callback(
+        rect,
+        crate::gpu::GpuCompositeCallback::new(id, size, rgba),
+    );
+    ui.painter().add(egui::Shape::Callback(callback));
+    for shape in unhandled {
+        ui.painter().add(shape);
+    }
+}
+
+#[cfg(not(feature = "wgpu"))]
+pub fn composite_layers_gpu(ui: &mut egui::Ui, layers: Vec<BlendLayer>) {
+    composite_layers(ui, layers)
+}
+
+/// Composite layers and apply an arbitrary polygon mask before painting.
+///
+/// This is the vector-export friendly clipping path: supplied [`BlendLayer`]s are
+/// rasterized into a single per-pixel layer group, every pixel outside
+/// `clip_polygon` is made transparent, and the result is painted as one texture.
+/// With the `wgpu` feature enabled it is presented through the egui-wgpu callback
+/// pipeline; otherwise it uses egui's texture painter as a CPU fallback.
+pub fn clipped_layers_gpu(ui: &mut egui::Ui, clip_polygon: &[egui::Pos2], layers: Vec<BlendLayer>) {
+    if clip_polygon.len() < 3 {
+        composite_layers_gpu(ui, layers);
+        return;
+    }
+    let Some((rect, size, mut pixels, unhandled)) = rasterize_composited_layers(&layers) else {
+        return;
+    };
+    apply_polygon_alpha_mask(&mut pixels, size[0], size[1], rect.min, clip_polygon);
+
+    #[cfg(feature = "wgpu")]
+    {
+        let rgba = pixels_to_rgba(&pixels);
+        let id = blend_layers_hash(&layers, &pixels) ^ polygon_hash(clip_polygon);
+        let callback = egui_wgpu::Callback::new_paint_callback(
+            rect,
+            crate::gpu::GpuCompositeCallback::new(id, size, rgba),
+        );
+        ui.painter().add(egui::Shape::Callback(callback));
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    {
+        let image = egui::ColorImage {
+            size: [size[0] as usize, size[1] as usize],
+            pixels,
+            source_size: egui::vec2(size[0] as f32, size[1] as f32),
+        };
+        let texture = ui.ctx().load_texture(
+            format!(
+                "__egui_expressive_clipped_layers_{:x}_{:x}",
+                blend_layers_hash(&layers, &image.pixels),
+                polygon_hash(clip_polygon)
+            ),
+            image,
+            egui::TextureOptions::LINEAR,
+        );
+        ui.painter().image(
+            texture.id(),
+            rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
+
+    for shape in unhandled {
+        ui.painter().add(shape);
+    }
+}
+
+fn rasterize_composited_layers(layers: &[BlendLayer]) -> Option<RasterizedBlendGroup> {
+    let rect = layers_bounds(layers)?;
+    let width = (rect.width().ceil() as u32).clamp(1, 4096);
+    let height = (rect.height().ceil() as u32).clamp(1, 4096);
+    let mut composited = vec![egui::Color32::TRANSPARENT; (width * height) as usize];
+    let mut unhandled = Vec::new();
+
+    for layer in layers {
+        let mut layer_pixels = vec![egui::Color32::TRANSPARENT; composited.len()];
+        for shape in &layer.shapes {
+            rasterize_shape(
+                shape,
+                rect.min,
+                width,
+                height,
+                &mut layer_pixels,
+                &mut unhandled,
+            );
+        }
+        if !unhandled.is_empty() {
+            return None;
+        }
+        for polygon in &layer.clip_polygons {
+            apply_polygon_alpha_mask(&mut layer_pixels, width, height, rect.min, polygon);
+        }
+        for (dst, src) in composited.iter_mut().zip(layer_pixels) {
+            let src = color_with_opacity(src, layer.opacity);
+            if src == egui::Color32::TRANSPARENT {
+                continue;
+            }
+            *dst = blend_color(src, *dst, layer.blend_mode.clone());
+        }
+    }
+
+    Some((rect, [width, height], composited, unhandled))
+}
+
+fn layers_bounds(layers: &[BlendLayer]) -> Option<egui::Rect> {
+    layers
+        .iter()
+        .flat_map(|layer| layer.shapes.iter())
+        .filter_map(shape_bounds)
+        .reduce(|a, b| a.union(b))
+}
+
+fn shape_bounds(shape: &egui::Shape) -> Option<egui::Rect> {
+    match shape {
+        egui::Shape::Rect(r) => valid_bounds(r.visual_bounding_rect()),
+        egui::Shape::Circle(c) => valid_bounds(c.visual_bounding_rect()),
+        egui::Shape::Ellipse(e) => valid_bounds(e.visual_bounding_rect()),
+        egui::Shape::Path(p) => bounds_from_points(&p.points)
+            .map(|rect| rect.expand(path_stroke_outset(&p.stroke, p.closed))),
+        egui::Shape::LineSegment { points, stroke } => {
+            bounds_from_points(points).map(|r| r.expand(stroke.width.max(1.0) * 0.5))
+        }
+        egui::Shape::Mesh(mesh) => mesh
+            .vertices
+            .iter()
+            .map(|vertex| egui::Rect::from_min_max(vertex.pos, vertex.pos))
+            .reduce(|a, b| a.union(b)),
+        egui::Shape::Vec(shapes) => shapes
+            .iter()
+            .filter_map(shape_bounds)
+            .reduce(|a, b| a.union(b)),
+        _ => None,
+    }
+}
+
+fn valid_bounds(rect: egui::Rect) -> Option<egui::Rect> {
+    if rect.is_finite() && rect.is_positive() {
+        Some(rect)
+    } else {
+        None
+    }
+}
+
+fn path_stroke_outset(stroke: &egui::epaint::PathStroke, closed: bool) -> f32 {
+    if stroke.is_empty() {
+        return 0.0;
+    }
+    if !closed {
+        return stroke.width.max(1.0) * 0.5;
+    }
+    match stroke.kind {
+        egui::StrokeKind::Inside => 0.0,
+        egui::StrokeKind::Middle => stroke.width.max(1.0) * 0.5,
+        egui::StrokeKind::Outside => stroke.width.max(1.0),
+    }
+}
+
+fn bounds_from_points(points: &[egui::Pos2]) -> Option<egui::Rect> {
+    let first = points.first()?;
+    let mut min = *first;
+    let mut max = *first;
+    for p in &points[1..] {
+        min.x = min.x.min(p.x);
+        min.y = min.y.min(p.y);
+        max.x = max.x.max(p.x);
+        max.y = max.y.max(p.y);
+    }
+    Some(egui::Rect::from_min_max(min, max))
+}
+
+fn rasterize_shape(
+    shape: &egui::Shape,
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    pixels: &mut [egui::Color32],
+    unhandled: &mut Vec<egui::Shape>,
+) {
+    match shape {
+        egui::Shape::Rect(r) => {
+            fill_rect_shape_pixels(r, origin, width, height, pixels);
+            if r.stroke.width > 0.0 && r.stroke.color != egui::Color32::TRANSPARENT {
+                stroke_rect_shape_pixels(r, origin, width, height, pixels);
+            }
+        }
+        egui::Shape::Circle(c) => {
+            fill_circle_pixels(c.center, c.radius, origin, width, height, c.fill, pixels);
+            if c.stroke.width > 0.0 && c.stroke.color != egui::Color32::TRANSPARENT {
+                stroke_circle_pixels(
+                    c.center,
+                    c.radius,
+                    origin,
+                    width,
+                    height,
+                    c.stroke.width,
+                    c.stroke.color,
+                    pixels,
+                );
+            }
+        }
+        egui::Shape::Ellipse(e) => {
+            fill_ellipse_pixels(
+                e.center, e.radius, e.angle, origin, width, height, e.fill, pixels,
+            );
+            if e.stroke.width > 0.0 && e.stroke.color != egui::Color32::TRANSPARENT {
+                stroke_ellipse_pixels(
+                    e.center,
+                    e.radius,
+                    e.angle,
+                    origin,
+                    width,
+                    height,
+                    e.stroke.width,
+                    e.stroke.color,
+                    pixels,
+                );
+            }
+        }
+        egui::Shape::Path(p) if p.closed => {
+            fill_polygon_pixels(&p.points, origin, width, height, p.fill, pixels);
+            if let Some(color) = path_stroke_color(&p.stroke) {
+                stroke_polyline_pixels(
+                    &p.points,
+                    true,
+                    origin,
+                    width,
+                    height,
+                    p.stroke.width,
+                    color,
+                    pixels,
+                );
+            }
+        }
+        egui::Shape::Path(p) => {
+            if let Some(color) = path_stroke_color(&p.stroke) {
+                stroke_polyline_pixels(
+                    &p.points,
+                    false,
+                    origin,
+                    width,
+                    height,
+                    p.stroke.width,
+                    color,
+                    pixels,
+                );
+            }
+        }
+        egui::Shape::LineSegment { points, stroke } => {
+            stroke_line_pixels(
+                points[0],
+                points[1],
+                origin,
+                width,
+                height,
+                stroke.width,
+                stroke.color,
+                pixels,
+            );
+        }
+        egui::Shape::Mesh(mesh) => rasterize_mesh_pixels(mesh, origin, width, height, pixels),
+        egui::Shape::Vec(shapes) => {
+            for s in shapes {
+                rasterize_shape(s, origin, width, height, pixels, unhandled);
+            }
+        }
+        _ => {
+            unhandled.push(shape.clone());
+        }
+    }
+}
+
+fn path_stroke_color(stroke: &egui::epaint::PathStroke) -> Option<egui::Color32> {
+    if stroke.width <= 0.0 {
+        return None;
+    }
+    match stroke.color {
+        egui::epaint::ColorMode::Solid(color) if color != egui::Color32::TRANSPARENT => Some(color),
+        _ => None,
+    }
+}
+
+fn fill_rect_shape_pixels(
+    rect_shape: &egui::epaint::RectShape,
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    pixels: &mut [egui::Color32],
+) {
+    if rect_shape.fill == egui::Color32::TRANSPARENT {
+        return;
+    }
+    if rect_shape.corner_radius == egui::CornerRadius::ZERO && rect_shape.angle.abs() <= 0.0001 {
+        fill_rect_pixels(
+            rect_shape.rect,
+            origin,
+            width,
+            height,
+            rect_shape.fill,
+            pixels,
+        );
+        return;
+    }
+    let points =
+        rounded_rect_shape_path(rect_shape.rect, rect_shape.corner_radius, rect_shape.angle);
+    fill_polygon_pixels(&points, origin, width, height, rect_shape.fill, pixels);
+}
+
+fn stroke_rect_shape_pixels(
+    rect_shape: &egui::epaint::RectShape,
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    pixels: &mut [egui::Color32],
+) {
+    if rect_shape.stroke.is_empty() {
+        return;
+    }
+    let stroke_width = rect_shape.stroke.width.max(1.0);
+    let center_outset = rect_stroke_center_outset(rect_shape.stroke_kind, stroke_width);
+    let rect = rect_shape.rect.expand(center_outset);
+    if !rect.is_positive() {
+        return;
+    }
+    let radius = (rect_shape.corner_radius.average() + center_outset).max(0.0);
+    let mut points = rounded_rect_path(rect, radius);
+    if rect_shape.angle.abs() > 0.0001 {
+        let transform =
+            Transform2D::rotate_around(rect_shape.angle.to_degrees(), rect_shape.rect.center());
+        for point in &mut points {
+            *point = transform.apply(*point);
+        }
+    }
+    stroke_polyline_pixels(
+        &points,
+        true,
+        origin,
+        width,
+        height,
+        rect_shape.stroke.width,
+        rect_shape.stroke.color,
+        pixels,
+    );
+}
+
+fn rounded_rect_shape_path(
+    rect: egui::Rect,
+    corner_radius: egui::CornerRadius,
+    angle_rad: f32,
+) -> Vec<egui::Pos2> {
+    let mut points = rounded_rect_path(rect, corner_radius.average());
+    if angle_rad.abs() > 0.0001 {
+        let transform = Transform2D::rotate_around(angle_rad.to_degrees(), rect.center());
+        for point in &mut points {
+            *point = transform.apply(*point);
+        }
+    }
+    points
+}
+
+fn rect_stroke_center_outset(stroke_kind: egui::StrokeKind, stroke_width: f32) -> f32 {
+    match stroke_kind {
+        egui::StrokeKind::Inside => -stroke_width * 0.5,
+        egui::StrokeKind::Middle => 0.0,
+        egui::StrokeKind::Outside => stroke_width * 0.5,
+    }
+}
+
+fn fill_rect_pixels(
+    rect: egui::Rect,
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    color: egui::Color32,
+    pixels: &mut [egui::Color32],
+) {
+    if color == egui::Color32::TRANSPARENT {
+        return;
+    }
+    let x0 = (rect.min.x - origin.x).floor().max(0.0) as u32;
+    let y0 = (rect.min.y - origin.y).floor().max(0.0) as u32;
+    let x1 = (rect.max.x - origin.x).ceil().min(width as f32) as u32;
+    let y1 = (rect.max.y - origin.y).ceil().min(height as f32) as u32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            pixels[(y * width + x) as usize] = blend_color(
+                color,
+                pixels[(y * width + x) as usize],
+                crate::codegen::BlendMode::Normal,
+            );
+        }
+    }
+}
+
+fn fill_circle_pixels(
+    center: egui::Pos2,
+    radius: f32,
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    color: egui::Color32,
+    pixels: &mut [egui::Color32],
+) {
+    if color == egui::Color32::TRANSPARENT || radius <= 0.0 {
+        return;
+    }
+    let r2 = radius * radius;
+    let rect = egui::Rect::from_center_size(center, egui::vec2(radius * 2.0, radius * 2.0));
+    let x0 = (rect.min.x - origin.x).floor().max(0.0) as u32;
+    let y0 = (rect.min.y - origin.y).floor().max(0.0) as u32;
+    let x1 = (rect.max.x - origin.x).ceil().min(width as f32) as u32;
+    let y1 = (rect.max.y - origin.y).ceil().min(height as f32) as u32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let p = egui::pos2(origin.x + x as f32 + 0.5, origin.y + y as f32 + 0.5);
+            if p.distance_sq(center) <= r2 {
+                let idx = (y * width + x) as usize;
+                pixels[idx] = blend_color(color, pixels[idx], crate::codegen::BlendMode::Normal);
             }
         }
     }
 }
 
-/// Apply blend mode and opacity to a shape's colors.
-fn apply_blend_to_shape(
-    shape: egui::Shape,
-    bg: egui::Color32,
-    mode: &crate::codegen::BlendMode,
-    opacity: f32,
-) -> egui::Shape {
-    match shape {
-        egui::Shape::Rect(mut r) => {
-            r.fill = blend_and_fade(r.fill, bg, mode, opacity);
-            r.stroke.color = blend_and_fade(r.stroke.color, bg, mode, opacity);
-            egui::Shape::Rect(r)
+#[allow(clippy::too_many_arguments)]
+fn stroke_circle_pixels(
+    center: egui::Pos2,
+    radius: f32,
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    stroke_width: f32,
+    color: egui::Color32,
+    pixels: &mut [egui::Color32],
+) {
+    if color == egui::Color32::TRANSPARENT || radius <= 0.0 || stroke_width <= 0.0 {
+        return;
+    }
+    let half = stroke_width.max(1.0) * 0.5;
+    let outer = radius + half;
+    let inner = (radius - half).max(0.0);
+    let outer2 = outer * outer;
+    let inner2 = inner * inner;
+    let rect = egui::Rect::from_center_size(center, egui::vec2(outer * 2.0, outer * 2.0));
+    let x0 = (rect.min.x - origin.x).floor().max(0.0) as u32;
+    let y0 = (rect.min.y - origin.y).floor().max(0.0) as u32;
+    let x1 = (rect.max.x - origin.x).ceil().min(width as f32) as u32;
+    let y1 = (rect.max.y - origin.y).ceil().min(height as f32) as u32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let p = egui::pos2(origin.x + x as f32 + 0.5, origin.y + y as f32 + 0.5);
+            let d2 = p.distance_sq(center);
+            if d2 <= outer2 && d2 >= inner2 {
+                let idx = (y * width + x) as usize;
+                pixels[idx] = blend_color(color, pixels[idx], crate::codegen::BlendMode::Normal);
+            }
         }
-        egui::Shape::Circle(mut c) => {
-            c.fill = blend_and_fade(c.fill, bg, mode, opacity);
-            c.stroke.color = blend_and_fade(c.stroke.color, bg, mode, opacity);
-            egui::Shape::Circle(c)
-        }
-        egui::Shape::Path(mut p) => {
-            p.fill = blend_and_fade(p.fill, bg, mode, opacity);
-            p.stroke.color = match p.stroke.color {
-                egui::epaint::ColorMode::Solid(c) => {
-                    egui::epaint::ColorMode::Solid(blend_and_fade(c, bg, mode, opacity))
-                }
-                other => other,
-            };
-            egui::Shape::Path(p)
-        }
-        egui::Shape::Text(mut t) => {
-            t.fallback_color = blend_and_fade(t.fallback_color, bg, mode, opacity);
-            egui::Shape::Text(t)
-        }
-        egui::Shape::Vec(shapes) => egui::Shape::Vec(
-            shapes
-                .into_iter()
-                .map(|s| apply_blend_to_shape(s, bg, mode, opacity))
-                .collect(),
-        ),
-        other => other,
     }
 }
 
-/// Blend a foreground color against a background using the given blend mode and opacity.
-fn blend_and_fade(
-    fg: egui::Color32,
-    bg: egui::Color32,
-    mode: &crate::codegen::BlendMode,
-    opacity: f32,
-) -> egui::Color32 {
-    if fg == egui::Color32::TRANSPARENT {
-        return fg;
+#[allow(clippy::too_many_arguments)]
+fn fill_ellipse_pixels(
+    center: egui::Pos2,
+    radius: egui::Vec2,
+    angle: f32,
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    color: egui::Color32,
+    pixels: &mut [egui::Color32],
+) {
+    if color == egui::Color32::TRANSPARENT || radius.x <= 0.0 || radius.y <= 0.0 {
+        return;
     }
-    // Apply opacity to the foreground alpha
-    let [r, g, b, a] = fg.to_srgba_unmultiplied();
-    let faded_a = (a as f32 * opacity).clamp(0.0, 255.0) as u8;
-    let faded = egui::Color32::from_rgba_unmultiplied(r, g, b, faded_a);
-    // Apply blend mode
-    blend_color(faded, bg, mode.clone())
+    let Some(bounds) = ellipse_bounds(center, radius, angle, 0.0) else {
+        return;
+    };
+    let x0 = (bounds.min.x - origin.x).floor().max(0.0) as u32;
+    let y0 = (bounds.min.y - origin.y).floor().max(0.0) as u32;
+    let x1 = (bounds.max.x - origin.x).ceil().min(width as f32) as u32;
+    let y1 = (bounds.max.y - origin.y).ceil().min(height as f32) as u32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let p = egui::pos2(origin.x + x as f32 + 0.5, origin.y + y as f32 + 0.5);
+            if point_in_ellipse(p, center, radius, angle) {
+                let idx = (y * width + x) as usize;
+                pixels[idx] = blend_color(color, pixels[idx], crate::codegen::BlendMode::Normal);
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stroke_ellipse_pixels(
+    center: egui::Pos2,
+    radius: egui::Vec2,
+    angle: f32,
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    stroke_width: f32,
+    color: egui::Color32,
+    pixels: &mut [egui::Color32],
+) {
+    if color == egui::Color32::TRANSPARENT
+        || radius.x <= 0.0
+        || radius.y <= 0.0
+        || stroke_width <= 0.0
+    {
+        return;
+    }
+    let half = stroke_width.max(1.0) * 0.5;
+    let outer_radius = egui::vec2(radius.x + half, radius.y + half);
+    let inner_radius = egui::vec2((radius.x - half).max(0.0), (radius.y - half).max(0.0));
+    let Some(bounds) = ellipse_bounds(center, outer_radius, angle, 0.0) else {
+        return;
+    };
+    let x0 = (bounds.min.x - origin.x).floor().max(0.0) as u32;
+    let y0 = (bounds.min.y - origin.y).floor().max(0.0) as u32;
+    let x1 = (bounds.max.x - origin.x).ceil().min(width as f32) as u32;
+    let y1 = (bounds.max.y - origin.y).ceil().min(height as f32) as u32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let p = egui::pos2(origin.x + x as f32 + 0.5, origin.y + y as f32 + 0.5);
+            if point_in_ellipse(p, center, outer_radius, angle)
+                && !point_in_ellipse(p, center, inner_radius, angle)
+            {
+                let idx = (y * width + x) as usize;
+                pixels[idx] = blend_color(color, pixels[idx], crate::codegen::BlendMode::Normal);
+            }
+        }
+    }
+}
+
+fn ellipse_bounds(
+    center: egui::Pos2,
+    radius: egui::Vec2,
+    angle: f32,
+    outset: f32,
+) -> Option<egui::Rect> {
+    let rx = radius.x.abs() + outset;
+    let ry = radius.y.abs() + outset;
+    if rx <= 0.0 || ry <= 0.0 {
+        return None;
+    }
+    let mut points = Vec::with_capacity(64);
+    let (sin, cos) = angle.sin_cos();
+    for idx in 0..64 {
+        let theta = std::f32::consts::TAU * idx as f32 / 64.0;
+        let local = egui::vec2(theta.cos() * rx, theta.sin() * ry);
+        points.push(
+            center + egui::vec2(cos * local.x - sin * local.y, sin * local.x + cos * local.y),
+        );
+    }
+    bounds_from_points(&points)
+}
+
+fn point_in_ellipse(point: egui::Pos2, center: egui::Pos2, radius: egui::Vec2, angle: f32) -> bool {
+    let rx = radius.x.abs();
+    let ry = radius.y.abs();
+    if rx <= 0.0001 || ry <= 0.0001 {
+        return false;
+    }
+    let v = point - center;
+    let (sin, cos) = (-angle).sin_cos();
+    let local = egui::vec2(cos * v.x - sin * v.y, sin * v.x + cos * v.y);
+    let nx = local.x / rx;
+    let ny = local.y / ry;
+    nx * nx + ny * ny <= 1.0
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stroke_polyline_pixels(
+    points: &[egui::Pos2],
+    closed: bool,
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    stroke_width: f32,
+    color: egui::Color32,
+    pixels: &mut [egui::Color32],
+) {
+    if points.len() < 2 {
+        return;
+    }
+    for segment in points.windows(2) {
+        stroke_line_pixels(
+            segment[0],
+            segment[1],
+            origin,
+            width,
+            height,
+            stroke_width,
+            color,
+            pixels,
+        );
+    }
+    if closed {
+        stroke_line_pixels(
+            *points.last().unwrap(),
+            points[0],
+            origin,
+            width,
+            height,
+            stroke_width,
+            color,
+            pixels,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stroke_line_pixels(
+    a: egui::Pos2,
+    b: egui::Pos2,
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    stroke_width: f32,
+    color: egui::Color32,
+    pixels: &mut [egui::Color32],
+) {
+    if color == egui::Color32::TRANSPARENT || stroke_width <= 0.0 {
+        return;
+    }
+    let Some(bounds) = bounds_from_points(&[a, b]).map(|r| r.expand(stroke_width.max(1.0))) else {
+        return;
+    };
+    let x0 = (bounds.min.x - origin.x).floor().max(0.0) as u32;
+    let y0 = (bounds.min.y - origin.y).floor().max(0.0) as u32;
+    let x1 = (bounds.max.x - origin.x).ceil().min(width as f32) as u32;
+    let y1 = (bounds.max.y - origin.y).ceil().min(height as f32) as u32;
+    let ab = b - a;
+    let len2 = ab.length_sq();
+    if len2 <= 0.0001 {
+        fill_circle_pixels(a, stroke_width * 0.5, origin, width, height, color, pixels);
+        return;
+    }
+    let radius = stroke_width.max(1.0) * 0.5;
+    let radius2 = radius * radius;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let p = egui::pos2(origin.x + x as f32 + 0.5, origin.y + y as f32 + 0.5);
+            let t = ((p - a).dot(ab) / len2).clamp(0.0, 1.0);
+            let closest = a + ab * t;
+            if p.distance_sq(closest) <= radius2 {
+                let idx = (y * width + x) as usize;
+                pixels[idx] = blend_color(color, pixels[idx], crate::codegen::BlendMode::Normal);
+            }
+        }
+    }
+}
+
+fn fill_polygon_pixels(
+    points: &[egui::Pos2],
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    color: egui::Color32,
+    pixels: &mut [egui::Color32],
+) {
+    if points.len() < 3 || color == egui::Color32::TRANSPARENT {
+        return;
+    }
+    let Some(bounds) = bounds_from_points(points) else {
+        return;
+    };
+    let x0 = (bounds.min.x - origin.x).floor().max(0.0) as u32;
+    let y0 = (bounds.min.y - origin.y).floor().max(0.0) as u32;
+    let x1 = (bounds.max.x - origin.x).ceil().min(width as f32) as u32;
+    let y1 = (bounds.max.y - origin.y).ceil().min(height as f32) as u32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let p = egui::pos2(origin.x + x as f32 + 0.5, origin.y + y as f32 + 0.5);
+            if point_in_polygon(p, points) {
+                let idx = (y * width + x) as usize;
+                pixels[idx] = blend_color(color, pixels[idx], crate::codegen::BlendMode::Normal);
+            }
+        }
+    }
+}
+
+fn rasterize_mesh_pixels(
+    mesh: &egui::epaint::Mesh,
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    pixels: &mut [egui::Color32],
+) {
+    for tri in mesh.indices.chunks_exact(3) {
+        let a = &mesh.vertices[tri[0] as usize];
+        let b = &mesh.vertices[tri[1] as usize];
+        let c = &mesh.vertices[tri[2] as usize];
+        rasterize_triangle_pixels(
+            [a.pos, b.pos, c.pos],
+            [a.color, b.color, c.color],
+            origin,
+            width,
+            height,
+            pixels,
+        );
+    }
+}
+
+fn rasterize_triangle_pixels(
+    points: [egui::Pos2; 3],
+    colors: [egui::Color32; 3],
+    origin: egui::Pos2,
+    width: u32,
+    height: u32,
+    pixels: &mut [egui::Color32],
+) {
+    let Some(bounds) = bounds_from_points(&points) else {
+        return;
+    };
+    let x0 = (bounds.min.x - origin.x).floor().max(0.0) as u32;
+    let y0 = (bounds.min.y - origin.y).floor().max(0.0) as u32;
+    let x1 = (bounds.max.x - origin.x).ceil().min(width as f32) as u32;
+    let y1 = (bounds.max.y - origin.y).ceil().min(height as f32) as u32;
+    let denom = cross2(points[1] - points[0], points[2] - points[0]);
+    if denom.abs() <= 0.0001 {
+        return;
+    }
+    let channels = colors.map(|color| color.to_srgba_unmultiplied());
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let p = egui::pos2(origin.x + x as f32 + 0.5, origin.y + y as f32 + 0.5);
+            let w0 = cross2(points[1] - p, points[2] - p) / denom;
+            let w1 = cross2(points[2] - p, points[0] - p) / denom;
+            let w2 = 1.0 - w0 - w1;
+            if w0 >= -0.001 && w1 >= -0.001 && w2 >= -0.001 {
+                let channel = |idx: usize| {
+                    (channels[0][idx] as f32 * w0
+                        + channels[1][idx] as f32 * w1
+                        + channels[2][idx] as f32 * w2)
+                        .round()
+                        .clamp(0.0, 255.0) as u8
+                };
+                let color = egui::Color32::from_rgba_unmultiplied(
+                    channel(0),
+                    channel(1),
+                    channel(2),
+                    channel(3),
+                );
+                let idx = (y * width + x) as usize;
+                pixels[idx] = blend_color(color, pixels[idx], crate::codegen::BlendMode::Normal);
+            }
+        }
+    }
+}
+
+fn point_in_polygon(p: egui::Pos2, polygon: &[egui::Pos2]) -> bool {
+    let mut inside = false;
+    let mut j = polygon.len() - 1;
+    for i in 0..polygon.len() {
+        let pi = polygon[i];
+        let pj = polygon[j];
+        if ((pi.y > p.y) != (pj.y > p.y))
+            && (p.x < (pj.x - pi.x) * (p.y - pi.y) / (pj.y - pi.y) + pi.x)
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+fn apply_polygon_alpha_mask(
+    pixels: &mut [egui::Color32],
+    width: u32,
+    height: u32,
+    origin: egui::Pos2,
+    polygon: &[egui::Pos2],
+) {
+    for y in 0..height {
+        for x in 0..width {
+            let p = egui::pos2(origin.x + x as f32 + 0.5, origin.y + y as f32 + 0.5);
+            if !point_in_polygon(p, polygon) {
+                pixels[(y * width + x) as usize] = egui::Color32::TRANSPARENT;
+            }
+        }
+    }
+}
+
+fn color_with_opacity(color: egui::Color32, opacity: f32) -> egui::Color32 {
+    let [r, g, b, a] = color.to_srgba_unmultiplied();
+    egui::Color32::from_rgba_unmultiplied(
+        r,
+        g,
+        b,
+        (a as f32 * opacity.clamp(0.0, 1.0)).round() as u8,
+    )
+}
+
+#[cfg(feature = "wgpu")]
+fn pixels_to_rgba(pixels: &[egui::Color32]) -> Vec<u8> {
+    pixels
+        .iter()
+        .flat_map(|p| p.to_srgba_unmultiplied())
+        .collect()
+}
+
+fn blend_layers_hash(layers: &[BlendLayer], pixels: &[egui::Color32]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    layers.len().hash(&mut hasher);
+    for layer in layers {
+        layer.blend_mode.hash(&mut hasher);
+        layer.opacity.to_bits().hash(&mut hasher);
+        layer.shapes.len().hash(&mut hasher);
+        layer.clip_polygons.len().hash(&mut hasher);
+        for polygon in &layer.clip_polygons {
+            for point in polygon {
+                point.x.to_bits().hash(&mut hasher);
+                point.y.to_bits().hash(&mut hasher);
+            }
+        }
+    }
+    for p in pixels {
+        p.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn polygon_hash(points: &[egui::Pos2]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for p in points {
+        p.x.to_bits().hash(&mut hasher);
+        p.y.to_bits().hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 // ============================================================================
@@ -1548,15 +3208,15 @@ fn blend_and_fade(
 /// - The polygon is convex
 /// - The background behind the clip region is a uniform color matching `ui.visuals().window_fill()`
 ///
-/// For non-uniform backgrounds or concave polygons, use `Painter::with_clip_rect` directly
-/// for rectangular clipping, or implement a `PaintCallback` with a wgpu stencil pipeline
-/// for true arbitrary-shape clipping.
+/// For non-uniform backgrounds, concave polygons, or layered scenes, prefer
+/// [`clipped_layers_gpu`], which masks the composited layer group per pixel and
+/// presents it through the egui-wgpu callback path when available.
 ///
 /// # Arguments
 /// * `ui` — the egui UI context
 /// * `clip_polygon` — convex polygon vertices (clockwise or counter-clockwise)
 /// * `content` — closure that paints the clipped content
-pub fn clipped_shape(
+pub fn clipped_shape_approx(
     ui: &mut egui::Ui,
     clip_polygon: &[egui::Pos2],
     _clip_closed: bool,
@@ -1567,7 +3227,6 @@ pub fn clipped_shape(
         content(ui);
         return;
     }
-
     // Compute bounding box of the clip polygon
     let min_x = clip_polygon
         .iter()
@@ -1620,15 +3279,30 @@ pub fn clipped_shape(
     }
 }
 
-/// Paint content clipped to an arbitrary polygon using CPU-side alpha masking (Phase 2).
+pub fn clipped_shape(
+    ui: &mut egui::Ui,
+    clip_polygon: &[egui::Pos2],
+    clip_closed: bool,
+    content: impl FnOnce(&mut egui::Ui),
+) {
+    clipped_shape_approx(ui, clip_polygon, clip_closed, content)
+}
+
+/// Paint content clipped to a polygon-shaped region using a background-dependent alpha-mask approximation.
 ///
 /// Requires the `clip-mask` feature flag (`tiny-skia` dependency).
-/// When the feature is not enabled, falls back to `clipped_shape` (bbox approximation).
+/// When the feature is not enabled, falls back to `clipped_shape_approx` (bbox approximation).
+///
+/// # Limitations
+/// This is **not** true arbitrary clipping. It works by painting an inverted mask overlay
+/// using the current `ui.visuals().window_fill()` color. It will look incorrect if the
+/// background behind the clipped shape is not a solid color matching `window_fill()`,
+/// or if placed over layered/non-flat scenes.
 ///
 /// # How it works
 /// 1. Builds a tiny-skia alpha mask from the clip polygon
 /// 2. Clips content to the bounding box via `set_clip_rect`
-/// 3. Overlays the inverted mask to hide regions outside the polygon
+/// 3. Overlays the inverted mask (in background color) to hide regions outside the polygon
 #[cfg(feature = "clip-mask")]
 pub fn clipped_shape_cpu(
     ui: &mut egui::Ui,
@@ -1673,7 +3347,7 @@ pub fn clipped_shape_cpu(
     let mut mask_pixmap = match Pixmap::new(w, h) {
         Some(p) => p,
         None => {
-            clipped_shape(ui, clip_polygon, true, content);
+            clipped_shape_approx(ui, clip_polygon, true, content);
             return;
         }
     };
@@ -1704,13 +3378,14 @@ pub fn clipped_shape_cpu(
     child_ui.set_clip_rect(clip_rect);
     content(&mut child_ui);
 
-    // Build inverted mask overlay: black where polygon is absent
+    // Build inverted mask overlay: background color where polygon is absent
+    let bg = ui.visuals().window_fill();
     let mask_pixels: Vec<egui::Color32> = mask_pixmap
         .pixels()
         .iter()
         .map(|px| {
             let a = px.alpha();
-            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 255u8.saturating_sub(a))
+            egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), 255u8.saturating_sub(a))
         })
         .collect();
 
@@ -1720,11 +3395,18 @@ pub fn clipped_shape_cpu(
         source_size: egui::Vec2::new(w as f32, h as f32),
     };
 
-    let texture = ui.ctx().load_texture(
-        "__egui_expressive_clip_mask",
-        mask_image,
-        egui::TextureOptions::NEAREST,
-    );
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for p in clip_polygon {
+        p.x.to_bits().hash(&mut hasher);
+        p.y.to_bits().hash(&mut hasher);
+    }
+    let hash = hasher.finish();
+    let texture_name = format!("__egui_expressive_clip_mask_{:x}_{}x{}", hash, w, h);
+
+    let texture = ui
+        .ctx()
+        .load_texture(texture_name, mask_image, egui::TextureOptions::NEAREST);
 
     let painter = ui.painter().with_clip_rect(clip_rect);
     painter.image(
@@ -1733,29 +3415,6 @@ pub fn clipped_shape_cpu(
         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
         egui::Color32::WHITE,
     );
-}
-
-/// Composite blend layers using the GPU shader pipeline when available.
-///
-/// # GPU Integration
-/// The WGSL shader at `src/draw/blend_shader.wgsl` implements all 16 blend modes
-/// with Porter-Duff source-over compositing. To activate full GPU compositing,
-/// the host application must wire the shader into its wgpu `RenderState`:
-///
-/// ```ignore
-/// // In your eframe App::setup():
-/// let shader = render_state.device.create_shader_module(
-///     wgpu::include_wgsl!("../draw/blend_shader.wgsl")
-/// );
-/// // Create pipeline, bind groups, and issue PaintCallback with the blend rect.
-/// ```
-///
-/// Until that integration is complete, this function falls back to the CPU
-/// approximation via [`composite_layers`].
-pub fn composite_layers_gpu(ui: &mut egui::Ui, _rect: egui::Rect, layers: Vec<BlendLayer>) {
-    // CPU fallback: blend_shader.wgsl is ready for host-app wgpu integration.
-    // See doc comment above for wiring instructions.
-    composite_layers(ui, layers);
 }
 
 /// Find the nearest bounding box corner to the midpoint of edge (a, b),
@@ -1825,6 +3484,134 @@ mod tests {
 
     fn opaque(r: u8, g: u8, b: u8) -> egui::Color32 {
         egui::Color32::from_rgb(r, g, b)
+    }
+
+    #[test]
+    fn test_mesh_gradient_patch_generates_subdivided_mesh() {
+        let shape = mesh_gradient_patch(
+            [
+                egui::pos2(0.0, 0.0),
+                egui::pos2(10.0, 0.0),
+                egui::pos2(10.0, 10.0),
+                egui::pos2(0.0, 10.0),
+            ],
+            [
+                egui::Color32::RED,
+                egui::Color32::GREEN,
+                egui::Color32::BLUE,
+                egui::Color32::WHITE,
+            ],
+            2,
+        );
+
+        let egui::Shape::Mesh(mesh) = shape else {
+            panic!("expected mesh shape");
+        };
+        assert_eq!(mesh.vertices.len(), 9);
+        assert_eq!(mesh.indices.len(), 24);
+        assert_eq!(mesh.vertices[0].pos, egui::pos2(0.0, 0.0));
+        assert_eq!(mesh.vertices[8].pos, egui::pos2(10.0, 10.0));
+    }
+
+    #[test]
+    fn test_noise_rect_is_deterministic_and_subdivided() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(4.0, 4.0));
+        let a = noise_rect(rect, 42, 2.0, 0.5);
+        let b = noise_rect(rect, 42, 2.0, 0.5);
+        assert_eq!(a.len(), 4);
+        assert_eq!(format!("{:?}", a), format!("{:?}", b));
+    }
+
+    #[test]
+    fn test_radial_gradient_rect_stops_preserves_multiple_rings() {
+        let shape = radial_gradient_rect_stops(
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(10.0, 10.0)),
+            &[
+                (0.0, egui::Color32::RED),
+                (0.5, egui::Color32::GREEN),
+                (1.0, egui::Color32::BLUE),
+            ],
+            8,
+        );
+        let egui::Shape::Mesh(mesh) = shape else {
+            panic!("expected mesh shape");
+        };
+        assert!(mesh.vertices.len() > 10);
+        assert!(mesh.indices.len() > 24);
+    }
+
+    #[test]
+    fn test_radial_gradient_path_mesh_has_inner_stop_vertex() {
+        let points = vec![
+            egui::pos2(0.0, 0.0),
+            egui::pos2(10.0, 0.0),
+            egui::pos2(10.0, 10.0),
+            egui::pos2(0.0, 10.0),
+        ];
+        let shape = gradient_path_mesh(
+            &points,
+            &[(0.0, egui::Color32::RED), (1.0, egui::Color32::BLUE)],
+            0.0,
+            true,
+        )
+        .expect("radial path mesh");
+        let egui::Shape::Mesh(mesh) = shape else {
+            panic!("expected mesh shape");
+        };
+        assert!(mesh.vertices.len() > points.len());
+        assert!(mesh
+            .vertices
+            .iter()
+            .any(|v| v.pos == egui::pos2(5.0, 5.0) && v.color == egui::Color32::RED));
+    }
+
+    #[test]
+    fn test_radial_gradient_path_mesh_uses_explicit_focal_point_and_radius() {
+        let points = vec![
+            egui::pos2(0.0, 0.0),
+            egui::pos2(10.0, 0.0),
+            egui::pos2(10.0, 10.0),
+            egui::pos2(0.0, 10.0),
+        ];
+        let focal = egui::pos2(3.0, 4.0);
+        let shape = gradient_path_mesh_with_geometry(
+            &points,
+            &[(0.0, egui::Color32::RED), (1.0, egui::Color32::BLUE)],
+            0.0,
+            true,
+            Some(egui::pos2(2.0, 2.0)),
+            Some(focal),
+            Some(20.0),
+        )
+        .expect("radial path mesh");
+        let egui::Shape::Mesh(mesh) = shape else {
+            panic!("expected mesh shape");
+        };
+        assert!(mesh
+            .vertices
+            .iter()
+            .any(|v| v.pos == focal && v.color == egui::Color32::RED));
+    }
+
+    #[test]
+    fn test_radial_gradient_t_uses_centered_outer_circle() {
+        let t = radial_gradient_t(
+            egui::pos2(11.0, 5.0),
+            egui::pos2(5.0, 5.0),
+            egui::pos2(7.0, 5.0),
+            10.0,
+        );
+        assert!((t - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_transform_inverse_roundtrip() {
+        let transform = Transform2D::translate(3.0, -2.0).then(Transform2D::scale(2.0, 4.0));
+        let inverse = transform.inverse().expect("invertible transform");
+        let point = egui::pos2(7.0, 11.0);
+        let roundtrip = inverse.apply(transform.apply(point));
+        assert!((roundtrip.x - point.x).abs() < 0.001);
+        assert!((roundtrip.y - point.y).abs() < 0.001);
     }
 
     #[test]
@@ -1941,6 +3728,267 @@ mod tests {
             r,
             g,
             b
+        );
+    }
+
+    #[test]
+    fn test_composite_layers_empty() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show_inside(ctx, |ui| {
+                composite_layers(ui, vec![]);
+            });
+        });
+    }
+
+    #[test]
+    fn test_composite_layers_behavior() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show_inside(ctx, |ui| {
+                let shape1 = egui::Shape::Rect(egui::epaint::RectShape::filled(
+                    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(10.0)),
+                    egui::CornerRadius::ZERO,
+                    egui::Color32::RED,
+                ));
+                let shape2 = egui::Shape::Rect(egui::epaint::RectShape::filled(
+                    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(10.0)),
+                    egui::CornerRadius::ZERO,
+                    egui::Color32::BLUE,
+                ));
+                let layer1 = BlendLayer::new(vec![shape1])
+                    .blend_mode(BlendMode::Normal)
+                    .opacity(1.0);
+                let layer2 = BlendLayer::new(vec![shape2])
+                    .blend_mode(BlendMode::Multiply)
+                    .opacity(0.5);
+
+                composite_layers(ui, vec![layer1, layer2]);
+            });
+        });
+    }
+
+    #[test]
+    fn test_rasterize_composited_layers_per_pixel_blend() {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(2.0));
+        let red = egui::Shape::Rect(egui::epaint::RectShape::filled(
+            rect,
+            egui::CornerRadius::ZERO,
+            egui::Color32::RED,
+        ));
+        let blue = egui::Shape::Rect(egui::epaint::RectShape::filled(
+            rect,
+            egui::CornerRadius::ZERO,
+            egui::Color32::BLUE,
+        ));
+        let (_, size, pixels, unhandled) = rasterize_composited_layers(&[
+            BlendLayer::new(vec![red]),
+            BlendLayer::new(vec![blue]).blend_mode(BlendMode::Multiply),
+        ])
+        .expect("layers rasterize");
+        assert_eq!(size, [2, 2]);
+        assert!(unhandled.is_empty());
+        let [r, g, b, a] = pixels[0].to_srgba_unmultiplied();
+        assert_eq!((r, g, b, a), (0, 0, 0, 255));
+    }
+
+    #[test]
+    fn test_rasterize_composited_layers_handles_ellipse() {
+        let ellipse = egui::Shape::ellipse_filled(
+            egui::pos2(5.0, 3.0),
+            egui::vec2(5.0, 3.0),
+            egui::Color32::RED,
+        );
+        let (_, size, pixels, unhandled) =
+            rasterize_composited_layers(&[BlendLayer::new(vec![ellipse])])
+                .expect("ellipse rasterizes");
+        assert_eq!(size, [10, 6]);
+        assert!(unhandled.is_empty());
+        assert_ne!(
+            pixels[(3 * size[0] + 5) as usize],
+            egui::Color32::TRANSPARENT
+        );
+    }
+
+    #[test]
+    fn test_rasterize_composited_layers_preserves_rounded_rect_corners() {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(10.0));
+        let rounded = egui::Shape::Rect(egui::epaint::RectShape::filled(
+            rect,
+            egui::CornerRadius::same(5),
+            egui::Color32::RED,
+        ));
+        let (_, size, pixels, unhandled) =
+            rasterize_composited_layers(&[BlendLayer::new(vec![rounded])])
+                .expect("rect rasterizes");
+        assert_eq!(size, [10, 10]);
+        assert!(unhandled.is_empty());
+        assert_eq!(pixels[0], egui::Color32::TRANSPARENT);
+        assert_ne!(
+            pixels[(5 * size[0] + 5) as usize],
+            egui::Color32::TRANSPARENT
+        );
+    }
+
+    #[test]
+    fn test_rasterize_composited_layers_uses_stroke_aware_bounds() {
+        let circle = egui::Shape::circle_stroke(
+            egui::pos2(5.0, 5.0),
+            5.0,
+            egui::Stroke::new(4.0, egui::Color32::RED),
+        );
+        let (_, size, _, unhandled) = rasterize_composited_layers(&[BlendLayer::new(vec![circle])])
+            .expect("stroke rasterizes");
+        assert_eq!(size, [14, 14]);
+        assert!(unhandled.is_empty());
+    }
+
+    #[test]
+    fn test_polygon_alpha_mask_clears_outside_pixels() {
+        let mut pixels = vec![egui::Color32::WHITE; 4];
+        apply_polygon_alpha_mask(
+            &mut pixels,
+            2,
+            2,
+            egui::Pos2::ZERO,
+            &[
+                egui::pos2(0.0, 0.0),
+                egui::pos2(1.0, 0.0),
+                egui::pos2(1.0, 1.0),
+                egui::pos2(0.0, 1.0),
+            ],
+        );
+        assert!(pixels.contains(&egui::Color32::TRANSPARENT));
+        assert!(pixels.contains(&egui::Color32::WHITE));
+    }
+
+    #[test]
+    fn test_clipped_shape_approx_empty() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show_inside(ctx, |ui| {
+                clipped_shape_approx(ui, &[], true, |_| {});
+            });
+        });
+    }
+
+    #[cfg(feature = "clip-mask")]
+    #[test]
+    fn test_clipped_shape_cpu_empty() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show_inside(ctx, |ui| {
+                clipped_shape_cpu(ui, &[], |_| {});
+            });
+        });
+    }
+
+    #[cfg(feature = "clip-mask")]
+    #[test]
+    fn test_clipped_shape_cpu_behavior() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show_inside(ctx, |ui| {
+                let polygon1 = vec![
+                    egui::pos2(0.0, 0.0),
+                    egui::pos2(10.0, 0.0),
+                    egui::pos2(10.0, 10.0),
+                ];
+                let polygon2 = vec![
+                    egui::pos2(10.0, 10.0),
+                    egui::pos2(20.0, 10.0),
+                    egui::pos2(20.0, 20.0),
+                ];
+                clipped_shape_cpu(ui, &polygon1, |ui| {
+                    ui.label("Clipped 1");
+                });
+                clipped_shape_cpu(ui, &polygon2, |ui| {
+                    ui.label("Clipped 2");
+                });
+            });
+        });
+    }
+
+    #[test]
+    fn test_paint_image_from_path_missing() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show_inside(ctx, |ui| {
+                let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(10.0));
+                let success = paint_image_from_path(
+                    ui,
+                    ui.painter(),
+                    rect,
+                    "nonexistent.png",
+                    "test_id",
+                    egui::Color32::WHITE,
+                );
+                assert!(!success);
+            });
+        });
+    }
+
+    #[test]
+    fn test_bevel_join_emits_segmented_geometry() {
+        let points = vec![
+            egui::pos2(0.0, 0.0),
+            egui::pos2(10.0, 0.0),
+            egui::pos2(10.0, 10.0),
+        ];
+        let stroke = RichStroke {
+            width: 2.0,
+            color: egui::Color32::WHITE,
+            dash: None,
+            cap: StrokeCap::Butt,
+            join: StrokeJoin::Bevel,
+        };
+
+        let shapes = dashed_path_shapes(&points, &stroke);
+        assert_eq!(shapes.len(), 2);
+    }
+
+    #[test]
+    fn test_layered_painter_from_ui_and_layers() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show_inside(ctx, |ui| {
+                let layered = LayeredPainter::from_ui(ui);
+                let clip = ui.clip_rect();
+                assert_eq!(layered.background().clip_rect(), clip);
+                assert_eq!(layered.main().clip_rect(), clip);
+                assert_eq!(layered.foreground().clip_rect(), clip);
+            });
+        });
+    }
+
+    #[test]
+    fn test_transform_apply_to_shape_and_rect() {
+        let transform = Transform2D::translate(10.0, 5.0).then(Transform2D::scale(2.0, 3.0));
+        let rect = egui::Rect::from_min_size(egui::pos2(1.0, 2.0), egui::vec2(3.0, 4.0));
+        let transformed_rect = transform.apply_to_rect(rect);
+        assert_eq!(transformed_rect.min, egui::pos2(22.0, 21.0));
+        assert_eq!(transformed_rect.max, egui::pos2(28.0, 33.0));
+
+        let shape = Shape::LineSegment {
+            points: [egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)],
+            stroke: egui::Stroke::new(1.0, egui::Color32::WHITE),
+        };
+        match transform.apply_to_shape(shape) {
+            Shape::LineSegment { points, .. } => {
+                assert_eq!(points[0], egui::pos2(20.0, 15.0));
+                assert_eq!(points[1], egui::pos2(22.0, 18.0));
+            }
+            other => panic!("unexpected shape: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_stack_align_to_align2() {
+        assert_eq!(StackAlign::TopLeft.to_align2(), egui::Align2::LEFT_TOP);
+        assert_eq!(StackAlign::Center.to_align2(), egui::Align2::CENTER_CENTER);
+        assert_eq!(
+            StackAlign::BottomRight.to_align2(),
+            egui::Align2::RIGHT_BOTTOM
         );
     }
 }

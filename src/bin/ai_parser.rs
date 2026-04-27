@@ -26,7 +26,10 @@ fn artboard_name_re() -> &'static Regex {
     })
 }
 
-use egui_expressive::codegen::{generate_artboard_file, ElementType, LayoutElement};
+use egui_expressive::codegen::{
+    generate_artboard_file, AppearanceFill, AppearanceStroke, BlendMode, EffectDef, EffectType,
+    ElementType, LayoutElement,
+};
 
 /// RGBA Color representation
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -36,13 +39,13 @@ pub struct Color {
     pub b: u8,
     pub a: u8,
     #[serde(default)]
-    pub opacity: f64,
+    pub opacity: Option<f64>,
     #[serde(default)]
     pub blend_mode: String,
 }
 
 /// Stroke representation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Stroke {
     pub r: u8,
     pub g: u8,
@@ -51,7 +54,17 @@ pub struct Stroke {
     #[serde(default)]
     pub width: f64,
     #[serde(default)]
-    pub opacity: f64,
+    pub opacity: Option<f64>,
+    #[serde(default)]
+    pub blend_mode: String,
+    #[serde(default)]
+    pub cap: Option<String>,
+    #[serde(default)]
+    pub join: Option<String>,
+    #[serde(default)]
+    pub dash: Option<Vec<f32>>,
+    #[serde(default)]
+    pub miter_limit: Option<f32>,
 }
 
 /// Live Effect parameter
@@ -121,7 +134,9 @@ pub struct Artboard {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PathPoint {
     pub anchor: [f64; 2],
+    #[serde(alias = "leftDir")]
     pub left_ctrl: [f64; 2],
+    #[serde(alias = "rightDir")]
     pub right_ctrl: [f64; 2],
 }
 
@@ -152,6 +167,8 @@ pub struct Element {
     #[serde(default)]
     pub translate_y: f64,
     #[serde(default)]
+    pub transform_candidates: Vec<[f64; 5]>,
+    #[serde(default)]
     pub corner_radius: f64,
     #[serde(default)]
     pub path_points: Vec<PathPoint>,
@@ -159,6 +176,14 @@ pub struct Element {
     pub path_closed: bool,
     #[serde(default)]
     pub artboard_name: Option<String>,
+    #[serde(default)]
+    pub is_pseudo_element: bool,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub element_type: Option<String>,
+    #[serde(default)]
+    pub bounds: Option<[f64; 4]>,
 }
 
 /// Parsed AI file result
@@ -175,6 +200,8 @@ pub struct AiParseResult {
     pub page_tiles: Vec<PageTile>,
     #[serde(default)]
     pub elements: Vec<Element>,
+    #[serde(default)]
+    pub transform_candidates: Vec<Element>,
     #[serde(default)]
     pub errors: Vec<String>,
 }
@@ -413,6 +440,73 @@ fn parse_appearance(content: &str) -> (Vec<Color>, Vec<Stroke>) {
     let mut fills = Vec::new();
     let mut strokes = Vec::new();
 
+    let mut blend_mode = "normal".to_string();
+    let bm_re = Regex::new(r"/(?:BM|BlendMode)\s+/([A-Za-z]+)").ok();
+    if let Some(re) = bm_re {
+        if let Some(caps) = re.captures(content) {
+            if let Some(mode) = caps.get(1) {
+                blend_mode = mode.as_str().to_string();
+            }
+        }
+    }
+
+    let mut cap = None;
+    let cap_re = Regex::new(r"\b([012])\s+J\b").ok();
+    if let Some(re) = cap_re {
+        if let Some(caps) = re.captures_iter(content).last() {
+            cap = match caps.get(1).unwrap().as_str() {
+                "0" => Some("butt".to_string()),
+                "1" => Some("round".to_string()),
+                "2" => Some("square".to_string()),
+                _ => None,
+            };
+        }
+    }
+
+    let mut join = None;
+    let join_re = Regex::new(r"\b([012])\s+j\b").ok();
+    if let Some(re) = join_re {
+        if let Some(caps) = re.captures_iter(content).last() {
+            join = match caps.get(1).unwrap().as_str() {
+                "0" => Some("miter".to_string()),
+                "1" => Some("round".to_string()),
+                "2" => Some("bevel".to_string()),
+                _ => None,
+            };
+        }
+    }
+
+    let mut miter_limit = None;
+    let miter_re = Regex::new(r"\b(\d+(?:\.\d+)?)\s+M\b").ok();
+    if let Some(re) = miter_re {
+        if let Some(caps) = re.captures_iter(content).last() {
+            miter_limit = caps.get(1).unwrap().as_str().parse::<f32>().ok();
+        }
+    }
+
+    let mut dash = None;
+    let dash_re = Regex::new(r"\[(.*?)\]\s+\d+(?:\.\d+)?\s+d\b").ok();
+    if let Some(re) = dash_re {
+        if let Some(caps) = re.captures_iter(content).last() {
+            let dash_str = caps.get(1).unwrap().as_str();
+            let dash_arr: Vec<f32> = dash_str
+                .split_whitespace()
+                .filter_map(|s| s.parse::<f32>().ok())
+                .collect();
+            if !dash_arr.is_empty() {
+                dash = Some(dash_arr);
+            }
+        }
+    }
+
+    let mut width = 1.0;
+    let width_re = Regex::new(r"\b(\d+(?:\.\d+)?)\s+w\b").ok();
+    if let Some(re) = width_re {
+        if let Some(caps) = re.captures_iter(content).last() {
+            width = caps.get(1).unwrap().as_str().parse::<f64>().unwrap_or(1.0);
+        }
+    }
+
     let fill_stroke_re = Regex::new(
         r"\[\s*(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s*\]\s*([Xx][aA])",
     )
@@ -435,25 +529,30 @@ fn parse_appearance(content: &str) -> (Vec<Color>, Vec<Stroke>) {
                     (b.as_str().parse::<f64>().unwrap_or(0.0) * 255.0).clamp(0.0, 255.0) as u8;
                 let a_val =
                     (a.as_str().parse::<f64>().unwrap_or(1.0) * 255.0).clamp(0.0, 255.0) as u8;
-                let op_str = op.as_str().to_lowercase();
+                let op_str = op.as_str();
 
-                if op_str.ends_with('a') && !op_str.starts_with('x') {
+                if op_str.starts_with('X') {
                     fills.push(Color {
                         r: r_val,
                         g: g_val,
                         b: b_val,
                         a: a_val,
-                        opacity: 1.0,
-                        blend_mode: "normal".to_string(),
+                        opacity: Some(1.0),
+                        blend_mode: blend_mode.clone(),
                     });
-                } else if op_str.ends_with('a') && op_str.starts_with('x') {
+                } else if op_str.starts_with('x') {
                     strokes.push(Stroke {
                         r: r_val,
                         g: g_val,
                         b: b_val,
                         a: a_val,
-                        width: 1.0,
-                        opacity: 1.0,
+                        width,
+                        opacity: Some(1.0),
+                        blend_mode: blend_mode.clone(),
+                        cap: cap.clone(),
+                        join: join.clone(),
+                        dash: dash.clone(),
+                        miter_limit,
                     });
                 }
             }
@@ -485,12 +584,46 @@ fn parse_appearance(content: &str) -> (Vec<Color>, Vec<Stroke>) {
                         g: g_val,
                         b: b_val,
                         a: a_val,
-                        opacity: 1.0,
-                        blend_mode: "normal".to_string(),
+                        opacity: Some(1.0),
+                        blend_mode: blend_mode.clone(),
                     });
                 }
             }
         }
+    }
+
+    // Fallback for gradients/patterns
+    if fills.is_empty()
+        && (content.contains(" sh\n")
+            || content.contains(" sh\r")
+            || content.contains(" sh ")
+            || content.contains("/Pattern cs")
+            || content.contains("/Pattern CS"))
+    {
+        fills.push(Color {
+            r: 128,
+            g: 128,
+            b: 128,
+            a: 255,
+            opacity: Some(1.0),
+            blend_mode: blend_mode.clone(),
+        });
+    }
+
+    if strokes.is_empty() && (content.contains("/Pattern CS") || content.contains("/Pattern cs")) {
+        strokes.push(Stroke {
+            r: 128,
+            g: 128,
+            b: 128,
+            a: 255,
+            width,
+            opacity: Some(1.0),
+            blend_mode: blend_mode.clone(),
+            cap: cap.clone(),
+            join: join.clone(),
+            dash: dash.clone(),
+            miter_limit,
+        });
     }
 
     (fills, strokes)
@@ -517,9 +650,31 @@ fn parse_mesh_patches(content: &str) -> Vec<MeshPatch> {
         .filter_map(|m| m.as_str().parse().ok())
         .collect();
 
-    if values.len() >= 8 {
-        for chunk in values.chunks(8) {
-            if chunk.len() == 8 {
+    let chunk_size = if values.len().is_multiple_of(20) {
+        20
+    } else {
+        8
+    };
+
+    if values.len() >= chunk_size {
+        for chunk in values.chunks(chunk_size) {
+            if chunk.len() == chunk_size {
+                let mut colors = vec![
+                    vec![255, 255, 255, 255],
+                    vec![255, 255, 255, 255],
+                    vec![255, 255, 255, 255],
+                    vec![255, 255, 255, 255],
+                ];
+                if chunk_size == 20 {
+                    for i in 0..4 {
+                        colors[i] = vec![
+                            (chunk[8 + i * 3] * 255.0).clamp(0.0, 255.0) as u8,
+                            (chunk[9 + i * 3] * 255.0).clamp(0.0, 255.0) as u8,
+                            (chunk[10 + i * 3] * 255.0).clamp(0.0, 255.0) as u8,
+                            255,
+                        ];
+                    }
+                }
                 patches.push(MeshPatch {
                     corners: vec![
                         vec![chunk[0], chunk[1]],
@@ -527,12 +682,7 @@ fn parse_mesh_patches(content: &str) -> Vec<MeshPatch> {
                         vec![chunk[4], chunk[5]],
                         vec![chunk[6], chunk[7]],
                     ],
-                    colors: vec![
-                        vec![255, 255, 255, 255],
-                        vec![255, 255, 255, 255],
-                        vec![255, 255, 255, 255],
-                        vec![255, 255, 255, 255],
-                    ],
+                    colors,
                 });
             }
         }
@@ -583,24 +733,32 @@ fn extract_ai_version(content: &str) -> String {
     String::new()
 }
 
-/// Parse the current transformation matrix (cm operator) from a PDF content stream.
-/// Returns (rotation_deg, scale_x, scale_y, translate_x, translate_y) or None.
-fn parse_ctm_from_stream(content: &str) -> Option<(f64, f64, f64, f64, f64)> {
-    let re = Regex::new(
-        r"(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+cm\b"
-    ).ok()?;
-    // Use the last cm operator (innermost transform)
-    let caps = re.captures_iter(content).last()?;
-    let a: f64 = caps.get(1)?.as_str().parse().ok()?;
-    let b: f64 = caps.get(2)?.as_str().parse().ok()?;
-    let c: f64 = caps.get(3)?.as_str().parse().ok()?;
-    let d: f64 = caps.get(4)?.as_str().parse().ok()?;
-    let e: f64 = caps.get(5)?.as_str().parse().ok()?;
-    let f: f64 = caps.get(6)?.as_str().parse().ok()?;
-    let rotation_deg = b.atan2(a).to_degrees();
-    let scale_x = (a * a + b * b).sqrt();
-    let scale_y = (c * c + d * d).sqrt();
-    Some((rotation_deg, scale_x, scale_y, e, f))
+/// Parse all current transformation matrices (cm operator) from a PDF content stream.
+/// Returns a list of (rotation_deg, scale_x, scale_y, translate_x, translate_y) candidates.
+fn parse_ctms_from_stream(content: &str) -> Vec<(f64, f64, f64, f64, f64)> {
+    let mut ctms = Vec::new();
+    let re = match Regex::new(
+        r"(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+(-?\d+\.?\d*(?:[eE][+-]?\d+)?)\s+cm\b",
+    ) {
+        Ok(re) => re,
+        Err(_) => return ctms,
+    };
+    for caps in re.captures_iter(content) {
+        if let (Ok(a), Ok(b), Ok(c), Ok(d), Ok(e), Ok(f)) = (
+            caps.get(1).unwrap().as_str().parse::<f64>(),
+            caps.get(2).unwrap().as_str().parse::<f64>(),
+            caps.get(3).unwrap().as_str().parse::<f64>(),
+            caps.get(4).unwrap().as_str().parse::<f64>(),
+            caps.get(5).unwrap().as_str().parse::<f64>(),
+            caps.get(6).unwrap().as_str().parse::<f64>(),
+        ) {
+            let rotation_deg = b.atan2(a).to_degrees();
+            let scale_x = (a * a + b * b).sqrt();
+            let scale_y = (c * c + d * d).sqrt();
+            ctms.push((rotation_deg, scale_x, scale_y, e, f));
+        }
+    }
+    ctms
 }
 
 /// Parse PostScript path geometry from a content stream.
@@ -737,8 +895,8 @@ fn parse_aip_private_stream(
     };
 
     if let Some(name) = extract_layer_name(content_str) {
-        element.artboard_name = Some(name.clone());
-        element.id = name;
+        element.name = Some(name.clone());
+        element.id = format!("{}_{}", name, stream_idx);
     }
 
     let effects = parse_live_effect_xml(content_str);
@@ -767,8 +925,13 @@ fn parse_aip_private_stream(
         element.mesh_patches = patches;
     }
 
-    // Parse CTM rotation
-    if let Some((rot, sx, sy, tx, ty)) = parse_ctm_from_stream(content_str) {
+    // Parse CTM rotation candidates
+    let ctms = parse_ctms_from_stream(content_str);
+    element.transform_candidates = ctms
+        .iter()
+        .map(|&(r, sx, sy, tx, ty)| [r, sx, sy, tx, ty])
+        .collect();
+    if let Some(&(rot, sx, sy, tx, ty)) = ctms.last() {
         if rot.abs() > 0.01 {
             element.rotation_deg = rot;
         }
@@ -815,6 +978,7 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
         artboards: Vec::new(),
         page_tiles: Vec::new(),
         elements: Vec::new(),
+        transform_candidates: Vec::new(),
         errors: Vec::new(),
     };
 
@@ -856,9 +1020,15 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
             // Main PDF content stream: scan for CTM and path geometry only
             let mut element = Element {
                 id: format!("ctm_element_{}", object_id.0),
+                is_pseudo_element: true,
                 ..Default::default()
             };
-            if let Some((rot, sx, sy, tx, ty)) = parse_ctm_from_stream(content_str) {
+            let ctms = parse_ctms_from_stream(content_str);
+            element.transform_candidates = ctms
+                .iter()
+                .map(|&(r, sx, sy, tx, ty)| [r, sx, sy, tx, ty])
+                .collect();
+            if let Some(&(rot, sx, sy, tx, ty)) = ctms.last() {
                 element.rotation_deg = rot;
                 element.scale_x = sx;
                 element.scale_y = sy;
@@ -873,9 +1043,12 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
             }
             // Only add if we found meaningful data
             if element.rotation_deg.abs() > 0.01 || !element.path_points.is_empty() {
-                let is_dup = result.elements.iter().any(|e| e.id == element.id);
+                let is_dup = result
+                    .transform_candidates
+                    .iter()
+                    .any(|e| e.id == element.id);
                 if !is_dup {
-                    result.elements.push(element);
+                    result.transform_candidates.push(element);
                 }
             }
         }
@@ -1075,7 +1248,99 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
         }
     }
 
+    // Promote CTM/path candidates into transform-backed elements so they reach downstream
+    // generation without leaking the internal `ctm_element_*` pseudo IDs into public output.
+    for (idx, candidate) in result.transform_candidates.iter_mut().enumerate() {
+        if candidate.is_pseudo_element {
+            candidate.is_pseudo_element = false;
+            candidate.id = format!("transform_candidate_{}", idx);
+            candidate.element_type = Some("shape".to_string());
+        }
+    }
+    result.elements.append(&mut result.transform_candidates);
+
+    // Populate stable matching metadata
+    let all_artboards: Vec<_> = result
+        .artboards
+        .iter()
+        .map(|a| (a.name.clone(), a.x, a.y, a.x + a.width, a.y + a.height))
+        .collect();
+    for elem in &mut result.elements {
+        let (x, y, w, h) = element_bounds(elem);
+        elem.bounds = Some([x, y, w, h]);
+
+        // Assign artboard_name by bounds if not already set
+        if elem.artboard_name.is_none() {
+            let mut assigned = false;
+            for (name, ax, ay, ax2, ay2) in &all_artboards {
+                let aw = ax2 - ax;
+                let ah = ay2 - ay;
+                if x < ax + aw && x + w > *ax && y < ay + ah && y + h > *ay {
+                    elem.artboard_name = Some(name.clone());
+                    assigned = true;
+                    break;
+                }
+            }
+            if !assigned && !all_artboards.is_empty() {
+                elem.artboard_name = Some(all_artboards[0].0.clone());
+            }
+        }
+
+        if elem.name.is_none() {
+            elem.name = elem.artboard_name.clone();
+        }
+        if elem.element_type.is_none() {
+            if !elem.path_points.is_empty() {
+                elem.element_type = Some("path".to_string());
+            } else if elem.is_pseudo_element {
+                elem.element_type = Some("transform".to_string());
+            } else {
+                elem.element_type = Some("shape".to_string());
+            }
+        }
+    }
+
     Ok(result)
+}
+
+fn element_bounds(elem: &Element) -> (f64, f64, f64, f64) {
+    if !elem.path_points.is_empty() {
+        let min_x = elem
+            .path_points
+            .iter()
+            .flat_map(|p| [p.anchor[0], p.left_ctrl[0], p.right_ctrl[0]])
+            .fold(f64::INFINITY, f64::min);
+        let min_y = elem
+            .path_points
+            .iter()
+            .flat_map(|p| [p.anchor[1], p.left_ctrl[1], p.right_ctrl[1]])
+            .fold(f64::INFINITY, f64::min);
+        let max_x = elem
+            .path_points
+            .iter()
+            .flat_map(|p| [p.anchor[0], p.left_ctrl[0], p.right_ctrl[0]])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let max_y = elem
+            .path_points
+            .iter()
+            .flat_map(|p| [p.anchor[1], p.left_ctrl[1], p.right_ctrl[1]])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let w = (max_x - min_x).max(1.0);
+        let h = (max_y - min_y).max(1.0);
+        (min_x, min_y, w, h)
+    } else {
+        let w = if elem.scale_x > 0.0 {
+            elem.scale_x
+        } else {
+            1.0
+        };
+        let h = if elem.scale_y > 0.0 {
+            elem.scale_y
+        } else {
+            1.0
+        };
+        (elem.translate_x, elem.translate_y, w, h)
+    }
 }
 
 /// Convert an ai_parser `Element` to a codegen `LayoutElement` for code generation.
@@ -1104,36 +1369,8 @@ fn element_to_layout(elem: &Element, idx: usize) -> LayoutElement {
 
     // Derive position and size from path_points bounding box when available,
     // otherwise fall back to CTM translate_x/translate_y with a default size.
-    let (x, y, w, h) = if !elem.path_points.is_empty() {
-        let min_x = elem
-            .path_points
-            .iter()
-            .map(|p| p.anchor[0])
-            .fold(f64::INFINITY, f64::min);
-        let min_y = elem
-            .path_points
-            .iter()
-            .map(|p| p.anchor[1])
-            .fold(f64::INFINITY, f64::min);
-        let max_x = elem
-            .path_points
-            .iter()
-            .map(|p| p.anchor[0])
-            .fold(f64::NEG_INFINITY, f64::max);
-        let max_y = elem
-            .path_points
-            .iter()
-            .map(|p| p.anchor[1])
-            .fold(f64::NEG_INFINITY, f64::max);
-        let w = (max_x - min_x).max(1.0);
-        let h = (max_y - min_y).max(1.0);
-        (min_x as f32, min_y as f32, w as f32, h as f32)
-    } else {
-        // Use CTM translation as position; scale gives approximate size
-        let w = (elem.scale_x * 100.0).max(1.0) as f32;
-        let h = (elem.scale_y * 100.0).max(1.0) as f32;
-        (elem.translate_x as f32, elem.translate_y as f32, w, h)
-    };
+    let (x, y, w, h) = element_bounds(elem);
+    let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);
 
     let mut layout_elem = LayoutElement::new(id, ElementType::Shape, x, y, w, h);
     layout_elem.fill = Some(fill_color);
@@ -1141,14 +1378,312 @@ fn element_to_layout(elem: &Element, idx: usize) -> LayoutElement {
     layout_elem.rotation_deg = elem.rotation_deg as f32;
     layout_elem.corner_radius = elem.corner_radius as f32;
     layout_elem.opacity = 1.0;
+    layout_elem.appearance_fills = elem
+        .appearance_fills
+        .iter()
+        .map(|c| AppearanceFill {
+            color: egui::Color32::from_rgba_unmultiplied(c.r, c.g, c.b, c.a),
+            gradient: None,
+            opacity: c.opacity.unwrap_or(1.0) as f32,
+            blend_mode: parse_blend_mode(&c.blend_mode),
+        })
+        .collect();
+    layout_elem.appearance_strokes = elem
+        .appearance_strokes
+        .iter()
+        .map(|s| AppearanceStroke {
+            color: egui::Color32::from_rgba_unmultiplied(s.r, s.g, s.b, s.a),
+            width: s.width as f32,
+            opacity: s.opacity.unwrap_or(1.0) as f32,
+            blend_mode: parse_blend_mode(&s.blend_mode),
+            cap: s.cap.as_deref().and_then(|c| c.parse().ok()),
+            join: s.join.as_deref().and_then(|j| j.parse().ok()),
+            dash: s.dash.clone(),
+            miter_limit: s.miter_limit,
+        })
+        .collect();
+    layout_elem.effects = elem
+        .live_effects
+        .iter()
+        .map(live_effect_to_effect_def)
+        .collect();
+
+    let mut appearance_stack = egui_expressive::scene::AppearanceStack::default();
+    for fill in &layout_elem.appearance_fills {
+        appearance_stack
+            .entries
+            .push(egui_expressive::scene::AppearanceEntry::Fill(
+                egui_expressive::scene::FillLayer {
+                    paint: egui_expressive::scene::PaintSource::Solid(fill.color),
+                    opacity: fill.opacity,
+                    blend_mode: fill.blend_mode.clone(),
+                },
+            ));
+    }
+    for effect in &layout_elem.effects {
+        appearance_stack
+            .entries
+            .push(egui_expressive::scene::AppearanceEntry::Effect(
+                egui_expressive::scene::EffectLayer {
+                    effect_type: effect.effect_type.clone(),
+                    params: effect.clone(),
+                    opacity: 1.0,
+                    blend_mode: BlendMode::Normal,
+                },
+            ));
+    }
+    for stroke in &layout_elem.appearance_strokes {
+        appearance_stack
+            .entries
+            .push(egui_expressive::scene::AppearanceEntry::Stroke(
+                egui_expressive::scene::StrokeLayer {
+                    paint: egui_expressive::scene::PaintSource::Solid(stroke.color),
+                    width: stroke.width,
+                    opacity: stroke.opacity,
+                    blend_mode: stroke.blend_mode.clone(),
+                    cap: stroke.cap.clone(),
+                    join: stroke.join.clone(),
+                    dash: stroke.dash.clone(),
+                    miter_limit: stroke.miter_limit,
+                },
+            ));
+    }
+    layout_elem.appearance_stack = appearance_stack;
+    layout_elem.path_points = elem
+        .path_points
+        .iter()
+        .map(|p| egui_expressive::codegen::PathPoint {
+            anchor: [p.anchor[0] as f32, p.anchor[1] as f32],
+            left_ctrl: [p.left_ctrl[0] as f32, p.left_ctrl[1] as f32],
+            right_ctrl: [p.right_ctrl[0] as f32, p.right_ctrl[1] as f32],
+        })
+        .collect();
+    layout_elem.path_closed = elem.path_closed;
+
     layout_elem
+}
+
+fn parse_blend_mode(mode: &str) -> BlendMode {
+    match mode.to_lowercase().as_str() {
+        "multiply" => BlendMode::Multiply,
+        "screen" => BlendMode::Screen,
+        "overlay" => BlendMode::Overlay,
+        "darken" => BlendMode::Darken,
+        "lighten" => BlendMode::Lighten,
+        "color_dodge" | "colordodge" => BlendMode::ColorDodge,
+        "color_burn" | "colorburn" => BlendMode::ColorBurn,
+        "hard_light" | "hardlight" => BlendMode::HardLight,
+        "soft_light" | "softlight" => BlendMode::SoftLight,
+        "difference" => BlendMode::Difference,
+        "exclusion" => BlendMode::Exclusion,
+        "hue" => BlendMode::Hue,
+        "saturation" => BlendMode::Saturation,
+        "color" => BlendMode::Color,
+        "luminosity" => BlendMode::Luminosity,
+        _ => BlendMode::Normal,
+    }
+}
+
+fn live_effect_to_effect_def(effect: &LiveEffect) -> EffectDef {
+    let name = effect.name.to_ascii_lowercase();
+    let params = &effect.params.params;
+    if name.contains("noise") || name.contains("grain") || name.contains("mezzotint") {
+        EffectDef {
+            effect_type: EffectType::Noise,
+            amount: param_f32(params, &["amount", "opacity", "intensity"], 0.16),
+            scale: param_f32(params, &["scale", "size", "cellSize"], 2.0),
+            seed: param_u32(params, &["seed"], 0),
+            ..EffectDef::default()
+        }
+    } else if name.contains("blur") {
+        EffectDef {
+            effect_type: EffectType::GaussianBlur,
+            radius: param_f32(params, &["radius", "blur"], 4.0),
+            ..EffectDef::default()
+        }
+    } else if name.contains("drop shadow") || name.contains("dropshadow") {
+        EffectDef {
+            effect_type: EffectType::DropShadow,
+            x: param_f32(params, &["horz", "x"], 0.0),
+            y: param_f32(params, &["vert", "y"], 0.0),
+            blur: param_f32(params, &["blur", "radius"], 4.0),
+            spread: param_f32(params, &["spread"], 0.0),
+            ..EffectDef::default()
+        }
+    } else if name.contains("inner shadow") || name.contains("innershadow") {
+        EffectDef {
+            effect_type: EffectType::InnerShadow,
+            x: param_f32(params, &["horz", "x"], 0.0),
+            y: param_f32(params, &["vert", "y"], 0.0),
+            blur: param_f32(params, &["blur", "radius"], 4.0),
+            ..EffectDef::default()
+        }
+    } else if name.contains("outer glow") || name.contains("outerglow") {
+        EffectDef {
+            effect_type: EffectType::OuterGlow,
+            blur: param_f32(params, &["blur", "radius"], 4.0),
+            ..EffectDef::default()
+        }
+    } else if name.contains("inner glow") || name.contains("innerglow") {
+        EffectDef {
+            effect_type: EffectType::InnerGlow,
+            blur: param_f32(params, &["blur", "radius"], 4.0),
+            ..EffectDef::default()
+        }
+    } else if name.contains("bevel") {
+        EffectDef {
+            effect_type: EffectType::Bevel,
+            depth: param_f32(params, &["depth"], 2.0),
+            angle: param_f32(params, &["angle"], 0.0),
+            ..EffectDef::default()
+        }
+    } else {
+        EffectDef {
+            effect_type: EffectType::LiveEffect,
+            ..EffectDef::default()
+        }
+    }
+}
+
+fn param_f32(params: &HashMap<String, Value>, keys: &[&str], fallback: f32) -> f32 {
+    keys.iter()
+        .find_map(|key| params.get(*key).and_then(|v| v.as_f64()).map(|v| v as f32))
+        .unwrap_or(fallback)
+}
+
+fn param_u32(params: &HashMap<String, Value>, keys: &[&str], fallback: u32) -> u32 {
+    keys.iter()
+        .find_map(|key| params.get(*key).and_then(|v| v.as_u64()).map(|v| v as u32))
+        .unwrap_or(fallback)
+}
+
+fn element_belongs_to_artboard(
+    e: &Element,
+    artboard_name: &str,
+    artboard_rect: (f64, f64, f64, f64),
+    all_artboards: &[(String, f64, f64, f64, f64)],
+    is_first_artboard: bool,
+) -> bool {
+    if let Some(ref ab_name) = e.artboard_name {
+        return ab_name == artboard_name;
+    }
+
+    let (x, y, w, h) = element_bounds(e);
+    let (ax, ay, aw, ah) = artboard_rect;
+
+    let intersects = x < ax + aw && x + w > ax && y < ay + ah && y + h > ay;
+    if intersects {
+        return true;
+    }
+
+    if is_first_artboard {
+        let mut belongs_to_any = false;
+        for (_, oax, oay, oax2, oay2) in all_artboards {
+            let oaw = oax2 - oax;
+            let oah = oay2 - oay;
+            if x < oax + oaw && x + w > *oax && y < oay + oah && y + h > *oay {
+                belongs_to_any = true;
+                break;
+            }
+        }
+        if !belongs_to_any {
+            return true;
+        }
+    }
+
+    false
+}
+
+pub fn generate_per_artboard_output(result: &AiParseResult) -> Vec<serde_json::Value> {
+    let artboards = if result.artboards.is_empty() {
+        vec![("default".to_string(), 0.0f64, 0.0f64, f64::MAX, f64::MAX)]
+    } else {
+        result
+            .artboards
+            .iter()
+            .map(|a| (a.name.clone(), a.x, a.y, a.x + a.width, a.y + a.height))
+            .collect::<Vec<_>>()
+    };
+
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    for (artboard_idx, (name, _x1, _y1, _x2, _y2)) in artboards.iter().enumerate() {
+        let sanitized = name
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        let sanitized = if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
+            format!("ab_{}", sanitized)
+        } else if sanitized.is_empty() {
+            "artboard".to_string()
+        } else {
+            sanitized
+        };
+        let filename = format!("{}.rs", sanitized);
+        let selected_elements: Vec<&Element> = result
+            .elements
+            .iter()
+            .filter(|e| !e.is_pseudo_element || !e.path_points.is_empty())
+            .filter(|e| {
+                element_belongs_to_artboard(
+                    e,
+                    name,
+                    (*_x1, *_y1, _x2 - _x1, _y2 - _y1),
+                    &artboards,
+                    artboard_idx == 0,
+                )
+            })
+            .collect();
+        let element_count = selected_elements.len();
+        let artboard_info = artboards.iter().find(|(n, _, _, _, _)| n == name);
+        let (ab_w, ab_h) = artboard_info
+            .map(|(_, x1, y1, x2, y2)| ((x2 - x1).abs(), (y2 - y1).abs()))
+            .unwrap_or((375.0, 812.0));
+        let layout_elements: Vec<LayoutElement> = selected_elements
+            .iter()
+            .enumerate()
+            .map(|(i, e)| element_to_layout(e, i))
+            .collect();
+        let code = generate_artboard_file(
+            name,
+            ab_w as f32,
+            ab_h as f32,
+            &layout_elements,
+            &std::collections::HashMap::new(),
+        );
+        entries.push(serde_json::json!({
+            "artboard": name,
+            "filename": filename,
+            "width": ab_w,
+            "height": ab_h,
+            "element_count": element_count,
+            "code": code,
+            "elements": result.elements.iter()
+                .filter(|e| {
+                    element_belongs_to_artboard(
+                        e,
+                        name,
+                        (*_x1, *_y1, _x2 - _x1, _y2 - _y1),
+                        &artboards,
+                        artboard_idx == 0,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        }));
+    }
+    entries
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: ai-parser <file.ai> [--pretty]");
+        eprintln!("Usage: ai-parser <file.ai> [--pretty] [--per-artboard]");
         std::process::exit(1);
     }
 
@@ -1161,11 +1696,12 @@ fn main() {
         Err(e) => {
             let error_result = AiParseResult {
                 version: "1.0".to_string(),
-                source_file: args[1].clone(),
+                source_file: path.to_string_lossy().to_string(),
                 ai_version: String::new(),
                 artboards: Vec::new(),
                 page_tiles: Vec::new(),
                 elements: Vec::new(),
+                transform_candidates: Vec::new(),
                 errors: vec![e],
             };
             if let Ok(json) = serde_json::to_string(&error_result) {
@@ -1178,79 +1714,7 @@ fn main() {
     };
 
     if per_artboard {
-        // Output one entry per artboard (or one entry if no artboards defined)
-        let artboards = if result.artboards.is_empty() {
-            vec![("default".to_string(), 0.0f64, 0.0f64, f64::MAX, f64::MAX)]
-        } else {
-            result
-                .artboards
-                .iter()
-                .map(|a| (a.name.clone(), a.x, a.y, a.x + a.width, a.y + a.height))
-                .collect::<Vec<_>>()
-        };
-
-        let mut entries: Vec<serde_json::Value> = Vec::new();
-        for (artboard_idx, (name, _x1, _y1, _x2, _y2)) in artboards.iter().enumerate() {
-            let sanitized = name
-                .chars()
-                .map(|c| {
-                    if c.is_alphanumeric() {
-                        c.to_ascii_lowercase()
-                    } else {
-                        '_'
-                    }
-                })
-                .collect::<String>();
-            let sanitized = if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
-                format!("ab_{}", sanitized)
-            } else if sanitized.is_empty() {
-                "artboard".to_string()
-            } else {
-                sanitized
-            };
-            let filename = format!("{}.rs", sanitized);
-            let element_count = result
-                .elements
-                .iter()
-                .filter(|e| {
-                    e.artboard_name.as_deref() == Some(name.as_str())
-                        || (e.artboard_name.is_none() && artboard_idx == 0)
-                })
-                .count();
-            let artboard_info = artboards.iter().find(|(n, _, _, _, _)| n == name);
-            let (ab_w, ab_h) = artboard_info
-                .map(|(_, x1, y1, x2, y2)| ((x2 - x1).abs(), (y2 - y1).abs()))
-                .unwrap_or((375.0, 812.0));
-            let layout_elements: Vec<LayoutElement> = result
-                .elements
-                .iter()
-                .filter(|e| {
-                    e.artboard_name.as_deref() == Some(name.as_str())
-                        || (e.artboard_name.is_none() && artboard_idx == 0)
-                })
-                .enumerate()
-                .map(|(i, e)| element_to_layout(e, i))
-                .collect();
-            let code = generate_artboard_file(
-                name,
-                ab_w as f32,
-                ab_h as f32,
-                &layout_elements,
-                &std::collections::HashMap::new(),
-            );
-            entries.push(serde_json::json!({
-                "artboard": name,
-                "filename": filename,
-                "width": ab_w,
-                "height": ab_h,
-                "element_count": element_count,
-                "code": code,
-                "elements": result.elements.iter()
-                    .filter(|e| e.artboard_name.as_deref() == Some(name.as_str())
-                        || (e.artboard_name.is_none() && artboard_idx == 0))
-                    .collect::<Vec<_>>(),
-            }));
-        }
+        let entries = generate_per_artboard_output(&result);
         let json = if pretty {
             serde_json::to_string_pretty(&entries)
         } else {
@@ -1335,6 +1799,76 @@ mod tests {
     }
 
     #[test]
+    fn test_layer_name_not_artboard() {
+        let content = "%%Layer: MyLayer\n%AI8_BeginLayer\n[ 1.0 0.0 0.0 1.0 ] Xa";
+        let mut errors = vec![];
+        let elem = parse_aip_private_stream(content.as_bytes(), 0, &mut errors).unwrap();
+        assert_eq!(elem.name, Some("MyLayer".to_string()));
+        assert_eq!(elem.artboard_name, None);
+    }
+
+    #[test]
+    fn test_element_to_layout_copies_path() {
+        let mut elem = Element::default();
+        elem.path_points.push(PathPoint {
+            anchor: [1.0, 2.0],
+            left_ctrl: [3.0, 4.0],
+            right_ctrl: [5.0, 6.0],
+        });
+        elem.path_closed = true;
+        let layout = element_to_layout(&elem, 0);
+        assert_eq!(layout.path_points.len(), 1);
+        assert_eq!(layout.path_points[0].anchor, [1.0, 2.0]);
+        assert!(layout.path_closed);
+    }
+
+    #[test]
+    fn test_parse_appearance_stroke_properties() {
+        let content = "1 J\n2 j\n4.0 M\n[2.0 4.0] 0 d\n2.5 w\n[ 0.0 1.0 0.0 1.0 ] xa";
+        let (_, strokes) = parse_appearance(content);
+        assert_eq!(strokes.len(), 1);
+        assert_eq!(strokes[0].g, 255);
+        assert_eq!(strokes[0].width, 2.5);
+        assert_eq!(strokes[0].cap.as_deref(), Some("round"));
+        assert_eq!(strokes[0].join.as_deref(), Some("bevel"));
+        assert_eq!(strokes[0].miter_limit, Some(4.0));
+        assert_eq!(strokes[0].dash.as_deref(), Some(&[2.0, 4.0][..]));
+    }
+
+    #[test]
+    fn test_parse_appearance_case_sensitive() {
+        let content = "[ 1.0 0.0 0.0 1.0 ] Xa\n[ 0.0 1.0 0.0 1.0 ] xa";
+        let (fills, strokes) = parse_appearance(content);
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].r, 255);
+        assert_eq!(fills[0].opacity, Some(1.0));
+        assert_eq!(strokes.len(), 1);
+        assert_eq!(strokes[0].g, 255);
+        assert_eq!(strokes[0].opacity, Some(1.0));
+    }
+
+    #[test]
+    fn test_parse_appearance_blend_mode() {
+        let content = "/BM /Multiply\n[ 1.0 0.0 0.0 1.0 ] Xa";
+        let (fills, _) = parse_appearance(content);
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].blend_mode, "Multiply");
+
+        let content2 = "/BlendMode /Screen\n[ 0.0 1.0 0.0 1.0 ] xa";
+        let (_, strokes) = parse_appearance(content2);
+        assert_eq!(strokes.len(), 1);
+        assert_eq!(strokes[0].blend_mode, "Screen");
+    }
+
+    #[test]
+    fn test_parse_appearance_gradient_fallback() {
+        let content = "0.0 0.0 0.0 1.0 k\n/Pattern cs\n sh\n";
+        let (fills, _strokes) = parse_appearance(content);
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].r, 128); // Fallback color
+    }
+
+    #[test]
     fn test_extract_ai_version() {
         let content = "%AI8_CreatorVersion 25.0";
         let version = extract_ai_version(content);
@@ -1344,9 +1878,9 @@ mod tests {
     #[test]
     fn test_parse_ctm_identity() {
         let content = "1 0 0 1 0 0 cm";
-        let result = parse_ctm_from_stream(content);
-        assert!(result.is_some());
-        let (rot, sx, sy, tx, ty) = result.unwrap();
+        let result = parse_ctms_from_stream(content);
+        assert!(!result.is_empty());
+        let (rot, sx, sy, tx, ty) = result.last().unwrap();
         assert!(
             (rot).abs() < 0.001,
             "identity rotation should be 0, got {}",
@@ -1362,9 +1896,9 @@ mod tests {
     fn test_parse_ctm_90deg() {
         // 90 degree rotation: a=0, b=1, c=-1, d=0
         let content = "0 1 -1 0 0 0 cm";
-        let result = parse_ctm_from_stream(content);
-        assert!(result.is_some());
-        let (rot, _sx, _sy, _tx, _ty) = result.unwrap();
+        let result = parse_ctms_from_stream(content);
+        assert!(!result.is_empty());
+        let (rot, _sx, _sy, _tx, _ty) = result.last().unwrap();
         assert!((rot - 90.0).abs() < 0.01, "expected 90 deg, got {}", rot);
     }
 
@@ -1452,5 +1986,70 @@ mod tests {
             r,
             detected
         );
+    }
+
+    #[test]
+    fn test_parse_path_geometry() {
+        let content = "10 20 m 30 40 l 50 60 70 80 90 100 c h";
+        let (points, closed) = parse_path_geometry(content);
+        assert!(closed);
+        assert_eq!(points.len(), 3);
+
+        // m 10 20
+        assert_eq!(points[0].anchor, [10.0, 20.0]);
+
+        // l 30 40
+        assert_eq!(points[1].anchor, [30.0, 40.0]);
+
+        // c 50 60 70 80 90 100
+        assert_eq!(points[2].anchor, [90.0, 100.0]);
+        assert_eq!(points[2].left_ctrl, [70.0, 80.0]);
+        assert_eq!(points[1].right_ctrl, [50.0, 60.0]);
+    }
+
+    #[test]
+    fn test_generate_per_artboard_output() {
+        let result = AiParseResult {
+            version: "1.0".to_string(),
+            source_file: "test.ai".to_string(),
+            ai_version: "25.0".to_string(),
+            artboards: vec![Artboard {
+                name: "Artboard_1".to_string(),
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+            }],
+            page_tiles: vec![],
+            elements: vec![Element {
+                id: "elem_1".to_string(),
+                artboard_name: Some("Artboard_1".to_string()),
+                ..Default::default()
+            }],
+            transform_candidates: vec![],
+            errors: vec![],
+        };
+
+        let output = generate_per_artboard_output(&result);
+        assert_eq!(output.len(), 1);
+        let obj = output[0].as_object().unwrap();
+        assert_eq!(obj.get("artboard").unwrap().as_str().unwrap(), "Artboard_1");
+        assert_eq!(obj.get("element_count").unwrap().as_u64().unwrap(), 1);
+        assert!(obj.get("elements").unwrap().as_array().unwrap().len() == 1);
+    }
+
+    #[test]
+    fn test_parse_ai_file_real_sample() {
+        let path = Path::new("UI assets from illustrator.ai");
+        if path.exists() {
+            let result = parse_ai_file(path).unwrap();
+            assert!(!result.elements.is_empty(), "Should find elements");
+            assert!(!result.artboards.is_empty(), "Should find artboards");
+            let per_artboard = generate_per_artboard_output(&result);
+            assert!(
+                !per_artboard.is_empty(),
+                "Should generate per-artboard output"
+            );
+        }
     }
 }

@@ -1,9 +1,55 @@
 # egui_expressive
 
-**A batteries-included extension crate for [egui](https://github.com/emilk/egui) 0.34** — design tokens, Material Design 3 widgets, animation primitives, blur effects, DAW-style controls, layout macros, and more.
+**Expressive, beautiful UI for [egui](https://github.com/emilk/egui) 0.34 — without giving up immediate-mode simplicity or performance.** Design tokens, Material Design 3 widgets, animation primitives, blur and glow effects, blend modes, DAW-style controls, design-tool code generation, layout macros, and more.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE-MIT)
 [![egui: 0.34](https://img.shields.io/badge/egui-0.34-orange.svg)](https://github.com/emilk/egui)
+
+## Why `egui_expressive`?
+
+`egui` is fast, portable, immediate-mode, and deliberately minimal. That is its strength—but building visually rich, production-polished interfaces directly from raw `Painter` calls can become repetitive: layered effects, state-driven styling, gradients, shadows, masks, complex strokes, large canvases, design tokens, and design-tool imports all require boilerplate.
+
+`egui_expressive` is the expressive design layer on top of egui. The goal is not to replace egui’s renderer, layout model, or interaction system. The goal is to make egui capable of highly designed interfaces while preserving the benefits that make egui valuable:
+
+- **Immediate-mode ergonomics** — APIs compose with `egui::Ui`, `egui::Painter`, `egui::Shape`, and `egui::Response`.
+- **Performance-first rendering** — use CPU/epaint meshes for cheap vector primitives, viewport culling for huge canvases, and GPU/WGPU-backed callbacks only when an effect genuinely needs shader or render-target support.
+- **Beautiful by default, escape hatches always available** — higher-level builders terminate into egui-native concepts, and you can drop down to raw egui at any point.
+- **Code output over screenshots** — design-tool exports aim to generate editable Rust primitives and effect code. Current exports cover an incremental subset of features (vector/primitive export target). Limitations include embedded rasters, unsupported live effects, and complex blend/mask cases.
+
+In short: **egui is the floor, not the ceiling.** This crate exists so applications can stay immediate-mode and lightweight while still looking expressive, polished, and aiming for design-tool fidelity.
+
+## Architecture
+
+```text
+┌─────────────────────────────────────────────┐
+│              Your Application                │
+├─────────────────────────────────────────────┤
+│           egui_expressive                    │
+│  ┌─────┐ ┌─────┐ ┌───────┐ ┌─────────────┐ │
+│  │draw │ │style│ │state  │ │interaction  │ │
+│  └──┬──┘ └──┬──┘ └───┬───┘ └──────┬──────┘ │
+│  ┌──┴──┐ ┌──┴──────┐ │  ┌─────────┴──────┐ │
+│  │surf.│ │animation│ │  │   widgets      │ │
+│  └─────┘ └─────────┘ │  └────────────────┘ │
+│                    ┌──┴──┐                   │
+│                    │tools│                   │
+│                    └─────┘                   │
+├─────────────────────────────────────────────┤
+│          egui (Painter, Ui, Response)        │
+├─────────────────────────────────────────────┤
+│          epaint / egui-wgpu where needed     │
+└─────────────────────────────────────────────┘
+```
+
+Most primitives render through egui’s existing `epaint` mesh and shape pipeline. More demanding Illustrator-style effects—true blurs, advanced blend/composite modes, stencil-like masks, gradient meshes, warps, or 3D-style effects—can be implemented as opt-in GPU-backed primitives using egui’s custom paint callback path while retaining immediate-mode call sites.
+
+Core philosophy:
+
+1. **egui is the floor, not the ceiling** — every API composes with raw egui.
+2. **Low overhead when unused** — features should be gated or pay-as-you-call.
+3. **State machines over boolean soup** — richer controls use explicit state models.
+4. **Builders terminate into egui types** — no hidden retained UI framework.
+5. **Culling is first-class** — timelines, node graphs, and large design surfaces should stay fast.
 
 ## Installation
 
@@ -25,7 +71,7 @@ eframe = "0.34"
 | `codegen` | SVG layout inference and Rust scaffold code generation. Naming convention parser (`row-*`, `col-*`, `btn-*`, etc.), gap inference, layout tree builder, multi-file artboard output |
 | `debug` | Debug overlays, `debug_label`, `debug_interaction` (enabled by default via `debug` feature) |
 | `devtools` | Live-tweakable `Prop` system with `DevToolsPanel` inspector (panel is no-op outside debug_assertions) |
-| `draw` | `ShapeBuilder`, `LayeredPainter`, gradients (linear + radial), box shadows, icons, scan-lines, vignette, **blend modes (16 Photoshop-style modes), 2D affine transforms, clipping masks, ZStack, layer compositing** |
+| `draw` | `ShapeBuilder`, `LayeredPainter`, gradients (linear + radial), box shadows, icons, scan-lines, vignette, **2D affine transforms, ZStack** |
 | `figma` | Figma design-token import and `figma-export` CLI binary |
 | `icons` | Icon font rendering with `Icon`, `IconButton`, `IconSize` types and built-in icon constants |
 | `interaction` | `DragDelta`, `DragAxis`, `PanZoom` — pointer and gesture helpers |
@@ -41,6 +87,8 @@ eframe = "0.34"
 | `typography` | Rich text rendering with `TypeScale`, `TypeSpec`, text overflow/decoration/transform support |
 | `widgets` | DAW controls (Knob, Fader, Meter, StepGrid, DragNumber), layout widgets (ResizableSplit, TabBar, TreeView, CollapsePanel, DragReorder), timeline (TimelineClip, Ruler, Waveform), and more |
 | `daw` | *(feature-gated)* — Convenience re-export module for DAW-oriented widgets and utilities (gated behind `daw` feature) |
+| `gpu` | *(feature-gated)* — GPU-accelerated effects pipeline using `wgpu` (gated behind `wgpu` feature) |
+| `scene` | Retained-mode scene graph for complex vector rendering and effect compositing |
 
 ## Feature Flags
 
@@ -48,7 +96,9 @@ eframe = "0.34"
 |---------|---------|-------------|
 | `debug` | [yes] | Enables DebugOverlay (methods become no-ops when off), debug_label, debug_interaction (removed from exports when off) |
 | `daw` | [no] | Enables the daw convenience re-export module (widgets are always available in the widgets module) |
-| `clip-mask` | [no] | Enables `clipped_shape_cpu` for CPU-side arbitrary-shape clipping (requires `tiny-skia`) |
+| `clip-mask` | [no] | Enables `clipped_shape_cpu` for CPU-side polygon mask overlay approximation (background-dependent; requires `tiny-skia`) |
+| `wgpu` | [no] | Enables the `gpu` module and `wgpu` dependency for hardware-accelerated effects |
+| `gpu-effects` | [no] | Enables advanced GPU effects (currently an alias for `wgpu`) |
 
 ## Quick Example
 
@@ -114,7 +164,7 @@ cargo run --bin ai-parser -- design.ai --pretty
 cargo run --bin ai-parser -- design.ai --per-artboard
 ```
 
-The parser extracts: artboards, AIPrivateData streams, LiveEffects, CTM transforms, Bezier path geometry, corner radius detection, fill/stroke appearance, gradient meshes, envelope distortions, and 3D effects.
+The parser currently extracts an incremental subset of features: artboards, AIPrivateData streams, CTM transforms, Bezier path geometry, corner radius detection, and fill/stroke appearance. Limitations include embedded rasters, unsupported live effects, and complex blend/mask cases.
 
 ## SVG Parsing
 
@@ -150,7 +200,7 @@ let nodes = infer_layout(&elements, &InferenceOptions::default());
 let code = generate_rust("my_screen", 375.0, 812.0, &nodes, Some(bg_color), None, None);
 ```
 
-Supports naming convention hints (`row-*`, `col-*`, `btn-*`, `card-*`, `panel-*`, `scroll-*`, `badge-*`, etc.), automatic gap inference, 16 blend modes, and multi-file artboard output.
+Supports naming convention hints (`row-*`, `col-*`, `btn-*`, `card-*`, `panel-*`, `scroll-*`, `badge-*`, etc.), automatic gap inference, and multi-file artboard output.
 
 ## Examples
 

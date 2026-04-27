@@ -37,8 +37,11 @@ pub mod debug;
 pub mod devtools;
 pub mod draw;
 pub mod figma;
+#[cfg(feature = "wgpu")]
+pub mod gpu;
 pub mod icons;
 pub mod m3;
+pub mod scene;
 pub mod svg;
 pub mod swiftui;
 pub mod theme;
@@ -66,27 +69,33 @@ pub use blur::{
     blur_image, blurred_image_shape, soft_glow, soft_inner_shadow, soft_shadow, BlurQuality,
 };
 pub use codegen::{
-    diff_sidecars, generate_components_file, generate_mod_file, generate_multi_file_output,
-    generate_rust, generate_state_file, generate_tokens_file, infer_layout, parse_json_sidecar,
-    parse_naming, parse_svg_elements, svg_to_rust_scaffold, AppearanceFill, AppearanceStroke,
-    ArtboardInfo, ArtboardOutput, ArtboardState, BlendMode, ComponentDef, EffectDef, EffectType,
-    ElementType, EmitMode, GradientDef, GradientStop, GradientType, InferenceOptions,
-    LayoutElement, LayoutNode, MultiFileOutput, NamingHint, PanelSide, SidecarChange, TextAlign,
-    TextRun, ThirdPartyEffect,
+    diff_sidecars, generate_all_artboards, generate_components_file, generate_mod_file,
+    generate_multi_file_output, generate_rust, generate_state_file, generate_tokens_file,
+    infer_layout, parse_json_sidecar, parse_naming, parse_svg_elements, svg_to_rust_scaffold,
+    AppearanceFill, AppearanceStroke, ArtboardDef, ArtboardInfo, ArtboardOutput, ArtboardState,
+    BlendMode, ComponentDef, EffectDef, EffectType, ElementType, EmitMode, GradientDef,
+    GradientStop, GradientType, InferenceOptions, LayoutElement, LayoutNode, MultiFileOutput,
+    NamingHint, PanelSide, SidecarChange, TextAlign, TextRun, ThirdPartyEffect,
 };
 pub use devtools::{DevToolsPanel, Prop, PropRegistry, PropValue};
 #[cfg(feature = "clip-mask")]
 pub use draw::clipped_shape_cpu;
-pub use draw::composite_layers_gpu;
 pub use draw::{
-    blend_color, box_shadow, clip_to, clipped_rounded_rect, clipped_shape, composite_layers,
-    dashed_path, dot_matrix, glow, gradient_rect, icon, icon_loop, icon_play, icon_record,
-    icon_stop, inner_shadow, linear_gradient_rect, radial_gradient, radial_gradient_rect,
-    scan_lines, transform_shape, vignette, with_opacity, zstack, zstack_layers, BlendLayer,
-    ClipShape, DashPattern, GradientDir, LayeredPainter, RadialGradientDir, RichStroke,
-    ShadowOffset, ShapeBuilder, StackAlign, StrokeCap, StrokeJoin, Transform2D,
+    blend_color, box_shadow, clip_to, clip_to_bounding_rect, clipped_layers_gpu,
+    clipped_rounded_rect, clipped_shape, clipped_shape_approx, clipped_to_bounding_rect,
+    composite_layers, composite_layers_gpu, dashed_path, dot_matrix, glow, gradient_path_mesh,
+    gradient_path_mesh_with_geometry, gradient_path_mesh_with_transform, gradient_rect, icon,
+    icon_loop, icon_play, icon_record, icon_stop, inner_shadow, linear_gradient_rect,
+    mesh_gradient_patch, noise_rect, paint_image_from_path, pattern_fill_path, radial_gradient,
+    radial_gradient_rect, radial_gradient_rect_stops, rounded_rect_path, scan_lines,
+    transform_shape, vignette, with_blend_mode, with_clip_path, with_opacity, zstack,
+    zstack_layers, BlendLayer, ClipShape, DashPattern, GradientDir, GradientPathGeometry,
+    LayeredPainter, RadialGradientDir, RichStroke, ShadowOffset, ShapeBuilder, StackAlign,
+    StrokeCap, StrokeJoin, Transform2D,
 };
 pub use figma::design_tokens_from_json;
+#[cfg(feature = "wgpu")]
+pub use gpu::{init_gpu_effects, GpuEffectsResources};
 pub use icons::chars as icon_constants;
 pub use icons::{Icon, IconButton, IconSize};
 pub use interaction::{
@@ -128,6 +137,7 @@ pub use widgets::{
 pub use m3::{
     blend_overlay,
     M3Badge,
+    M3Badge as Badge,
     // Tier 1 components:
     M3Button,
     M3ButtonVariant,
@@ -166,4 +176,8 @@ pub use m3::{
     M3TopAppBar,
     M3TopAppBarVariant,
     M3TypeScale,
+};
+pub use scene::{
+    render_geometry_appearance, render_scene, AppearanceEntry, AppearanceStack, ArtboardScene,
+    EffectLayer, FillLayer, Geometry, NoiseDef, PaintSource, SceneNode, StrokeLayer,
 };

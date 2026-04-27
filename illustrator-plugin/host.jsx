@@ -6,9 +6,97 @@
 if (typeof JSON !== 'object') {
     JSON = {};
 }
+
+var __eguiHostDiagnostics = [];
+function noteHostDiagnostic(context, error) {
+    try {
+        if (__eguiHostDiagnostics.length < 200) {
+            __eguiHostDiagnostics.push({ id: "host", note: context + ": " + (error && error.message ? error.message : String(error)) });
+        }
+    } catch (ignored) {
+        // Last-resort guard: diagnostics must never break export.
+    }
+}
+
+function consumeHostDiagnostics() {
+    var out = __eguiHostDiagnostics.slice(0);
+    __eguiHostDiagnostics = [];
+    return out;
+}
+
 if (typeof JSON.parse !== 'function') {
     JSON.parse = function(str) {
-        try { return eval('(' + str + ')'); } catch(e) { return null; }
+        var text = String(str), i = 0;
+        function fail(msg) { throw new Error('Invalid JSON: ' + msg + ' at ' + i); }
+        function ws() { while (/\s/.test(text.charAt(i))) i++; }
+        function parseString() {
+            var out = '';
+            if (text.charAt(i++) !== '"') fail('expected string');
+            while (i < text.length) {
+                var ch = text.charAt(i++);
+                if (ch === '"') return out;
+                if (ch === '\\') {
+                    var esc = text.charAt(i++);
+                    if (esc === '"' || esc === '\\' || esc === '/') out += esc;
+                    else if (esc === 'b') out += '\b';
+                    else if (esc === 'f') out += '\f';
+                    else if (esc === 'n') out += '\n';
+                    else if (esc === 'r') out += '\r';
+                    else if (esc === 't') out += '\t';
+                    else if (esc === 'u') { out += String.fromCharCode(parseInt(text.substr(i, 4), 16)); i += 4; }
+                    else fail('bad escape');
+                } else out += ch;
+            }
+            fail('unterminated string');
+        }
+        function parseNumber() {
+            var start = i;
+            if (text.charAt(i) === '-') i++;
+            while (/\d/.test(text.charAt(i))) i++;
+            if (text.charAt(i) === '.') { i++; while (/\d/.test(text.charAt(i))) i++; }
+            if (/[eE]/.test(text.charAt(i))) { i++; if (/[+\-]/.test(text.charAt(i))) i++; while (/\d/.test(text.charAt(i))) i++; }
+            var n = Number(text.substring(start, i));
+            if (!isFinite(n)) fail('bad number');
+            return n;
+        }
+        function parseArray() {
+            var arr = [];
+            i++; ws();
+            if (text.charAt(i) === ']') { i++; return arr; }
+            while (i < text.length) {
+                arr.push(parseValue()); ws();
+                if (text.charAt(i) === ']') { i++; return arr; }
+                if (text.charAt(i++) !== ',') fail('expected comma');
+            }
+            fail('unterminated array');
+        }
+        function parseObject() {
+            var obj = {};
+            i++; ws();
+            if (text.charAt(i) === '}') { i++; return obj; }
+            while (i < text.length) {
+                ws(); var key = parseString(); ws();
+                if (text.charAt(i++) !== ':') fail('expected colon');
+                obj[key] = parseValue(); ws();
+                if (text.charAt(i) === '}') { i++; return obj; }
+                if (text.charAt(i++) !== ',') fail('expected comma');
+            }
+            fail('unterminated object');
+        }
+        function parseValue() {
+            ws();
+            var ch = text.charAt(i);
+            if (ch === '"') return parseString();
+            if (ch === '{') return parseObject();
+            if (ch === '[') return parseArray();
+            if (ch === 't' && text.substr(i, 4) === 'true') { i += 4; return true; }
+            if (ch === 'f' && text.substr(i, 5) === 'false') { i += 5; return false; }
+            if (ch === 'n' && text.substr(i, 4) === 'null') { i += 4; return null; }
+            return parseNumber();
+        }
+        var value = parseValue(); ws();
+        if (i !== text.length) fail('trailing input');
+        return value;
     };
 }
 if (typeof JSON.stringify !== 'function') {
@@ -55,6 +143,41 @@ function getDiagnosticsJSON() {
     return JSON.stringify(result);
 }
 
+function getDocumentPath(doc) {
+    try {
+        if (doc && doc.fullName && doc.fullName.fsName) return doc.fullName.fsName;
+    } catch (e) { noteHostDiagnostic("getDocumentPath fullName", e); }
+    try {
+        if (doc && doc.path && doc.name) return doc.path + "/" + doc.name;
+    } catch (e2) { noteHostDiagnostic("getDocumentPath path/name", e2); }
+    return "";
+}
+
+function portableAssetPath(pathValue) {
+    var raw = String(pathValue || "").replace(/\\/g, "/");
+    var parts = raw.split("/");
+    var name = parts.length ? parts[parts.length - 1] : "";
+    name = name.replace(/[^A-Za-z0-9._-]/g, "_");
+    if (!name) return null;
+    var hash = 0;
+    for (var i = 0; i < raw.length; i++) {
+        hash = ((hash << 5) - hash) + raw.charCodeAt(i);
+        hash |= 0;
+    }
+    var hashStr = Math.abs(hash).toString(16);
+    hashStr = hashStr.substring(0, 6);
+    return "assets/" + hashStr + "_" + name;
+}
+
+function sanitizeOutputFilename(filename) {
+    var raw = String(filename || "").replace(/\\/g, "/");
+    var parts = raw.split("/");
+    var base = parts.length ? parts[parts.length - 1] : "";
+    base = base.replace(/[^A-Za-z0-9._-]/g, "_");
+    if (!base || base === "." || base === "..") base = "exported.rs";
+    return base;
+}
+
 function getArtboardsJSON() {
     try {
         var appExists = false;
@@ -95,17 +218,51 @@ function saveFilesToFolderJSON(payloadJSON) {
         }
         
         var saved = [];
+        var errors = [];
         for (var filename in files) {
             if (Object.prototype.hasOwnProperty.call(files, filename)) {
-                var file = new File(folder.fsName + "/" + filename);
+                var safeFilename = sanitizeOutputFilename(filename);
+                var file = new File(folder.fsName + "/" + safeFilename);
                 file.encoding = "UTF-8";
-                file.open("w");
-                file.write(files[filename]);
-                file.close();
-                saved.push(filename);
+                if (file.open("w")) {
+                    if (file.write(files[filename])) {
+                        saved.push(safeFilename);
+                    } else {
+                        errors.push("Failed to write " + safeFilename);
+                    }
+                    file.close();
+                } else {
+                    errors.push("Failed to open " + safeFilename);
+                }
             }
         }
         
+        var assets = payload.assets || {};
+        var assetsFolder = new Folder(folder.fsName + "/assets");
+        var createdAssetsFolder = false;
+        for (var assetPath in assets) {
+            if (Object.prototype.hasOwnProperty.call(assets, assetPath)) {
+                var sourceFile = new File(assets[assetPath]);
+                if (sourceFile.exists) {
+                    if (!createdAssetsFolder) {
+                        assetsFolder.create();
+                        createdAssetsFolder = true;
+                    }
+                    var destFile = new File(folder.fsName + "/" + assetPath);
+                    if (sourceFile.copy(destFile)) {
+                        saved.push(assetPath);
+                    } else {
+                        errors.push("Failed to copy " + assetPath);
+                    }
+                } else {
+                    errors.push("Source asset missing: " + assets[assetPath]);
+                }
+            }
+        }
+
+        if (errors.length > 0) {
+            return JSON.stringify({ error: errors.join(", "), saved: saved });
+        }
         return JSON.stringify({ success: true, folder: folder.fsName, saved: saved });
     } catch (e) {
         return JSON.stringify({ error: String(e) });
@@ -145,17 +302,17 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                 if (c.typename === "RGBColor") return { r: Math.round(c.red), g: Math.round(c.green), b: Math.round(c.blue), a: 255 };
                 if (c.typename === "CMYKColor") { var k = c.black/100; return { r: Math.round(255*(1-c.cyan/100)*(1-k)), g: Math.round(255*(1-c.magenta/100)*(1-k)), b: Math.round(255*(1-c.yellow/100)*(1-k)), a: 255 }; }
                 if (c.typename === "GrayColor") { var v = Math.round(255*(1-c.gray/100)); return { r: v, g: v, b: v, a: 255 }; }
-            } catch (e) {}
+            } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             return null;
         }
         
         function getFill(item) {
-            try { if (item.filled && item.fillColor) return colorToRGB(item.fillColor); } catch (e) {}
+            try { if (item.filled && item.fillColor) return colorToRGB(item.fillColor); } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             return null;
         }
         
         function getStroke(item) {
-            try { if (item.stroked && item.strokeColor) { var c = colorToRGB(item.strokeColor); if (c) { c.width = item.strokeWidth || 1; return c; } } } catch (e) {}
+            try { if (item.stroked && item.strokeColor) { var c = colorToRGB(item.strokeColor); if (c) { c.width = item.strokeWidth || 1; return c; } } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             return null;
         }
         
@@ -174,7 +331,7 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                 if (c.typename === "RGBColor") return { r: Math.round(c.red), g: Math.round(c.green), b: Math.round(c.blue) };
                 if (c.typename === "CMYKColor") { var k = c.black/100; return { r: Math.round(255*(1-c.cyan/100)*(1-k)), g: Math.round(255*(1-c.magenta/100)*(1-k)), b: Math.round(255*(1-c.yellow/100)*(1-k)) }; }
                 if (c.typename === "GrayColor") { var v = Math.round(255*(1-c.gray/100)); return { r: v, g: v, b: v }; }
-            } catch(e) {}
+            } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             return { r: 128, g: 128, b: 128 };
         }
 
@@ -191,10 +348,10 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                             var sc = gradientColorToRGB(s.color);
                             stops.push({ position: s.rampPoint/100, color: colorToHex(sc), opacity: s.opacity !== undefined ? s.opacity/100 : 1 });
                         }
-                    } catch(e) {}
+                    } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
                     return { type: grad.type === 1 ? "linear" : "radial", angle: angle, stops: stops };
                 }
-            } catch(e) {}
+            } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             return null;
         }
 
@@ -208,8 +365,8 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                         // XMP has shadow data but parsing it is complex — emit a generic shadow
                         fx.push({ type: "dropShadow", x: 4, y: 4, blur: 8, color: { r: 0, g: 0, b: 0, a: 0.3 } });
                     }
-                } catch(e) {}
-            } catch(e) {}
+                } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             return fx;
         }
 
@@ -224,9 +381,9 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                             var tr = trs[ri];
                             var a = tr.characterAttributes;
                             var runColor = null;
-                            try { runColor = colorToRGB(a.fillColor); } catch(e) {}
+                            try { runColor = colorToRGB(a.fillColor); } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
                             runs.push({ text: tr.contents || "", style: { size: a.size||14, weight: (a.textFont && a.textFont.name && a.textFont.name.indexOf("Bold") !== -1) ? 700 : 400, color: runColor } });
-                        } catch(e) {}
+                        } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
                     }
                 }
                 return runs.length > 0 ? runs : null;
@@ -244,13 +401,15 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                                 anchor: [pp.anchor[0] - artboardRect[0], artboardRect[1] - pp.anchor[1]],
                                 leftDir: [pp.leftDirection[0] - artboardRect[0], artboardRect[1] - pp.leftDirection[1]],
                                 rightDir: [pp.rightDirection[0] - artboardRect[0], artboardRect[1] - pp.rightDirection[1]],
+                                left_ctrl: [pp.leftDirection[0] - artboardRect[0], artboardRect[1] - pp.leftDirection[1]],
+                                right_ctrl: [pp.rightDirection[0] - artboardRect[0], artboardRect[1] - pp.rightDirection[1]],
                                 kind: pp.pointType === PointType.SMOOTH ? "smooth" : "corner"
                             });
-                        } catch(ppe) {}
+                        } catch (ppe) { noteHostDiagnostic("optional Illustrator property unavailable", ppe); }
                     }
                     if (pts.length > 0) return { points: pts, closed: item.closed || false };
                 }
-            } catch(e) {}
+            } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             return null;
         }
         
@@ -271,11 +430,11 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                                 var bb = item.geometricBounds;
                                 var bw = Math.abs(bb[2] - bb[0]), bh = Math.abs(bb[1] - bb[3]);
                                 var ratio = (bw > 0 && bh > 0) ? Math.min(bw, bh) / Math.max(bw, bh) : 0;
-                                if (ratio > 0.85) return "circle";
+                                if (ratio > 0.985) return "circle";
                                 return "ellipse";
                             }
                         }
-                    } catch(e) {}
+                    } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
                     return "shape";
                 }
                 if (t === "GroupItem") return "group";
@@ -316,22 +475,24 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                 gradient: null, blendMode: "normal",
                 effects: [], notes: [],
                 pathPoints: null, pathClosed: false,
-                imagePath: null, symbolName: null,
+                imagePath: null, embeddedRaster: false, symbolName: null,
                 isChart: false, isGradientMesh: false,
                 strokeCap: null, strokeJoin: null
             };
             
-            try { el.opacity = item.opacity !== undefined ? item.opacity / 100 : 1; } catch (e) {}
-            try { el.rotation = item.rotation !== undefined ? item.rotation : 0; } catch (e) {}
-            try { if (item.typename === "PathItem" && item.cornerRadius !== undefined) el.cornerRadius = item.cornerRadius; } catch (e) {}
-            try { if (item.strokeCap !== undefined) el.strokeCap = ({0:"butt",1:"round",2:"square"})[item.strokeCap] || "butt"; } catch(e) {}
-            try { if (item.strokeJoin !== undefined) el.strokeJoin = ({0:"miter",1:"round",2:"bevel"})[item.strokeJoin] || "miter"; } catch(e) {}
+            try { el.opacity = item.opacity !== undefined ? item.opacity / 100 : 1; } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            try { el.rotation = item.rotation !== undefined ? item.rotation : 0; } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            try { if (item.typename === "PathItem" && item.cornerRadius !== undefined) el.cornerRadius = item.cornerRadius; } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            try { if (item.strokeCap !== undefined) el.strokeCap = ({0:"butt",1:"round",2:"square"})[item.strokeCap] || "butt"; } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            try { if (item.strokeJoin !== undefined) el.strokeJoin = ({0:"miter",1:"round",2:"bevel"})[item.strokeJoin] || "miter"; } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            try { if (item.strokeDashes && item.strokeDashes.length > 0) { var dashes = []; for(var di=0; di<item.strokeDashes.length; di++) dashes.push(item.strokeDashes[di]); el.strokeDash = dashes; } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            try { if (item.strokeMiterLimit !== undefined) el.strokeMiterLimit = item.strokeMiterLimit; } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             
             // Blend mode
             try {
-                var BLEND_MAP = { "BlendModes.NORMAL":"normal","BlendModes.MULTIPLY":"multiply","BlendModes.SCREEN":"screen","BlendModes.OVERLAY":"overlay","BlendModes.DARKEN":"darken","BlendModes.LIGHTEN":"lighten","BlendModes.COLORDODGE":"color_dodge","BlendModes.COLORBURN":"color_burn","BlendModes.HARDLIGHT":"hard_light","BlendModes.SOFTLIGHT":"soft_light","BlendModes.DIFFERENCE":"difference","BlendModes.EXCLUSION":"exclusion" };
+                var BLEND_MAP = { "BlendModes.NORMAL":"normal","BlendModes.MULTIPLY":"multiply","BlendModes.SCREEN":"screen","BlendModes.OVERLAY":"overlay","BlendModes.DARKEN":"darken","BlendModes.LIGHTEN":"lighten","BlendModes.COLORDODGE":"color_dodge","BlendModes.COLORBURN":"color_burn","BlendModes.HARDLIGHT":"hard_light","BlendModes.SOFTLIGHT":"soft_light","BlendModes.DIFFERENCE":"difference","BlendModes.EXCLUSION":"exclusion", "BlendModes.HUE":"hue", "BlendModes.SATURATIONBLEND":"saturation", "BlendModes.COLORBLEND":"color", "BlendModes.LUMINOSITY":"luminosity" };
                 if (item.blendingMode !== undefined) el.blendMode = BLEND_MAP[String(item.blendingMode)] || "normal";
-            } catch(e) {}
+            } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             
             // Gradient
             el.gradient = getGradient(item);
@@ -344,16 +505,16 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             if (ppResult) { el.pathPoints = ppResult.points; el.pathClosed = ppResult.closed; }
             
             // Image path
-            try { if (item.typename === "PlacedItem" && item.file) el.imagePath = item.file.fsName || item.file.name || null; } catch(e) {}
-            try { if (item.typename === "RasterItem") el.imagePath = "raster_" + Math.round(w) + "x" + Math.round(h); } catch(e) {}
+            try { if (item.typename === "PlacedItem" && item.file) el.imagePath = portableAssetPath(item.file.fsName || item.file.name || null); } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            try { if (item.typename === "RasterItem") { el.embeddedRaster = true; el.notes.push("embedded raster image"); } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             
             // Symbol
-            try { if (item.typename === "SymbolItem") { el.type = "symbol"; el.symbolName = item.symbol ? item.symbol.name : "unknown"; } } catch(e) {}
+            try { if (item.typename === "SymbolItem") { el.type = "symbol"; el.symbolName = item.symbol ? item.symbol.name : "unknown"; } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             
             // Flags
-            try { if (item.typename === "MeshItem") { el.isGradientMesh = true; el.notes.push("gradient mesh"); } } catch(e) {}
-            try { if (item.typename === "GraphItem") { el.isChart = true; el.notes.push("chart/graph"); } } catch(e) {}
-            try { if (item.clipping || item.clipped) el.notes.push("clipping mask"); } catch(e) {}
+            try { if (item.typename === "MeshItem") { el.isGradientMesh = true; el.notes.push("gradient mesh"); } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            try { if (item.typename === "GraphItem") { el.isChart = true; el.notes.push("chart/graph"); } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            try { if (item.clipping || item.clipped) { el.clipMask = true; el.notes.push("clipping mask"); } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             
             // Text
             if (item.typename === "TextFrame") {
@@ -361,8 +522,8 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                 try {
                     var chars = item.textRange.characterAttributes;
                     var size = 14, weight = 400, family = "default";
-                    try { size = chars.size || 14; } catch (e) {}
-                    try { if (chars.textFont) { var fn = chars.textFont.name || ""; weight = fn.indexOf("Bold") !== -1 ? 700 : fn.indexOf("Light") !== -1 ? 300 : 400; family = fn; } } catch (e) {}
+                    try { size = chars.size || 14; } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+                    try { if (chars.textFont) { var fn = chars.textFont.name || ""; weight = fn.indexOf("Bold") !== -1 ? 700 : fn.indexOf("Light") !== -1 ? 300 : 400; family = fn; } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
                     el.textStyle = { size: size, fontSize: size, weight: weight, family: family };
                 } catch (e) { el.textStyle = { size: 14, fontSize: 14, weight: 400, family: "default" }; }
                 el.textRuns = getTextRuns(item);
@@ -376,7 +537,7 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                             extractRecursive(item.pageItems[ci], artboardRect, el.children, depth + 1);
                         }
                     }
-                } catch (e) {}
+                } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             }
             
             elements.push(el);
@@ -386,7 +547,7 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             var idx = selectedIndices[i];
             var ab = doc.artboards[idx];
             var rect = ab.artboardRect;
-            var abInfo = { name: ab.name, width: Math.abs(rect[2] - rect[0]), height: Math.abs(rect[3] - rect[1]), x: rect[0], y: rect[1] };
+            var abInfo = { name: ab.name, index: idx, width: Math.abs(rect[2] - rect[0]), height: Math.abs(rect[3] - rect[1]), x: rect[0], y: rect[1], bounds: [rect[0], rect[1], rect[2], rect[3]] };
             
             var items = [];
             for (var j = 0; j < doc.pageItems.length; j++) {
@@ -397,7 +558,7 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                     if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) {
                         items.push(it);
                     }
-                } catch(e) {}
+                } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             }
             
             var els = [];
@@ -405,13 +566,13 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                 extractRecursive(items[k], rect, els, 0);
             }
             
-            results.push({ artboard: abInfo, elements: els });
+            results.push({ artboard: abInfo, elements: els, documentPath: getDocumentPath(doc) });
         }
         
         for (var i = 0; i < selectedTiles.length; i++) {
             var tile = selectedTiles[i];
             var rect = [tile.x, tile.y, tile.x + tile.width, tile.y - tile.height];
-            var abInfo = { name: tile.name, width: tile.width, height: tile.height, x: tile.x, y: tile.y };
+            var abInfo = { name: tile.name, width: tile.width, height: tile.height, x: tile.x, y: tile.y, bounds: [rect[0], rect[1], rect[2], rect[3]] };
             
             var items = [];
             for (var j = 0; j < doc.pageItems.length; j++) {
@@ -422,7 +583,7 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                     if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) {
                         items.push(it);
                     }
-                } catch(e) {}
+                } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             }
             
             var els = [];
@@ -430,9 +591,13 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                 extractRecursive(items[k], rect, els, 0);
             }
             
-            results.push({ artboard: abInfo, elements: els });
+            results.push({ artboard: abInfo, elements: els, documentPath: getDocumentPath(doc) });
         }
         
+        var hostDiagnostics = consumeHostDiagnostics();
+        if (hostDiagnostics.length > 0) {
+            for (var ri = 0; ri < results.length; ri++) results[ri].hostDiagnostics = hostDiagnostics;
+        }
         return JSON.stringify(results);
     } catch (e) {
         return JSON.stringify({ error: String(e) });

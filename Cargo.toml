@@ -2,7 +2,7 @@
 name = "egui_expressive"
 version = "0.1.0"
 edition = "2021"
-description = "Authoring-layer helpers for advanced custom UI in egui"
+description = "Expressive design system and authoring layer for beautiful egui UI without giving up immediate mode"
 license = "MIT"
 readme = "README.md"
 keywords = ["egui", "gui", "ui", "widget", "daw"]
@@ -13,6 +13,8 @@ default = ["debug"]
 debug = []
 daw = []
 clip-mask = ["tiny-skia"]
+wgpu = ["dep:egui-wgpu"]
+gpu-effects = ["wgpu"]
 
 [dependencies]
 egui = "0.34"
@@ -22,6 +24,8 @@ lopdf = "0.34"
 flate2 = "1.0"
 regex = "1"
 tiny-skia = { version = "0.11", optional = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+egui-wgpu = { version = "0.34", optional = true }
 
 [dev-dependencies]
 eframe = "0.34"

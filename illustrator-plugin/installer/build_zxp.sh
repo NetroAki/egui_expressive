@@ -17,10 +17,90 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_ROOT="$(dirname "$PLUGIN_DIR")"
 OUTPUT_DIR="$PROJECT_ROOT/dist"
+RELEASE_DIR="$OUTPUT_DIR/release"
+
+# Detect platform
+case "$(uname -s)" in
+    Darwin*) PLATFORM="darwin" ;;
+    Linux*) PLATFORM="linux" ;;
+    MINGW*|MSYS*|CYGWIN*) PLATFORM="win32" ;;
+    *) PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')" ;;
+esac
 
 EXTENSION_ID="com.egui-expressive.illustrator-exporter"
 VERSION="1.0.0"
-ZXP_NAME="egui_expressive_export-${VERSION}.zxp"
+ZXP_NAME="egui_expressive_export-${VERSION}-${PLATFORM}.zxp"
+
+prune_stale_packages() {
+    mkdir -p "$OUTPUT_DIR" "$RELEASE_DIR"
+    rm -f \
+        "$OUTPUT_DIR/egui_expressive_export-${VERSION}.zxp" \
+        "$OUTPUT_DIR/egui_expressive_export-${VERSION}.zip" \
+        "$OUTPUT_DIR/egui_expressive_export-${VERSION}-installer.zip" \
+        "$OUTPUT_DIR/test_fresh.zxp" \
+        "$RELEASE_DIR/egui_expressive_export-${VERSION}.zxp" \
+        "$RELEASE_DIR/egui_expressive_export-${VERSION}.zip" \
+        "$RELEASE_DIR/egui_expressive_export-${VERSION}-installer.zip"
+    rm -f "$RELEASE_DIR"/egui_expressive_export-"$VERSION"-*.zxp \
+        "$RELEASE_DIR"/egui_expressive_export-"$VERSION"-*-installer.zip \
+        "$RELEASE_DIR/$ZXP_NAME"
+}
+
+write_release_readme() {
+    local readme_path="$1"
+    cat > "$readme_path" <<EOF
+# egui_expressive Illustrator Exporter — ${PLATFORM} package
+
+This bundle contains the platform-specific ZXP:
+
+- ${ZXP_NAME}
+
+Install only on a matching ${PLATFORM} host. Do not install this ZXP on another platform because the bundled ai-parser binary is platform-specific.
+
+## Install
+
+EOF
+    if [ "$PLATFORM" = "darwin" ]; then
+        cat >> "$readme_path" <<EOF
+Run:
+
+    chmod +x install.sh && ./install.sh
+
+The helper requires ${ZXP_NAME} and refuses non-matching platform packages.
+EOF
+    elif [ "$PLATFORM" = "win32" ]; then
+        cat >> "$readme_path" <<EOF
+Run install.bat on Windows. The helper requires ${ZXP_NAME} and refuses non-matching platform packages.
+EOF
+    else
+        cat >> "$readme_path" <<EOF
+Install ${ZXP_NAME} with your CEP extension manager for this Linux/CEP test host.
+EOF
+    fi
+}
+
+sync_release_bundle() {
+    local zxp_path="$1"
+    mkdir -p "$RELEASE_DIR"
+    rm -f "$RELEASE_DIR/install.sh" "$RELEASE_DIR/install.bat" "$RELEASE_DIR/install_zxp.bat"
+    cp "$zxp_path" "$RELEASE_DIR/$ZXP_NAME"
+    write_release_readme "$RELEASE_DIR/README.md"
+
+    local zip_path="$OUTPUT_DIR/${ZXP_NAME%.zxp}-installer.zip"
+    rm -f "$zip_path" "$RELEASE_DIR/${ZXP_NAME%.zxp}-installer.zip"
+    if [ "$PLATFORM" = "darwin" ]; then
+        cp "$PLUGIN_DIR/install.sh" "$RELEASE_DIR/install.sh"
+        zip -j "$zip_path" "$zxp_path" "$RELEASE_DIR/README.md" "$PLUGIN_DIR/install.sh" >/dev/null
+    elif [ "$PLATFORM" = "win32" ]; then
+        cp "$PLUGIN_DIR/install.bat" "$RELEASE_DIR/install.bat"
+        zip -j "$zip_path" "$zxp_path" "$RELEASE_DIR/README.md" "$PLUGIN_DIR/install.bat" >/dev/null
+    else
+        zip -j "$zip_path" "$zxp_path" "$RELEASE_DIR/README.md" >/dev/null
+    fi
+    cp "$zip_path" "$RELEASE_DIR/${ZXP_NAME%.zxp}-installer.zip"
+    info "Release artifact synced: $RELEASE_DIR/$ZXP_NAME"
+    info "Installer bundle synced: $RELEASE_DIR/${ZXP_NAME%.zxp}-installer.zip"
+}
 
 # Certificate defaults (for self-signed)
 CERT_COUNTRY="US"
@@ -31,7 +111,9 @@ CERT_PASSWORD="${ZXP_SIGN_PASSWORD:-}"
 CERT_FILE="$OUTPUT_DIR/cert.p12"
 
 # Timestamp authority
-TSA_URL="http://timestamp.digicert.com"
+TSA_URL="https://timestamp.digicert.com"
+# Note: If your signer fails with HTTPS, you can try HTTP:
+# TSA_URL="http://timestamp.digicert.com"
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -119,6 +201,8 @@ prepare_staging() {
         cp "$PLUGIN_DIR/host.jsx" "$stage/host.jsx"
     fi
 
+    stage_ai_parser "$stage"
+
     # NOTE: .debug file is excluded from production builds.
     # For development, create it manually:
     #   cat > .debug << 'EOF'
@@ -126,6 +210,26 @@ prepare_staging() {
     #   EOF
 
     echo "$stage"
+}
+
+stage_ai_parser() {
+    local stage="$1"
+    local platform="$PLATFORM"
+    local binary="ai-parser"
+    if [ "$platform" = "win32" ]; then binary="ai-parser.exe"; fi
+
+    info "Building bundled ai-parser for $platform..." >&2
+    (. "$HOME/.cargo/env" 2>/dev/null || true; cd "$PROJECT_ROOT" && cargo build --release --bin ai-parser) >&2
+
+    local built="$PROJECT_ROOT/target/release/$binary"
+    if [ ! -f "$built" ]; then
+        error "Built ai-parser binary not found: $built"
+    fi
+
+    mkdir -p "$stage/bin/$platform"
+    cp "$built" "$stage/bin/$platform/$binary"
+    chmod +x "$stage/bin/$platform/$binary" 2>/dev/null || true
+    info "Bundled ai-parser: bin/$platform/$binary" >&2
 }
 
 # ─── Run signer command (handles wine: prefix) ───────────────────────────────
@@ -142,7 +246,13 @@ run_signer() {
                 win_args+=("$arg")
             fi
         done
-        wine "$exe" "${win_args[@]}" 2>&1 | grep -v "^0.*fixme:" | grep -v "^$"
+        local output status
+        set +e
+        output="$(wine "$exe" "${win_args[@]}" 2>&1)"
+        status=$?
+        set -e
+        printf '%s\n' "$output" | grep -v "^0.*fixme:" | grep -v "^$" || true
+        return "$status"
     elif [[ "$signer" == "npx zxp-sign-cmd" ]]; then
         npx zxp-sign-cmd "$@"
     else
@@ -205,6 +315,7 @@ sign_and_package() {
     local size
     size=$(du -sh "$output" | cut -f1)
     info "Package created: $output ($size)"
+    sync_release_bundle "$output"
 }
 
 # ─── Unsigned packaging fallback ────────────────────────────────────────────
@@ -232,6 +343,8 @@ main() {
     echo "║  egui_expressive Exporter — .zxp Package Builder    ║"
     echo "╚══════════════════════════════════════════════════════╝"
     echo ""
+
+    prune_stale_packages
 
     # Stage files
     local stage
@@ -272,13 +385,18 @@ main() {
         sign_and_package "$signer" "$stage" "$cert"
 
         echo ""
-        info "Done! Install with:"
+        info "Done! Built platform-specific package for $PLATFORM. Install on matching host with:"
         echo ""
-        echo "  macOS:"
-        echo "    \"/Library/Application Support/Adobe/Adobe Desktop Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent\" /install \"$OUTPUT_DIR/$ZXP_NAME\""
-        echo ""
-        echo "  Windows:"
-        echo "    \"C:\\Program Files\\Common Files\\Adobe\\Adobe Desktop Common\\RemoteComponents\\UPI\\UnifiedPluginInstallerAgent\\UnifiedPluginInstallerAgent.exe\" /install \"$OUTPUT_DIR\\$ZXP_NAME\""
+        if [ "$PLATFORM" = "darwin" ]; then
+            echo "  macOS:"
+            echo "    \"/Library/Application Support/Adobe/Adobe Desktop Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent\" /install \"$OUTPUT_DIR/$ZXP_NAME\""
+        elif [ "$PLATFORM" = "win32" ]; then
+            echo "  Windows:"
+            echo "    \"C:\\Program Files\\Common Files\\Adobe\\Adobe Desktop Common\\RemoteComponents\\UPI\\UnifiedPluginInstallerAgent\\UnifiedPluginInstallerAgent.exe\" /install \"$OUTPUT_DIR\\$ZXP_NAME\""
+        else
+            echo "  Linux/CEP test host:"
+            echo "    Install \"$OUTPUT_DIR/$ZXP_NAME\" with your CEP extension manager."
+        fi
         echo ""
         echo "  Or use Anastasiy's Extension Manager: https://install.anastasiy.com"
     fi
