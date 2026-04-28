@@ -11,8 +11,8 @@ var __eguiHostDiagnostics = [];
 var __eguiHostLogFileName = "egui_expressive_export.log";
 var __eguiHostLogInitialized = false;
 var __eguiHostLogFallbacksCleaned = false;
-var __eguiHostMaxLogBytes = 1024 * 1024;
-var __eguiHostItemTraceLimit = 0;
+var __eguiHostMaxLogBytes = 20 * 1024 * 1024;
+var __eguiHostItemTraceLimit = 100000;
 
 function stringifyHostLogValue(value) {
     try {
@@ -399,6 +399,49 @@ function describeHostItem(item) {
     return parts.join(" ");
 }
 
+function summarizeHostText(value, limit) {
+    var text = String(value || "");
+    var max = limit || 120;
+    text = text.replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t");
+    return text.length > max ? text.substring(0, max) + "…" : text;
+}
+
+function countElementTree(elements) {
+    var total = 0;
+    if (!elements) return total;
+    for (var i = 0; i < elements.length; i++) {
+        total += 1 + countElementTree(elements[i].children || []);
+    }
+    return total;
+}
+
+function describeExtractedElement(el) {
+    var parts = [];
+    parts.push("id=" + summarizeHostText(el.id, 80));
+    parts.push("type=" + el.type);
+    parts.push("depth=" + el.depth);
+    parts.push("bounds=" + [el.x, el.y, el.w, el.h].join(","));
+    parts.push("opacity=" + el.opacity);
+    parts.push("blend=" + el.blendMode);
+    parts.push("rotation=" + el.rotation);
+    parts.push("children=" + (el.children ? el.children.length : 0));
+    if (el.fill) parts.push("fill=" + safeJsonStringify(el.fill));
+    if (el.stroke) parts.push("stroke=" + safeJsonStringify(el.stroke));
+    if (el.gradient) parts.push("gradient=" + safeJsonStringify(el.gradient));
+    if (el.pathPoints) parts.push("pathPoints=" + el.pathPoints.length + " closed=" + el.pathClosed);
+    if (el.text !== null && el.text !== undefined) parts.push("textLen=" + String(el.text).length + " text=\"" + summarizeHostText(el.text, 120) + "\"");
+    if (el.textStyle) parts.push("textStyle=" + safeJsonStringify(el.textStyle));
+    if (el.textRuns) parts.push("textRuns=" + el.textRuns.length);
+    if (el.imagePath) parts.push("imagePath=" + summarizeHostText(el.imagePath, 160));
+    if (el.embeddedRaster) parts.push("embeddedRaster=true");
+    if (el.symbolName) parts.push("symbol=" + summarizeHostText(el.symbolName, 120));
+    if (el.isChart) parts.push("chart=true");
+    if (el.isGradientMesh) parts.push("gradientMesh=true");
+    if (el.clipMask) parts.push("clipMask=true");
+    if (el.notes && el.notes.length) parts.push("notes=" + el.notes.join("|"));
+    return parts.join(" ");
+}
+
 function getArtboardsJSON() {
     try {
         appendHostLog("getArtboardsJSON", "start");
@@ -516,6 +559,83 @@ function saveFilesToFolderJSON(payloadJSON) {
     }
 }
 
+function selectSaveFolderJSON() {
+    try {
+        appendHostLog("selectSaveFolderJSON", "start");
+        var folder = Folder.selectDialog("Select destination folder");
+        if (!folder) {
+            appendHostLog("selectSaveFolderJSON", "canceled");
+            return safeJsonStringify({ canceled: true });
+        }
+        appendHostLog("selectSaveFolderJSON", "folder=" + folder.fsName);
+        return safeJsonStringify({ success: true, folder: folder.fsName });
+    } catch (e) {
+        appendHostLog("selectSaveFolderJSON exception", e);
+        return safeJsonStringify({ error: String(e) });
+    }
+}
+
+function writeGeneratedFileChunkJSON(payloadJSON) {
+    try {
+        appendHostLog("writeGeneratedFileChunkJSON", "payloadChars=" + String(payloadJSON || "").length);
+        var payload = JSON.parse(payloadJSON || "{}");
+        var folderPath = String(payload.folder || "");
+        var filename = sanitizeOutputFilename(payload.filename || "generated.rs");
+        var mode = payload.mode === "a" ? "a" : "w";
+        var content = String(payload.content || "");
+        appendHostLog("writeGeneratedFileChunkJSON", "file=" + filename + " mode=" + mode + " chars=" + content.length + " folder=" + folderPath);
+        if (!folderPath) { appendHostLog("writeGeneratedFileChunkJSON error", "missing folder for " + filename); return safeJsonStringify({ error: "Missing destination folder" }); }
+
+        var folder = new Folder(folderPath);
+        if (!folder.exists) { appendHostLog("writeGeneratedFileChunkJSON error", "folder missing " + folderPath); return safeJsonStringify({ error: "Destination folder does not exist: " + folderPath }); }
+
+        var file = new File(folder.fsName + "/" + filename);
+        file.encoding = "UTF-8";
+        if (!file.open(mode)) { appendHostLog("writeGeneratedFileChunkJSON error", "open failed file=" + filename + " path=" + file.fsName); return safeJsonStringify({ error: "Failed to open " + filename }); }
+        var wrote = file.write(content);
+        file.close();
+        if (!wrote) { appendHostLog("writeGeneratedFileChunkJSON error", "write failed file=" + filename + " chars=" + content.length); return safeJsonStringify({ error: "Failed to write " + filename }); }
+        appendHostLog("writeGeneratedFileChunkJSON", "success file=" + filename + " chars=" + content.length + " path=" + file.fsName);
+        return safeJsonStringify({ success: true, filename: filename, bytes: content.length });
+    } catch (e) {
+        appendHostLog("writeGeneratedFileChunkJSON exception", e);
+        return safeJsonStringify({ error: String(e) });
+    }
+}
+
+function copyGeneratedAssetJSON(payloadJSON) {
+    try {
+        appendHostLog("copyGeneratedAssetJSON", "payloadChars=" + String(payloadJSON || "").length);
+        var payload = JSON.parse(payloadJSON || "{}");
+        var folderPath = String(payload.folder || "");
+        var assetPath = String(payload.assetPath || "").replace(/\\/g, "/");
+        var sourcePath = String(payload.sourcePath || "");
+        appendHostLog("copyGeneratedAssetJSON", "asset=" + assetPath + " source=" + sourcePath + " folder=" + folderPath);
+        if (!folderPath) { appendHostLog("copyGeneratedAssetJSON error", "missing folder for " + assetPath); return safeJsonStringify({ error: "Missing destination folder" }); }
+        if (!assetPath || assetPath.indexOf("assets/") !== 0) { appendHostLog("copyGeneratedAssetJSON error", "invalid asset path " + assetPath); return safeJsonStringify({ error: "Invalid asset path: " + assetPath }); }
+        if (!sourcePath) { appendHostLog("copyGeneratedAssetJSON error", "missing source for " + assetPath); return safeJsonStringify({ error: "Missing source asset for " + assetPath }); }
+
+        var folder = new Folder(folderPath);
+        if (!folder.exists) { appendHostLog("copyGeneratedAssetJSON error", "folder missing " + folderPath); return safeJsonStringify({ error: "Destination folder does not exist: " + folderPath }); }
+        var assetsFolder = new Folder(folder.fsName + "/assets");
+        if (!assetsFolder.exists) {
+            appendHostLog("copyGeneratedAssetJSON", "creating assets folder=" + assetsFolder.fsName);
+            assetsFolder.create();
+        }
+
+        var assetName = sanitizeOutputFilename(assetPath.substring("assets/".length));
+        var sourceFile = new File(sourcePath);
+        if (!sourceFile.exists) { appendHostLog("copyGeneratedAssetJSON error", "source missing " + sourcePath); return safeJsonStringify({ error: "Source asset missing: " + sourcePath }); }
+        var destFile = new File(assetsFolder.fsName + "/" + assetName);
+        if (!sourceFile.copy(destFile)) { appendHostLog("copyGeneratedAssetJSON error", "copy failed " + sourcePath + " -> " + destFile.fsName); return safeJsonStringify({ error: "Failed to copy " + assetPath }); }
+        appendHostLog("copyGeneratedAssetJSON", "success " + sourcePath + " -> " + destFile.fsName);
+        return safeJsonStringify({ success: true, filename: "assets/" + assetName });
+    } catch (e) {
+        appendHostLog("copyGeneratedAssetJSON exception", e);
+        return safeJsonStringify({ error: String(e) });
+    }
+}
+
 function extractArtboardDataJSON(exportPayloadJSON) {
     appendHostLog("extractArtboardDataJSON start", "payloadChars=" + String(exportPayloadJSON || "").length);
     try {
@@ -535,7 +655,7 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             selectedIndices = payload.selected || [];
             selectedTiles = payload.selectedTiles || [];
         }
-        appendHostLog("extract selection", "artboards=" + selectedIndices.length + " tiles=" + selectedTiles.length);
+        appendHostLog("extract selection", "artboards=" + selectedIndices.length + " indices=" + selectedIndices.join(",") + " tiles=" + selectedTiles.length + " payload=" + summarizeHostText(exportPayloadJSON, 500));
         
         var results = [];
         
@@ -880,7 +1000,12 @@ function extractArtboardDataJSON(exportPayloadJSON) {
         }
         
         function extractRecursive(item, artboardRect, elements, depth) {
-            try { if (item.locked || item.hidden) return; } catch (e) { return; }
+            try {
+                if (item.locked || item.hidden) {
+                    appendHostLog("extract skip hidden/locked", "depth=" + depth + " " + describeHostItem(item));
+                    return;
+                }
+            } catch (e) { appendHostLog("extract skip state error", "depth=" + depth + " " + stringifyHostLogValue(e)); return; }
             
             var x = 0, y = 0, w = 0, h = 0;
             try {
@@ -892,7 +1017,7 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                     var b2 = item.visibleBounds;
                     x = b2[0] - artboardRect[0]; y = artboardRect[1] - b2[1];
                     w = Math.abs(b2[2] - b2[0]); h = Math.abs(b2[1] - b2[3]);
-                } catch (e2) { return; }
+                } catch (e2) { appendHostLog("extract skip bounds", "depth=" + depth + " " + describeHostItem(item) + " err=" + stringifyHostLogValue(e2)); return; }
             }
             
             var el = {
@@ -974,6 +1099,8 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                     }
                 } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             }
+
+            appendHostLog("extract element", describeExtractedElement(el));
             
             elements.push(el);
         }
@@ -986,24 +1113,30 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             appendHostLog("extract artboard", "index=" + idx + " name=" + abInfo.name + " size=" + abInfo.width + "x" + abInfo.height);
             
             var items = [];
+            var scanStats = { total: 0, lockedHidden: 0, boundsFailed: 0, outside: 0, nested: 0, included: 0 };
             for (var j = 0; j < doc.pageItems.length; j++) {
                 var it = doc.pageItems[j];
+                scanStats.total += 1;
                 try {
-                    if (it.locked || it.hidden) continue;
+                    if (it.locked || it.hidden) { scanStats.lockedHidden += 1; continue; }
                     var b = it.geometricBounds;
-                    if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) {
+                    var overlaps = b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1];
+                    if (!overlaps) { scanStats.outside += 1; continue; }
+                    if (!isTopLevelItem(it)) { scanStats.nested += 1; continue; }
+                    if (overlaps) {
                         items.push(it);
+                        scanStats.included += 1;
                     }
-                } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+                } catch (e) { scanStats.boundsFailed += 1; noteHostDiagnostic("optional Illustrator property unavailable", e); }
             }
-            appendHostLog("extract artboard items", "index=" + idx + " topLevelItems=" + items.length);
+            appendHostLog("extract artboard items", "index=" + idx + " topLevelItems=" + items.length + " scan=" + safeJsonStringify(scanStats));
             
             var els = [];
             for (var k = 0; k < items.length; k++) {
                 if (__eguiHostItemTraceLimit > 0 && k < __eguiHostItemTraceLimit) appendHostLog("extract item", "artboard=" + idx + " item=" + k + " " + describeHostItem(items[k]));
                 extractRecursive(items[k], rect, els, 0);
             }
-            appendHostLog("extract artboard done", "index=" + idx + " elements=" + els.length);
+            appendHostLog("extract artboard done", "index=" + idx + " elements=" + els.length + " treeElements=" + countElementTree(els));
             
             results.push({ artboard: abInfo, elements: els, documentPath: getDocumentPath(doc) });
         }
@@ -1015,24 +1148,30 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             appendHostLog("extract tile", "name=" + abInfo.name + " size=" + abInfo.width + "x" + abInfo.height);
             
             var items = [];
+            var tileScanStats = { total: 0, lockedHidden: 0, boundsFailed: 0, outside: 0, nested: 0, included: 0 };
             for (var j = 0; j < doc.pageItems.length; j++) {
                 var it = doc.pageItems[j];
+                tileScanStats.total += 1;
                 try {
-                    if (it.locked || it.hidden) continue;
+                    if (it.locked || it.hidden) { tileScanStats.lockedHidden += 1; continue; }
                     var b = it.geometricBounds;
-                    if (b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1] && isTopLevelItem(it)) {
+                    var overlaps = b[2] > rect[0] && b[0] < rect[2] && b[1] > rect[3] && b[3] < rect[1];
+                    if (!overlaps) { tileScanStats.outside += 1; continue; }
+                    if (!isTopLevelItem(it)) { tileScanStats.nested += 1; continue; }
+                    if (overlaps) {
                         items.push(it);
+                        tileScanStats.included += 1;
                     }
-                } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+                } catch (e) { tileScanStats.boundsFailed += 1; noteHostDiagnostic("optional Illustrator property unavailable", e); }
             }
-            appendHostLog("extract tile items", "name=" + abInfo.name + " topLevelItems=" + items.length);
+            appendHostLog("extract tile items", "name=" + abInfo.name + " topLevelItems=" + items.length + " scan=" + safeJsonStringify(tileScanStats));
             
             var els = [];
             for (var k = 0; k < items.length; k++) {
                 if (__eguiHostItemTraceLimit > 0 && k < __eguiHostItemTraceLimit) appendHostLog("extract tile item", "tile=" + abInfo.name + " item=" + k + " " + describeHostItem(items[k]));
                 extractRecursive(items[k], rect, els, 0);
             }
-            appendHostLog("extract tile done", "name=" + abInfo.name + " elements=" + els.length);
+            appendHostLog("extract tile done", "name=" + abInfo.name + " elements=" + els.length + " treeElements=" + countElementTree(els));
             
             results.push({ artboard: abInfo, elements: els, documentPath: getDocumentPath(doc) });
         }
@@ -1041,8 +1180,9 @@ function extractArtboardDataJSON(exportPayloadJSON) {
         if (hostDiagnostics.length > 0) {
             for (var ri = 0; ri < results.length; ri++) results[ri].hostDiagnostics = hostDiagnostics;
         }
-        appendHostLog("extractArtboardDataJSON done", "results=" + results.length + " diagnostics=" + hostDiagnostics.length);
-        return JSON.stringify(results);
+        var resultJSON = JSON.stringify(results);
+        appendHostLog("extractArtboardDataJSON done", "results=" + results.length + " diagnostics=" + hostDiagnostics.length + " resultChars=" + resultJSON.length);
+        return resultJSON;
     } catch (e) {
         appendHostLog("extractArtboardDataJSON exception", e);
         return JSON.stringify({ error: String(e) });

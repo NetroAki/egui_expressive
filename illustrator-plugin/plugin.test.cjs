@@ -244,13 +244,19 @@ function testAriaPressedToggle() {
 
 function testHostJsx() {
   const hostSource = fs.readFileSync(path.join(__dirname, 'host.jsx'), 'utf8');
+  const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert(hostSource.includes('__eguiHostMaxLogBytes = 20 * 1024 * 1024'), 'Host log should retain detailed low-level traces');
+  assert(hostSource.includes('__eguiHostItemTraceLimit = 100000'), 'Host extraction should trace item details by default');
+  assert(hostSource.includes('describeExtractedElement'), 'Host log should describe extracted element details');
+  assert(indexHtml.includes('logArtboardDataForExport'), 'CEP panel should log extracted artboard details');
+  assert(indexHtml.includes('save file chunk'), 'CEP panel should log chunked save progress');
   assert(hostSource.includes('center: origin'), 'CEP host gradients should include radial center');
   assert(hostSource.includes('focalPoint: focalPoint'), 'CEP host gradients should include focal point');
   assert(hostSource.includes('getTextAlign(item)'), 'CEP host text extraction should include alignment');
   assert(hostSource.includes('illustratorTrackingToPx'), 'CEP host text extraction should convert tracking to px');
   const writes = [];
   const hostSandbox = {
-    Folder: function(path) { this.fsName = path; this.create = function() {}; },
+    Folder: function(path) { this.fsName = path; this.exists = true; this.create = function() { this.exists = true; }; },
     File: function(path) {
       this.fsName = path;
       this.exists = true;
@@ -303,6 +309,22 @@ function testHostJsx() {
   assert.strictEqual(saveResult.folder, '/tmp/export');
   assert(saveResult.saved.includes('test.rs'));
   assert(saveResult.saved.includes('assets/123_img.png'));
+
+  const folderResult = JSON.parse(hostSandbox.selectSaveFolderJSON());
+  assert.strictEqual(folderResult.success, true);
+  assert.strictEqual(folderResult.folder, '/tmp/export');
+  const firstChunk = JSON.parse(hostSandbox.writeGeneratedFileChunkJSON(JSON.stringify({
+    folder: '/tmp/export', filename: 'chunked.rs', content: 'fn ', mode: 'w'
+  })));
+  const secondChunk = JSON.parse(hostSandbox.writeGeneratedFileChunkJSON(JSON.stringify({
+    folder: '/tmp/export', filename: 'chunked.rs', content: 'main() {}', mode: 'a'
+  })));
+  assert.strictEqual(firstChunk.success, true);
+  assert.strictEqual(secondChunk.success, true);
+  const assetCopy = JSON.parse(hostSandbox.copyGeneratedAssetJSON(JSON.stringify({
+    folder: '/tmp/export', assetPath: 'assets/123_img.png', sourcePath: '/tmp/img.png'
+  })));
+  assert.strictEqual(assetCopy.success, true);
 
   // Test extractArtboardDataJSON with no app
   const extractResult = JSON.parse(hostSandbox.extractArtboardDataJSON(JSON.stringify([0])));
@@ -367,7 +389,7 @@ function testGenerateStateFileDerives() {
 function testHostSaveFailureHandling() {
   const hostSource = fs.readFileSync(path.join(__dirname, 'host.jsx'), 'utf8');
   const hostSandbox = {
-    Folder: function(path) { this.fsName = path; this.create = function() {}; },
+    Folder: function(path) { this.fsName = path; this.exists = true; this.create = function() { this.exists = true; }; },
     File: function(path) {
       this.fsName = path;
       this.exists = true;
