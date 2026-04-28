@@ -12,3 +12,13 @@ installer/.rnd
 *.rnd
 fix_plugin.js
 test-results/
+
+# Local export/comparison artifacts
+/artifacts/
+/Zach info.zip
+
+# Preview exports copied in for local testing; keep tracked placeholders/docs.
+/preview/generated/*.json
+/preview/generated/*.rs
+!/preview/generated/mod.rs
+!/preview/generated/README.md
