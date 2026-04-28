@@ -370,6 +370,163 @@ pub fn render_text(
     final_rect
 }
 
+/// Horizontal alignment for [`TextBlock`] rendering.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum TextBlockAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+/// One styled span inside a [`TextBlock`].
+#[derive(Clone, Debug)]
+pub struct TextSpan {
+    pub text: String,
+    pub spec: TypeSpec,
+}
+
+impl TextSpan {
+    pub fn new(text: impl Into<String>, spec: TypeSpec) -> Self {
+        Self {
+            text: text.into(),
+            spec,
+        }
+    }
+}
+
+/// Reusable absolute text-block primitive shared by generated Illustrator code
+/// and code-first egui_expressive UIs.
+///
+/// `layout_width` is the alignment frame width. It does not wrap text; use
+/// explicit newlines for multi-line blocks.
+#[derive(Clone, Debug)]
+pub struct TextBlock {
+    pub spans: Vec<TextSpan>,
+    pub align: TextBlockAlign,
+    /// Multiplier applied to each line's largest font size.
+    pub line_height: f32,
+    pub layout_width: Option<f32>,
+}
+
+impl TextBlock {
+    pub fn new(text: impl Into<String>, spec: TypeSpec) -> Self {
+        Self {
+            spans: vec![TextSpan::new(text, spec)],
+            align: TextBlockAlign::Left,
+            line_height: 1.2,
+            layout_width: None,
+        }
+    }
+
+    pub fn from_spans(spans: Vec<TextSpan>) -> Self {
+        Self {
+            spans,
+            align: TextBlockAlign::Left,
+            line_height: 1.2,
+            layout_width: None,
+        }
+    }
+
+    pub fn align(mut self, align: TextBlockAlign) -> Self {
+        self.align = align;
+        self
+    }
+
+    pub fn line_height(mut self, line_height: f32) -> Self {
+        self.line_height = line_height;
+        self
+    }
+
+    pub fn layout_width(mut self, layout_width: f32) -> Self {
+        self.layout_width = Some(layout_width);
+        self
+    }
+}
+
+impl Default for TextBlock {
+    fn default() -> Self {
+        Self {
+            spans: Vec::new(),
+            align: TextBlockAlign::Left,
+            line_height: 1.2,
+            layout_width: None,
+        }
+    }
+}
+
+fn split_text_block_lines(block: &TextBlock) -> Vec<Vec<TextSpan>> {
+    let mut lines: Vec<Vec<TextSpan>> = vec![Vec::new()];
+    for span in &block.spans {
+        for (idx, part) in span.text.split('\n').enumerate() {
+            if idx > 0 {
+                lines.push(Vec::new());
+            }
+            if !part.is_empty() {
+                lines
+                    .last_mut()
+                    .expect("line exists")
+                    .push(TextSpan::new(part, span.spec.clone()));
+            }
+        }
+    }
+    lines
+}
+
+fn measure_span_width(painter: &egui::Painter, span: &TextSpan) -> f32 {
+    let font_id = span.spec.to_font_id();
+    let color = span.spec.color.unwrap_or(Color32::BLACK);
+    let galley = painter.layout(span.text.clone(), font_id, color, f32::INFINITY);
+    galley.rect.width()
+        + span.spec.letter_spacing.max(0.0) * span.text.chars().count().saturating_sub(1) as f32
+}
+
+/// Renders a multi-span, multi-line text block at an absolute painter position.
+///
+/// Returns the painted bounds. This intentionally uses the same [`TypeSpec`]
+/// primitive as hand-authored code, so Illustrator exports do not need custom
+/// one-off text layout snippets.
+pub fn render_text_block(painter: &egui::Painter, origin: Pos2, block: &TextBlock) -> Rect {
+    let lines = split_text_block_lines(block);
+    let mut bounds: Option<Rect> = None;
+    let mut y = origin.y;
+    let line_height_multiplier = block.line_height.max(0.1);
+
+    for line in lines {
+        let line_width: f32 = line
+            .iter()
+            .map(|span| measure_span_width(painter, span))
+            .sum();
+        let line_height = line
+            .iter()
+            .map(|span| span.spec.size * line_height_multiplier)
+            .fold(14.0 * line_height_multiplier, f32::max);
+        let available_width = block.layout_width.unwrap_or(line_width);
+        let mut x = match block.align {
+            TextBlockAlign::Left => origin.x,
+            TextBlockAlign::Center => origin.x + (available_width - line_width) * 0.5,
+            TextBlockAlign::Right => origin.x + available_width - line_width,
+        };
+
+        if line.is_empty() {
+            let line_rect =
+                Rect::from_min_size(Pos2::new(origin.x, y), egui::vec2(0.0, line_height));
+            bounds = Some(bounds.map_or(line_rect, |rect| rect.union(line_rect)));
+            y += line_height;
+            continue;
+        }
+
+        for span in line {
+            let rect = render_text(painter, Pos2::new(x, y), &span.text, &span.spec, None);
+            x = rect.max.x;
+            bounds = Some(bounds.map_or(rect, |existing| existing.union(rect)));
+        }
+        y += line_height;
+    }
+
+    bounds.unwrap_or_else(|| Rect::from_min_size(origin, egui::Vec2::ZERO))
+}
+
 /// An egui widget that renders text using a TypeSpec.
 pub struct TypeLabel<'a> {
     text: &'a str,

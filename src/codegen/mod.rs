@@ -271,6 +271,8 @@ pub struct AppearanceFill {
 #[derive(Clone, Debug)]
 pub struct AppearanceStroke {
     pub color: Color32,
+    pub gradient: Option<GradientDef>,
+    pub pattern: Option<crate::scene::PatternDef>,
     pub width: f32,
     pub opacity: f32,
     pub blend_mode: BlendMode,
@@ -1354,7 +1356,11 @@ pub fn generate_rust(
         "    ui.allocate_space(egui::vec2({:.1}, {:.1}));\n",
         artboard_w, artboard_h
     ));
-    output.push_str("    let painter = ui.painter();\n");
+    output.push_str(&format!(
+        "    let artboard_rect = egui::Rect::from_min_size(origin, egui::vec2({:.1}, {:.1}));\n",
+        artboard_w, artboard_h
+    ));
+    output.push_str("    let painter = ui.painter_at(artboard_rect);\n");
     output.push('\n');
 
     // Background
@@ -2106,7 +2112,7 @@ pub fn generate_node(
             let alpha = (255.0 * style.opacity).clamp(0.0, 255.0) as u8;
             if let Some(path) = &style.image_path {
                 output.push_str(&format!(
-                    "{}egui_expressive::paint_image_from_path(ui, &ui.painter(), rect, \"{}\", \"{}\", egui::Color32::from_rgba_unmultiplied(255, 255, 255, {}));\n",
+                    "{}egui_expressive::paint_image_slot(ui, &ui.painter(), rect, Some(\"{}\"), \"{}\", egui::Color32::from_rgba_unmultiplied(255, 255, 255, {}), \"Missing Image\");\n",
                     inner, path, id, alpha
                 ));
             } else {
@@ -2115,15 +2121,9 @@ pub fn generate_node(
                     "{}// Note: Image asset slot emitted without linked path for \"{}\".\n",
                     inner, id
                 ));
-                let fill_a = (180.0 * style.opacity).clamp(0.0, 255.0) as u8;
                 output.push_str(&format!(
-                    "{}painter.rect_filled(rect, {:.1}, egui::Color32::from_rgba_premultiplied(80, 80, 80, {}));\n",
-                    inner, style.corner_radius, fill_a
-                ));
-                let stroke_a = (255.0 * style.opacity).clamp(0.0, 255.0) as u8;
-                output.push_str(&format!(
-                    "{}painter.rect_stroke(rect, {:.1}, egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 120, 120, {})), egui::StrokeKind::Outside);\n",
-                    inner, style.corner_radius, stroke_a
+                    "{}egui_expressive::paint_image_slot(ui, &ui.painter(), rect, None, \"{}\", egui::Color32::from_rgba_unmultiplied(255, 255, 255, {}), \"Image Slot\");\n",
+                    inner, id, alpha
                 ));
             }
             output.push_str(&format!("{}}}\n", indent_str));
@@ -2678,34 +2678,12 @@ pub fn generate_mod_file(artboard_names: &[&str]) -> String {
 pub fn generate_components_file(components: &[ComponentDef]) -> String {
     let mut output = String::new();
 
-    output.push_str("#[allow(unused_imports)]\n");
-    output.push_str("use egui::{Color32, RichText, Ui};\n");
-    output.push_str("#[allow(unused_imports)]\n");
-    output.push_str("use super::tokens;\n\n");
-
-    for comp in components {
-        let fn_name = sanitize_fn_name(&comp.name);
-
-        output.push_str(&format!(
-            "pub fn {}(ui: &mut Ui, label: &str) -> egui::Response {{\n",
-            fn_name
-        ));
-        output.push_str("    let btn = egui::Button::new(\n");
-        output.push_str(&format!(
-            "        RichText::new(label).size({:.1}).color(egui::Color32::from_rgba_premultiplied({}, {}, {}, {}))\n",
-            comp.text_size, comp.text_color.r(), comp.text_color.g(), comp.text_color.b(), comp.text_color.a()
-        ));
-        output.push_str(&format!(
-            "    ).fill(egui::Color32::from_rgba_premultiplied({}, {}, {}, {})).corner_radius({:.1});\n",
-            comp.fill.r(), comp.fill.g(), comp.fill.b(), comp.fill.a(),
-            comp.rounding
-        ));
-        output.push_str("    ui.add(btn)\n");
-        output.push_str("}\n\n");
-    }
-
-    // Generate default styled button if no components defined
-    // (Removed button stub as per requirements)
+    let _ = components;
+    output.push_str("// Auto-generated component hook.\n");
+    output.push_str("// Local wrapper primitives are intentionally not emitted here.\n");
+    output.push_str(
+        "// Reusable design primitives live in egui_expressive (scene, typography, image slots).\n",
+    );
 
     output
 }
@@ -4298,6 +4276,11 @@ fn parse_element(elem_value: &serde_json::Value) -> Option<LayoutElement> {
                 let so = s.as_object()?;
                 Some(AppearanceStroke {
                     color: parse_color(so).unwrap_or(Color32::BLACK),
+                    gradient: so.get("gradient").and_then(parse_gradient),
+                    pattern: so
+                        .get("gradient")
+                        .and_then(parse_pattern)
+                        .or_else(|| so.get("pattern").and_then(parse_pattern)),
                     width: so.get("width").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
                     opacity: so.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
                     blend_mode: so
@@ -4536,11 +4519,22 @@ fn parse_element(elem_value: &serde_json::Value) -> Option<LayoutElement> {
                         },
                     ));
                 } else if entry_type == "stroke" {
+                    let paint = if let Some(pattern) = eo.get("gradient").and_then(parse_pattern) {
+                        crate::scene::PaintSource::Pattern(pattern)
+                    } else if let Some(pattern) = eo.get("pattern").and_then(parse_pattern) {
+                        crate::scene::PaintSource::Pattern(pattern)
+                    } else if let Some(gradient) = eo.get("gradient").and_then(parse_gradient) {
+                        if gradient.gradient_type == GradientType::Radial {
+                            crate::scene::PaintSource::RadialGradient(gradient)
+                        } else {
+                            crate::scene::PaintSource::LinearGradient(gradient)
+                        }
+                    } else {
+                        crate::scene::PaintSource::Solid(parse_color(eo).unwrap_or(Color32::BLACK))
+                    };
                     entries.push(crate::scene::AppearanceEntry::Stroke(
                         crate::scene::StrokeLayer {
-                            paint: crate::scene::PaintSource::Solid(
-                                parse_color(eo).unwrap_or(Color32::BLACK),
-                            ),
+                            paint,
                             width: eo.get("width").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
                             opacity: eo.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0)
                                 as f32,
@@ -4663,9 +4657,20 @@ fn parse_element(elem_value: &serde_json::Value) -> Option<LayoutElement> {
                 ));
             }
             for stroke in &appearance_strokes {
+                let paint = if let Some(gradient) = &stroke.gradient {
+                    if gradient.gradient_type == GradientType::Radial {
+                        crate::scene::PaintSource::RadialGradient(gradient.clone())
+                    } else {
+                        crate::scene::PaintSource::LinearGradient(gradient.clone())
+                    }
+                } else if let Some(pattern) = &stroke.pattern {
+                    crate::scene::PaintSource::Pattern(pattern.clone())
+                } else {
+                    crate::scene::PaintSource::Solid(stroke.color)
+                };
                 entries.push(crate::scene::AppearanceEntry::Stroke(
                     crate::scene::StrokeLayer {
-                        paint: crate::scene::PaintSource::Solid(stroke.color),
+                        paint,
                         width: stroke.width,
                         opacity: stroke.opacity,
                         blend_mode: stroke.blend_mode.clone(),
@@ -5631,7 +5636,8 @@ mod tests {
         }];
 
         let components_file = generate_components_file(&components);
-        assert!(components_file.contains("pub fn primary_button"));
+        assert!(components_file.contains("Reusable design primitives live in egui_expressive"));
+        assert!(!components_file.contains("pub fn primary_button"));
     }
 
     #[test]
@@ -5875,7 +5881,8 @@ fn test_parse_json_sidecar_appearance_stack() {
                 "appearanceStack": [
                     { "type": "fill", "color": "#ff0000", "opacity": 0.5, "blendMode": "multiply",
                       "gradient": { "type": "linear", "angle": 45, "transform": [1, 0, 0, 1, 2, 3], "stops": [{ "position": 0.0, "color": "#ff0000", "opacity": 0.25 }, { "position": 1.0, "color": "#0000ff" }] } },
-                    { "type": "stroke", "r": 0, "g": 255, "b": 0, "width": 2.0, "opacity": 1.0, "blendMode": "screen", "cap": "round", "join": "bevel", "dash": [2, 4], "miterLimit": 1.0 }
+                    { "type": "stroke", "r": 0, "g": 255, "b": 0, "width": 2.0, "opacity": 1.0, "blendMode": "screen", "cap": "round", "join": "bevel", "dash": [2, 4], "miterLimit": 1.0,
+                      "gradient": { "type": "linear", "angle": 0, "stops": [{ "position": 0.0, "color": "#00ff00" }, { "position": 1.0, "color": "#0000ff" }] } }
                 ]
             }]
         }"##;
@@ -5896,10 +5903,10 @@ fn test_parse_json_sidecar_appearance_stack() {
     }
     match &stack[1] {
         crate::scene::AppearanceEntry::Stroke(s) => {
-            assert_eq!(
+            assert!(matches!(
                 s.paint,
-                crate::scene::PaintSource::Solid(egui::Color32::from_rgb(0, 255, 0))
-            );
+                crate::scene::PaintSource::LinearGradient(_)
+            ));
             assert_eq!(s.width, 2.0);
             assert_eq!(s.blend_mode, BlendMode::Screen);
             assert_eq!(s.cap, Some(StrokeCap::Round));

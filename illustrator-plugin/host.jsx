@@ -10,6 +10,9 @@ if (typeof JSON !== 'object') {
 var __eguiHostDiagnostics = [];
 var __eguiHostLogFileName = "egui_expressive_export.log";
 var __eguiHostLogInitialized = false;
+var __eguiHostLogFallbacksCleaned = false;
+var __eguiHostMaxLogBytes = 1024 * 1024;
+var __eguiHostItemTraceLimit = 0;
 
 function stringifyHostLogValue(value) {
     try {
@@ -46,6 +49,8 @@ function getHostLogFile() {
 }
 
 function removeOtherHostLogFiles(activePath) {
+    if (__eguiHostLogFallbacksCleaned) return;
+    __eguiHostLogFallbacksCleaned = true;
     var folders = [];
     try { if (Folder.myDocuments) folders.push(Folder.myDocuments); } catch (ignored) { /* optional host folder unavailable */ }
     try { if (Folder.desktop) folders.push(Folder.desktop); } catch (ignored2) { /* optional host folder unavailable */ }
@@ -62,6 +67,24 @@ function removeOtherHostLogFiles(activePath) {
     }
 }
 
+function trimHostLogFile(file) {
+    try {
+        if (!file || !file.exists || !file.length || file.length <= __eguiHostMaxLogBytes) return;
+        file.encoding = "UTF-8";
+        if (!file.open("r")) return;
+        var content = file.read();
+        file.close();
+        if (!content || content.length <= __eguiHostMaxLogBytes) return;
+        var keepChars = Math.floor(__eguiHostMaxLogBytes * 0.75);
+        var retained = content.substring(Math.max(0, content.length - keepChars));
+        if (!file.open("w")) return;
+        file.write("[log trimmed to latest entries; older entries discarded]\n" + retained);
+        file.close();
+    } catch (ignored) {
+        try { file.close(); } catch (ignored2) { /* close best effort */ }
+    }
+}
+
 function writeHostLogLine(mode, stage, detail) {
     var file = getHostLogFile();
     if (!file) return "";
@@ -73,6 +96,7 @@ function writeHostLogLine(mode, stage, detail) {
         if (extra) line += " - " + extra;
         file.writeln(line);
         file.close();
+        trimHostLogFile(file);
         return file.fsName || String(file);
     } catch (ignored) {
         try { file.close(); } catch (ignored2) { /* close best effort */ }
@@ -87,8 +111,15 @@ function resetHostLog(context) {
     return path;
 }
 
+function startHostLog(context) {
+    __eguiHostLogInitialized = true;
+    var path = writeHostLogLine("a", "host log start", context || "host.jsx loaded");
+    if (path) removeOtherHostLogFiles(path);
+    return path;
+}
+
 function appendHostLog(stage, detail) {
-    if (!__eguiHostLogInitialized) resetHostLog("implicit start");
+    if (!__eguiHostLogInitialized) startHostLog("implicit start");
     return writeHostLogLine("a", stage || "log", detail || "");
 }
 
@@ -120,7 +151,7 @@ function getHostLogPathJSON() {
     return JSON.stringify({ path: path });
 }
 
-resetHostLog("host.jsx loaded");
+startHostLog("host.jsx loaded");
 
 function noteHostDiagnostic(context, error) {
     try {
@@ -237,6 +268,59 @@ if (typeof JSON.stringify !== 'function') {
     };
 }
 
+function hostJsonEscape(value) {
+    return String(value === undefined || value === null ? "" : value)
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, "\\\"")
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
+}
+
+function hostJsonPrimitive(value) {
+    var t = typeof value;
+    if (value === null || value === undefined) return "null";
+    if (t === "number") return isFinite(value) ? String(value) : "0";
+    if (t === "boolean") return value ? "true" : "false";
+    return "\"" + hostJsonEscape(value) + "\"";
+}
+
+function safeJsonStringify(value) {
+    try { return JSON.stringify(value); } catch (jsonErr) { appendHostLog("safeJsonStringify", jsonErr); }
+    try {
+        var isArr = (Object.prototype.toString.call(value) === "[object Array]");
+        if (isArr) {
+            var rows = [];
+            for (var i = 0; i < value.length; i++) rows.push(safeJsonStringify(value[i]));
+            return "[" + rows.join(",") + "]";
+        }
+        var parts = [];
+        for (var k in value) {
+            if (Object.prototype.hasOwnProperty.call(value, k)) {
+                var v = value[k];
+                if (typeof v !== "function") parts.push("\"" + hostJsonEscape(k) + "\":" + hostJsonPrimitive(v));
+            }
+        }
+        return "{" + parts.join(",") + "}";
+    } catch (fallbackErr) {
+        return "{\"error\":\"JSON serialization failed: " + hostJsonEscape(fallbackErr) + "\"}";
+    }
+}
+
+function openDocumentCount(context) {
+    try { return app.documents.length; } catch (e) { appendHostLog(context || "documents.length", e); }
+    try { if (typeof $ !== "undefined" && $.sleep) $.sleep(200); } catch (ignored) { /* optional sleep unavailable */ }
+    try { return app.documents.length; } catch (e2) { appendHostLog((context || "documents.length") + " retry", e2); }
+    return 0;
+}
+
+function activeIllustratorDocument(context) {
+    try { return app.activeDocument; } catch (e) { appendHostLog(context || "activeDocument", e); }
+    try { if (typeof $ !== "undefined" && $.sleep) $.sleep(200); } catch (ignored) { /* optional sleep unavailable */ }
+    try { return app.activeDocument; } catch (e2) { appendHostLog((context || "activeDocument") + " retry", e2); }
+    return null;
+}
+
 function getDiagnosticsJSON() {
     var result = { hasApp: false, hasDoc: false, artboardCount: 0, docName: "", error: "" };
     try {
@@ -245,10 +329,18 @@ function getDiagnosticsJSON() {
         try { appExists = (typeof app !== 'undefined'); } catch(e) { appendHostLog("getDiagnosticsJSON error", e); return JSON.stringify({ error: e.message || String(e) }); }
         result.hasApp = appExists;
         if (result.hasApp) {
-            result.hasDoc = (app.documents.length > 0);
+            var docCount = openDocumentCount("getDiagnosticsJSON documents.length");
+            result.hasDoc = (docCount > 0);
             if (result.hasDoc) {
-                result.docName = app.activeDocument.name;
-                result.artboardCount = app.activeDocument.artboards.length;
+                var doc = activeIllustratorDocument("getDiagnosticsJSON activeDocument");
+                if (!doc) {
+                    result.hasDoc = false;
+                    result.error = "Illustrator reports an open document, but activeDocument is not ready yet. Try clicking the document canvas, then press Refresh.";
+                    appendHostLog("getDiagnosticsJSON", result.error);
+                    return safeJsonStringify(result);
+                }
+                try { result.docName = doc.name || ""; } catch (nameErr) { appendHostLog("getDiagnosticsJSON doc.name", nameErr); }
+                try { result.artboardCount = doc.artboards ? doc.artboards.length : 0; } catch (abErr) { appendHostLog("getDiagnosticsJSON artboards.length", abErr); result.artboardCount = 0; }
                 
                 // Page tile detection is handled by ai_parser, not by size heuristics.
                 // Always report hasPageTiles = false here; the panel will check ai_parser separately.
@@ -257,8 +349,8 @@ function getDiagnosticsJSON() {
             }
         }
         appendHostLog("getDiagnosticsJSON", "hasDoc=" + result.hasDoc + " artboards=" + result.artboardCount + " doc=" + result.docName);
-    } catch(e) { appendHostLog("getDiagnosticsJSON error", e); return JSON.stringify({ error: String(e) }); }
-    return JSON.stringify(result);
+    } catch(e) { appendHostLog("getDiagnosticsJSON error", e); return safeJsonStringify({ error: String(e) }); }
+    return safeJsonStringify(result);
 }
 
 function getDocumentPath(doc) {
@@ -312,16 +404,31 @@ function getArtboardsJSON() {
         appendHostLog("getArtboardsJSON", "start");
         var appExists = false;
         try { appExists = (typeof app !== 'undefined'); } catch(e) { appendHostLog("getArtboardsJSON error", e); return JSON.stringify({ error: e.message || String(e) }); }
-        if (!appExists || app.documents.length === 0) { appendHostLog("getArtboardsJSON", "no document"); return "[]"; }
-        var doc = app.activeDocument;
+        if (!appExists) { appendHostLog("getArtboardsJSON", "app unavailable"); return "[]"; }
+        if (openDocumentCount("getArtboardsJSON documents.length") === 0) { appendHostLog("getArtboardsJSON", "no document"); return "[]"; }
+        var doc = activeIllustratorDocument("getArtboardsJSON activeDocument");
         if (!doc) { appendHostLog("getArtboardsJSON", "no active document"); return "[]"; }
         var boards = [];
-        for (var i = 0; i < doc.artboards.length; i++) {
-            var ab = doc.artboards[i];
-            var r = ab.artboardRect;
+        var artboards = null;
+        var artboardCount = 0;
+        try {
+            artboards = doc.artboards;
+            artboardCount = artboards ? artboards.length : 0;
+        } catch (listErr) {
+            appendHostLog("getArtboardsJSON artboards", listErr);
+            return safeJsonStringify({ error: "Could not access Illustrator artboards: " + String(listErr) });
+        }
+        for (var i = 0; i < artboardCount; i++) {
+            var ab = null;
+            var r = null;
+            try { ab = artboards[i]; } catch (itemErr) { appendHostLog("getArtboardsJSON artboard[" + i + "]", itemErr); continue; }
+            try { r = ab.artboardRect; } catch (rectErr) { appendHostLog("getArtboardsJSON artboardRect[" + i + "]", rectErr); continue; }
+            if (!r || r.length < 4) { appendHostLog("getArtboardsJSON", "invalid artboardRect for index " + i); continue; }
+            var name = "Artboard " + (i + 1);
+            try { if (ab.name) name = ab.name; } catch (nameErr) { appendHostLog("getArtboardsJSON name[" + i + "]", nameErr); }
             boards.push({
                 index: i,
-                name: ab.name,
+                name: name,
                 width: Math.abs(r[2] - r[0]),
                 height: Math.abs(r[3] - r[1]),
                 x: r[0],
@@ -329,10 +436,10 @@ function getArtboardsJSON() {
             });
         }
         appendHostLog("getArtboardsJSON", "count=" + boards.length + " doc=" + (doc.name || ""));
-        return JSON.stringify(boards);
+        return safeJsonStringify(boards);
     } catch (e) {
         appendHostLog("getArtboardsJSON error", e);
-        return JSON.stringify({ error: String(e) });
+        return safeJsonStringify({ error: String(e) });
     }
 }
 
@@ -454,9 +561,66 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             return null;
         }
         
-        function getStroke(item) {
-            try { if (item.stroked && item.strokeColor) { var c = colorToRGB(item.strokeColor); if (c) { c.width = item.strokeWidth || 1; return c; } } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+        function getStroke(item, artboardRect) {
+            try {
+                if (item.stroked && item.strokeColor) {
+                    var c = colorToRGB(item.strokeColor) || { r: 0, g: 0, b: 0, a: 255 };
+                    c.width = item.strokeWidth || 1;
+                    var gradient = getGradientFromColor(item.strokeColor, artboardRect);
+                    if (gradient) c.gradient = gradient;
+                    return c;
+                }
+            } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             return null;
+        }
+
+        function illustratorPointToEgui(point, artboardRect) {
+            if (!point) return null;
+            var x = null;
+            var y = null;
+            if (point.length !== undefined && point.length >= 2) {
+                x = Number(point[0]);
+                y = Number(point[1]);
+            } else {
+                try {
+                    x = Number(point.x !== undefined ? point.x : point[0]);
+                    y = Number(point.y !== undefined ? point.y : point[1]);
+                } catch (e) { return null; }
+            }
+            if (!isFinite(x) || !isFinite(y)) return null;
+            if (!artboardRect || artboardRect.length < 2) return { x: x, y: y };
+            return { x: x - Number(artboardRect[0]), y: Number(artboardRect[1]) - y };
+        }
+
+        function offsetIllustratorPoint(point, distance, angleDeg) {
+            if (!point || !isFinite(distance) || !isFinite(angleDeg)) return null;
+            var angle = angleDeg * Math.PI / 180;
+            return { x: point.x + Math.cos(angle) * distance, y: point.y + Math.sin(angle) * distance };
+        }
+
+        function readGradientMatrix(matrix, artboardRect) {
+            if (!matrix) return null;
+            function read(names) {
+                for (var i = 0; i < names.length; i++) {
+                    var value = Number(matrix[names[i]]);
+                    if (isFinite(value)) return value;
+                }
+                return null;
+            }
+            var a, b, c, d, e, f;
+            if (matrix.length !== undefined && matrix.length >= 6) {
+                a = Number(matrix[0]); b = Number(matrix[1]); c = Number(matrix[2]);
+                d = Number(matrix[3]); e = Number(matrix[4]); f = Number(matrix[5]);
+            } else {
+                a = read(["a", "mValueA"]); b = read(["b", "mValueB"]);
+                c = read(["c", "mValueC"]); d = read(["d", "mValueD"]);
+                e = read(["e", "tx", "mValueTX"]); f = read(["f", "ty", "mValueTY"]);
+            }
+            if (!isFinite(a) || !isFinite(b) || !isFinite(c) || !isFinite(d) || !isFinite(e) || !isFinite(f)) return null;
+            if (!artboardRect || artboardRect.length < 2) return [a, b, c, d, e, f];
+            var left = Number(artboardRect[0]);
+            var top = Number(artboardRect[1]);
+            return [a, -b, -c, d, a * left + c * top + e - left, top - b * left - d * top - f];
         }
         
         function colorToHex(c) {
@@ -478,12 +642,13 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             return { r: 128, g: 128, b: 128 };
         }
 
-        function getGradient(item) {
+        function getGradientFromColor(color, artboardRect) {
+            if (!color) return null;
             try {
-                if (item.fillColor && item.fillColor.typename === "GradientColor") {
-                    var grad = item.fillColor.gradient;
+                if (color.typename === "GradientColor") {
+                    var grad = color.gradient;
                     if (!grad) return null;
-                    var angle = item.fillColor.angle || 0;
+                    var angle = color.angle || 0;
                     var stops = [];
                     try {
                         for (var si = 0; si < grad.gradientStops.length; si++) {
@@ -492,10 +657,38 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                             stops.push({ position: s.rampPoint/100, color: colorToHex(sc), opacity: s.opacity !== undefined ? s.opacity/100 : 1 });
                         }
                     } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
-                    return { type: grad.type === 1 ? "linear" : "radial", angle: angle, stops: stops };
+                    var origin = illustratorPointToEgui(color.origin, artboardRect);
+                    var length = Number(color.length);
+                    var hiliteLength = Number(color.hiliteLength);
+                    var hiliteAngle = Number(color.hiliteAngle);
+                    var focalPoint = (isFinite(hiliteLength) && isFinite(hiliteAngle))
+                        ? offsetIllustratorPoint(origin, hiliteLength, -hiliteAngle)
+                        : origin;
+                    var transform = readGradientMatrix(color.matrix, artboardRect);
+                    return {
+                        type: grad.type === 1 ? "linear" : "radial",
+                        angle: angle,
+                        center: origin,
+                        focalPoint: focalPoint,
+                        radius: isFinite(length) && length > 0 ? length : null,
+                        transform: transform,
+                        stops: stops
+                    };
+                }
+                if (color.typename === "PatternColor") {
+                    return {
+                        type: "pattern",
+                        patternName: color.pattern ? color.pattern.name : "unknown",
+                        rotation: color.rotation || 0,
+                        scale: [color.scaleFactor || 1, color.scaleFactor || 1]
+                    };
                 }
             } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             return null;
+        }
+
+        function getGradient(item, artboardRect) {
+            return getGradientFromColor(item && item.fillColor, artboardRect);
         }
 
         function extractEffects(item) {
@@ -513,6 +706,87 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             return fx;
         }
 
+        function textFontWeight(fontName) {
+            var name = fontName || "";
+            if (name.indexOf("Bold") !== -1) return 700;
+            if (name.indexOf("Light") !== -1) return 300;
+            return 400;
+        }
+
+        function illustratorTrackingToPx(tracking, fontSize) {
+            var t = Number(tracking);
+            var size = Number(fontSize) || 14;
+            if (!isFinite(t) || t === 0) return null;
+            return (t / 1000) * size;
+        }
+
+        function illustratorLeadingToMultiplier(leading, fontSize) {
+            var l = Number(leading);
+            var size = Number(fontSize) || 14;
+            if (!isFinite(l) || l <= 0 || size <= 0) return null;
+            return l / size;
+        }
+
+        function getTextStyle(item) {
+            try {
+                var chars = item.textRange.characterAttributes;
+                var size = 14, weight = 400, family = "default";
+                try { size = chars.size || 14; } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+                try { if (chars.textFont) { family = chars.textFont.name || ""; weight = textFontWeight(family); } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+                return { size: size, fontSize: size, weight: weight, family: family };
+            } catch (e) { return { size: 14, fontSize: 14, weight: 400, family: "default" }; }
+        }
+
+        function getTextAlign(item) {
+            if (item.typename !== "TextFrame") return null;
+            try {
+                var j = item.textRange.paragraphAttributes.justification;
+                var name = String(j || "").toUpperCase();
+                if (typeof Justification !== "undefined" && j === Justification.LEFT) return "left";
+                if (typeof Justification !== "undefined" && j === Justification.CENTER) return "center";
+                if (typeof Justification !== "undefined" && j === Justification.RIGHT) return "right";
+                if ((typeof Justification !== "undefined" && j === Justification.FULLJUSTIFY) || name.indexOf("JUSTIFY") !== -1) return "justified";
+            } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            return "left";
+        }
+
+        function getLetterSpacing(item) {
+            if (item.typename !== "TextFrame") return null;
+            try {
+                var attrs = item.textRange.characterAttributes;
+                return illustratorTrackingToPx(attrs.tracking, attrs.size || 14);
+            } catch (e) { return null; }
+        }
+
+        function getLineHeight(item) {
+            if (item.typename !== "TextFrame") return null;
+            try {
+                var attrs = item.textRange.characterAttributes;
+                return illustratorLeadingToMultiplier(attrs.leading, attrs.size || 14);
+            } catch (e) { return null; }
+        }
+
+        function getTextDecoration(item) {
+            if (item.typename !== "TextFrame") return null;
+            try {
+                var u = item.textRange.characterAttributes.underline;
+                var s = item.textRange.characterAttributes.strikeThrough;
+                if (u && s) return "both";
+                if (u) return "underline";
+                if (s) return "strikethrough";
+            } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            return null;
+        }
+
+        function getTextTransform(item) {
+            if (item.typename !== "TextFrame") return null;
+            try {
+                if (item.textRange.characterAttributes.smallCaps) return "small_caps";
+                if (item.textRange.characterAttributes.allCaps) return "uppercase";
+            } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            return null;
+        }
+
         function getTextRuns(item) {
             if (item.typename !== "TextFrame") return null;
             try {
@@ -525,7 +799,21 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                             var a = tr.characterAttributes;
                             var runColor = null;
                             try { runColor = colorToRGB(a.fillColor); } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
-                            runs.push({ text: tr.contents || "", style: { size: a.size||14, weight: (a.textFont && a.textFont.name && a.textFont.name.indexOf("Bold") !== -1) ? 700 : 400, color: runColor } });
+                            var fontName = a.textFont && a.textFont.name ? a.textFont.name : null;
+                            runs.push({
+                                text: tr.contents || "",
+                                style: {
+                                    size: a.size || 14,
+                                    fontSize: a.size || 14,
+                                    weight: textFontWeight(fontName),
+                                    family: fontName,
+                                    color: runColor,
+                                    letterSpacing: illustratorTrackingToPx(a.tracking, a.size || 14),
+                                    lineHeight: illustratorLeadingToMultiplier(a.leading, a.size || 14),
+                                    textDecoration: (a.underline && a.strikeThrough) ? "both" : a.underline ? "underline" : a.strikeThrough ? "strikethrough" : null,
+                                    textTransform: a.smallCaps ? "small_caps" : a.allCaps ? "uppercase" : null
+                                }
+                            });
                         } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
                     }
                 }
@@ -612,8 +900,11 @@ function extractArtboardDataJSON(exportPayloadJSON) {
                 type: getElementType(item),
                 x: x, y: y, w: w, h: h, depth: depth,
                 fill: getFill(item),
-                stroke: getStroke(item),
-                text: null, textStyle: null, textRuns: null, children: [],
+                stroke: getStroke(item, artboardRect),
+                text: null, textStyle: null, textRuns: null,
+                textAlign: null, letterSpacing: null, lineHeight: null,
+                textDecoration: null, textTransform: null,
+                children: [],
                 opacity: 1.0, rotation: 0, cornerRadius: 0,
                 gradient: null, blendMode: "normal",
                 effects: [], notes: [],
@@ -638,7 +929,7 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             
             // Gradient
-            el.gradient = getGradient(item);
+            el.gradient = getGradient(item, artboardRect);
             
             // Effects
             el.effects = extractEffects(item);
@@ -647,8 +938,10 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             var ppResult = getPathPoints(item, artboardRect);
             if (ppResult) { el.pathPoints = ppResult.points; el.pathClosed = ppResult.closed; }
             
-            // Image path
-            try { if (item.typename === "PlacedItem" && item.file) el.imagePath = portableAssetPath(item.file.fsName || item.file.name || null); } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
+            // Image path. Keep the original filesystem path here; plugin.js derives
+            // the portable assets/... path later while saveFilesToFolderJSON uses
+            // this raw source path for the actual copy.
+            try { if (item.typename === "PlacedItem" && item.file) el.imagePath = item.file.fsName || item.file.name || null; } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             try { if (item.typename === "RasterItem") { el.embeddedRaster = true; el.notes.push("embedded raster image"); } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
             
             // Symbol
@@ -662,13 +955,12 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             // Text
             if (item.typename === "TextFrame") {
                 try { el.text = item.contents || ""; } catch (e) { el.text = ""; }
-                try {
-                    var chars = item.textRange.characterAttributes;
-                    var size = 14, weight = 400, family = "default";
-                    try { size = chars.size || 14; } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
-                    try { if (chars.textFont) { var fn = chars.textFont.name || ""; weight = fn.indexOf("Bold") !== -1 ? 700 : fn.indexOf("Light") !== -1 ? 300 : 400; family = fn; } } catch (e) { noteHostDiagnostic("optional Illustrator property unavailable", e); }
-                    el.textStyle = { size: size, fontSize: size, weight: weight, family: family };
-                } catch (e) { el.textStyle = { size: 14, fontSize: 14, weight: 400, family: "default" }; }
+                el.textStyle = getTextStyle(item);
+                el.textAlign = getTextAlign(item);
+                el.letterSpacing = getLetterSpacing(item);
+                el.lineHeight = getLineHeight(item);
+                el.textDecoration = getTextDecoration(item);
+                el.textTransform = getTextTransform(item);
                 el.textRuns = getTextRuns(item);
             }
             
@@ -708,7 +1000,7 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             
             var els = [];
             for (var k = 0; k < items.length; k++) {
-                appendHostLog("extract item", "artboard=" + idx + " item=" + k + " " + describeHostItem(items[k]));
+                if (__eguiHostItemTraceLimit > 0 && k < __eguiHostItemTraceLimit) appendHostLog("extract item", "artboard=" + idx + " item=" + k + " " + describeHostItem(items[k]));
                 extractRecursive(items[k], rect, els, 0);
             }
             appendHostLog("extract artboard done", "index=" + idx + " elements=" + els.length);
@@ -737,7 +1029,7 @@ function extractArtboardDataJSON(exportPayloadJSON) {
             
             var els = [];
             for (var k = 0; k < items.length; k++) {
-                appendHostLog("extract tile item", "tile=" + abInfo.name + " item=" + k + " " + describeHostItem(items[k]));
+                if (__eguiHostItemTraceLimit > 0 && k < __eguiHostItemTraceLimit) appendHostLog("extract tile item", "tile=" + abInfo.name + " item=" + k + " " + describeHostItem(items[k]));
                 extractRecursive(items[k], rect, els, 0);
             }
             appendHostLog("extract tile done", "name=" + abInfo.name + " elements=" + els.length);

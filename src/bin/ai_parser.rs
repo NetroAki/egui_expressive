@@ -5,7 +5,7 @@
 use lopdf::Document;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -28,7 +28,7 @@ fn artboard_name_re() -> &'static Regex {
 
 use egui_expressive::codegen::{
     generate_artboard_file, AppearanceFill, AppearanceStroke, BlendMode, EffectDef, EffectType,
-    ElementType, LayoutElement,
+    ElementType, GradientDef, GradientStop, GradientType, LayoutElement,
 };
 
 /// RGBA Color representation
@@ -65,6 +65,8 @@ pub struct Stroke {
     pub dash: Option<Vec<f32>>,
     #[serde(default)]
     pub miter_limit: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gradient: Option<Value>,
 }
 
 /// Live Effect parameter
@@ -553,6 +555,7 @@ fn parse_appearance(content: &str) -> (Vec<Color>, Vec<Stroke>) {
                         join: join.clone(),
                         dash: dash.clone(),
                         miter_limit,
+                        gradient: None,
                     });
                 }
             }
@@ -610,7 +613,7 @@ fn parse_appearance(content: &str) -> (Vec<Color>, Vec<Stroke>) {
         });
     }
 
-    if strokes.is_empty() && (content.contains("/Pattern CS") || content.contains("/Pattern cs")) {
+    if strokes.is_empty() && content.contains("/Pattern CS") {
         strokes.push(Stroke {
             r: 128,
             g: 128,
@@ -623,6 +626,13 @@ fn parse_appearance(content: &str) -> (Vec<Color>, Vec<Stroke>) {
             join: join.clone(),
             dash: dash.clone(),
             miter_limit,
+            gradient: Some(json!({
+                "type": "pattern",
+                "patternName": "parser-stroke-pattern",
+                "seed": 0,
+                "cellSize": 8.0,
+                "markSize": 2.0
+            })),
         });
     }
 
@@ -759,6 +769,392 @@ fn parse_ctms_from_stream(content: &str) -> Vec<(f64, f64, f64, f64, f64)> {
         }
     }
     ctms
+}
+
+#[derive(Clone, Debug)]
+struct PdfGraphicsState {
+    ctm: [f64; 6],
+    fill: Color,
+    stroke: Stroke,
+}
+
+impl Default for PdfGraphicsState {
+    fn default() -> Self {
+        Self {
+            ctm: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            fill: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+                opacity: Some(1.0),
+                blend_mode: "normal".to_string(),
+            },
+            stroke: Stroke {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+                width: 1.0,
+                opacity: Some(1.0),
+                blend_mode: "normal".to_string(),
+                cap: None,
+                join: None,
+                dash: None,
+                miter_limit: None,
+                gradient: None,
+            },
+        }
+    }
+}
+
+fn concat_ctm(current: [f64; 6], next: [f64; 6]) -> [f64; 6] {
+    let [a, b, c, d, e, f] = current;
+    let [g, h, i, j, k, l] = next;
+    [
+        a * g + c * h,
+        b * g + d * h,
+        a * i + c * j,
+        b * i + d * j,
+        a * k + c * l + e,
+        b * k + d * l + f,
+    ]
+}
+
+fn transform_pdf_point(ctm: [f64; 6], x: f64, y: f64) -> [f64; 2] {
+    [
+        ctm[0] * x + ctm[2] * y + ctm[4],
+        ctm[1] * x + ctm[3] * y + ctm[5],
+    ]
+}
+
+fn pdf_color_from_components(values: &[f64], blend_mode: &str) -> Color {
+    let (r, g, b) = match values.len() {
+        0 => (0.0, 0.0, 0.0),
+        1 => {
+            let gray = values[0].clamp(0.0, 1.0);
+            (gray, gray, gray)
+        }
+        2 | 3 => (
+            values[0].clamp(0.0, 1.0),
+            values.get(1).copied().unwrap_or(0.0).clamp(0.0, 1.0),
+            values.get(2).copied().unwrap_or(0.0).clamp(0.0, 1.0),
+        ),
+        _ => {
+            let c = values[0].clamp(0.0, 1.0);
+            let m = values[1].clamp(0.0, 1.0);
+            let y = values[2].clamp(0.0, 1.0);
+            let k = values[3].clamp(0.0, 1.0);
+            (
+                (1.0 - c) * (1.0 - k),
+                (1.0 - m) * (1.0 - k),
+                (1.0 - y) * (1.0 - k),
+            )
+        }
+    };
+
+    Color {
+        r: (r * 255.0).round().clamp(0.0, 255.0) as u8,
+        g: (g * 255.0).round().clamp(0.0, 255.0) as u8,
+        b: (b * 255.0).round().clamp(0.0, 255.0) as u8,
+        a: 255,
+        opacity: Some(1.0),
+        blend_mode: blend_mode.to_string(),
+    }
+}
+
+fn path_bounds(points: &[PathPoint]) -> Option<[f64; 4]> {
+    let first = points.first()?;
+    let mut min_x = first.anchor[0];
+    let mut min_y = first.anchor[1];
+    let mut max_x = first.anchor[0];
+    let mut max_y = first.anchor[1];
+    for point in points {
+        for [x, y] in [point.anchor, point.left_ctrl, point.right_ctrl] {
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+    }
+    Some([
+        min_x,
+        min_y,
+        (max_x - min_x).max(1.0),
+        (max_y - min_y).max(1.0),
+    ])
+}
+
+fn painted_path_element(
+    stream_idx: usize,
+    element_idx: usize,
+    points: &[PathPoint],
+    closed: bool,
+    state: &PdfGraphicsState,
+    fill: bool,
+    stroke: bool,
+) -> Option<Element> {
+    if points.is_empty() || (!fill && !stroke) {
+        return None;
+    }
+    let mut element = Element {
+        id: format!("pdf_path_{}_{}", stream_idx, element_idx),
+        element_type: Some("shape".to_string()),
+        path_points: points.to_vec(),
+        path_closed: closed,
+        corner_radius: detect_corner_radius(points),
+        is_pseudo_element: true,
+        ..Default::default()
+    };
+    if fill {
+        element.appearance_fills.push(state.fill.clone());
+    }
+    if stroke && state.stroke.width > 0.0 {
+        element.appearance_strokes.push(state.stroke.clone());
+    }
+    element.bounds = path_bounds(points);
+    Some(element)
+}
+
+/// Parse painted PDF path objects from a content stream.
+///
+/// This keeps the Illustrator/PDF reference path vector-only: it converts PDF path paint commands
+/// into the same codegen/scene primitives used by hand-authored egui_expressive code rather than
+/// embedding the rendered PDF/PNG as an image.
+fn parse_pdf_painted_path_elements(content: &str, stream_idx: usize) -> Vec<Element> {
+    let token_re = match Regex::new(
+        r"/[A-Za-z0-9_.#-]+|-?\d*\.?\d+(?:[eE][+-]?\d+)?|f\*|B\*|b\*|[A-Za-z]{1,3}|\S",
+    ) {
+        Ok(re) => re,
+        Err(_) => return Vec::new(),
+    };
+    let mut state = PdfGraphicsState::default();
+    let mut stack: Vec<f64> = Vec::new();
+    let mut saved_states: Vec<PdfGraphicsState> = Vec::new();
+    let mut path: Vec<PathPoint> = Vec::new();
+    let mut closed = false;
+    let mut elements = Vec::new();
+
+    for token in token_re.find_iter(content).map(|m| m.as_str()) {
+        if let Ok(value) = token.parse::<f64>() {
+            stack.push(value);
+            continue;
+        }
+        if token.starts_with('/') {
+            continue;
+        }
+
+        match token {
+            "q" => saved_states.push(state.clone()),
+            "Q" => {
+                if let Some(saved) = saved_states.pop() {
+                    state = saved;
+                }
+                path.clear();
+                closed = false;
+            }
+            "cm" if stack.len() >= 6 => {
+                let m = [
+                    stack[stack.len() - 6],
+                    stack[stack.len() - 5],
+                    stack[stack.len() - 4],
+                    stack[stack.len() - 3],
+                    stack[stack.len() - 2],
+                    stack[stack.len() - 1],
+                ];
+                state.ctm = concat_ctm(state.ctm, m);
+            }
+            "w" if !stack.is_empty() => {
+                state.stroke.width = stack[stack.len() - 1].max(0.0);
+            }
+            "J" if !stack.is_empty() => {
+                state.stroke.cap = match stack[stack.len() - 1].round() as i32 {
+                    0 => Some("butt".to_string()),
+                    1 => Some("round".to_string()),
+                    2 => Some("square".to_string()),
+                    _ => state.stroke.cap.clone(),
+                };
+            }
+            "j" if !stack.is_empty() => {
+                state.stroke.join = match stack[stack.len() - 1].round() as i32 {
+                    0 => Some("miter".to_string()),
+                    1 => Some("round".to_string()),
+                    2 => Some("bevel".to_string()),
+                    _ => state.stroke.join.clone(),
+                };
+            }
+            "M" if !stack.is_empty() => {
+                state.stroke.miter_limit = Some(stack[stack.len() - 1] as f32);
+            }
+            "rg" if stack.len() >= 3 => {
+                state.fill =
+                    pdf_color_from_components(&stack[stack.len() - 3..], &state.fill.blend_mode);
+            }
+            "RG" if stack.len() >= 3 => {
+                let mut stroke = state.stroke.clone();
+                let color =
+                    pdf_color_from_components(&stack[stack.len() - 3..], &stroke.blend_mode);
+                stroke.r = color.r;
+                stroke.g = color.g;
+                stroke.b = color.b;
+                stroke.a = color.a;
+                state.stroke = stroke;
+            }
+            "g" if !stack.is_empty() => {
+                state.fill =
+                    pdf_color_from_components(&stack[stack.len() - 1..], &state.fill.blend_mode);
+            }
+            "G" if !stack.is_empty() => {
+                let mut stroke = state.stroke.clone();
+                let color =
+                    pdf_color_from_components(&stack[stack.len() - 1..], &stroke.blend_mode);
+                stroke.r = color.r;
+                stroke.g = color.g;
+                stroke.b = color.b;
+                stroke.a = color.a;
+                state.stroke = stroke;
+            }
+            "k" | "sc" | "scn" if !stack.is_empty() => {
+                state.fill = pdf_color_from_components(&stack, &state.fill.blend_mode);
+            }
+            "K" | "SC" | "SCN" if !stack.is_empty() => {
+                let mut stroke = state.stroke.clone();
+                let color = pdf_color_from_components(&stack, &stroke.blend_mode);
+                stroke.r = color.r;
+                stroke.g = color.g;
+                stroke.b = color.b;
+                stroke.a = color.a;
+                state.stroke = stroke;
+            }
+            "m" if stack.len() >= 2 => {
+                let [x, y] =
+                    transform_pdf_point(state.ctm, stack[stack.len() - 2], stack[stack.len() - 1]);
+                path.clear();
+                closed = false;
+                path.push(PathPoint {
+                    anchor: [x, y],
+                    left_ctrl: [x, y],
+                    right_ctrl: [x, y],
+                });
+            }
+            "l" if stack.len() >= 2 => {
+                let [x, y] =
+                    transform_pdf_point(state.ctm, stack[stack.len() - 2], stack[stack.len() - 1]);
+                path.push(PathPoint {
+                    anchor: [x, y],
+                    left_ctrl: [x, y],
+                    right_ctrl: [x, y],
+                });
+            }
+            "c" if stack.len() >= 6 => {
+                let [x1, y1] =
+                    transform_pdf_point(state.ctm, stack[stack.len() - 6], stack[stack.len() - 5]);
+                let [x2, y2] =
+                    transform_pdf_point(state.ctm, stack[stack.len() - 4], stack[stack.len() - 3]);
+                let [x3, y3] =
+                    transform_pdf_point(state.ctm, stack[stack.len() - 2], stack[stack.len() - 1]);
+                if let Some(prev) = path.last_mut() {
+                    prev.right_ctrl = [x1, y1];
+                }
+                path.push(PathPoint {
+                    anchor: [x3, y3],
+                    left_ctrl: [x2, y2],
+                    right_ctrl: [x3, y3],
+                });
+            }
+            "re" if stack.len() >= 4 => {
+                let x = stack[stack.len() - 4];
+                let y = stack[stack.len() - 3];
+                let w = stack[stack.len() - 2];
+                let h = stack[stack.len() - 1];
+                let p1 = transform_pdf_point(state.ctm, x, y);
+                let p2 = transform_pdf_point(state.ctm, x + w, y);
+                let p3 = transform_pdf_point(state.ctm, x + w, y + h);
+                let p4 = transform_pdf_point(state.ctm, x, y + h);
+                path = [p1, p2, p3, p4]
+                    .into_iter()
+                    .map(|p| PathPoint {
+                        anchor: p,
+                        left_ctrl: p,
+                        right_ctrl: p,
+                    })
+                    .collect();
+                closed = true;
+            }
+            "h" => closed = true,
+            "n" => {
+                path.clear();
+                closed = false;
+            }
+            "f" | "F" | "f*" => {
+                if let Some(element) = painted_path_element(
+                    stream_idx,
+                    elements.len(),
+                    &path,
+                    true,
+                    &state,
+                    true,
+                    false,
+                ) {
+                    elements.push(element);
+                }
+                path.clear();
+                closed = false;
+            }
+            "S" => {
+                if let Some(element) = painted_path_element(
+                    stream_idx,
+                    elements.len(),
+                    &path,
+                    closed,
+                    &state,
+                    false,
+                    true,
+                ) {
+                    elements.push(element);
+                }
+                path.clear();
+                closed = false;
+            }
+            "s" => {
+                if let Some(element) = painted_path_element(
+                    stream_idx,
+                    elements.len(),
+                    &path,
+                    true,
+                    &state,
+                    false,
+                    true,
+                ) {
+                    elements.push(element);
+                }
+                path.clear();
+                closed = false;
+            }
+            "B" | "B*" | "b" | "b*" => {
+                if let Some(element) = painted_path_element(
+                    stream_idx,
+                    elements.len(),
+                    &path,
+                    true,
+                    &state,
+                    true,
+                    true,
+                ) {
+                    elements.push(element);
+                }
+                path.clear();
+                closed = false;
+            }
+            _ => {}
+        }
+
+        if !matches!(token, "q" | "Q") {
+            stack.clear();
+        }
+    }
+
+    elements
 }
 
 /// Parse PostScript path geometry from a content stream.
@@ -1016,39 +1412,61 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
                     result.elements.push(element);
                 }
             }
-        } else if content_str.contains(" cm") || content_str.contains("\ncm") {
-            // Main PDF content stream: scan for CTM and path geometry only
-            let mut element = Element {
-                id: format!("ctm_element_{}", object_id.0),
-                is_pseudo_element: true,
-                ..Default::default()
-            };
-            let ctms = parse_ctms_from_stream(content_str);
-            element.transform_candidates = ctms
-                .iter()
-                .map(|&(r, sx, sy, tx, ty)| [r, sx, sy, tx, ty])
-                .collect();
-            if let Some(&(rot, sx, sy, tx, ty)) = ctms.last() {
-                element.rotation_deg = rot;
-                element.scale_x = sx;
-                element.scale_y = sy;
-                element.translate_x = tx;
-                element.translate_y = ty;
-            }
-            let (path_pts, path_closed) = parse_path_geometry(content_str);
-            if !path_pts.is_empty() {
-                element.corner_radius = detect_corner_radius(&path_pts);
-                element.path_points = path_pts;
-                element.path_closed = path_closed;
-            }
-            // Only add if we found meaningful data
-            if element.rotation_deg.abs() > 0.01 || !element.path_points.is_empty() {
-                let is_dup = result
-                    .transform_candidates
+        } else if content_str.contains(" cm")
+            || content_str.contains("\ncm")
+            || content_str.contains(" re")
+            || content_str.contains(" f")
+            || content_str.contains(" S")
+        {
+            // Main PDF content stream: scan painted vector paths with their current PDF graphics
+            // state. This keeps Illustrator comparison fixtures code/vector-based instead of
+            // falling back to the PDF or PNG raster render.
+            let painted_paths = parse_pdf_painted_path_elements(content_str, object_id.0 as usize);
+            if !painted_paths.is_empty() {
+                for element in painted_paths {
+                    let is_dup = result
+                        .transform_candidates
+                        .iter()
+                        .any(|e| e.id == element.id);
+                    if !is_dup {
+                        result.transform_candidates.push(element);
+                    }
+                }
+            } else {
+                // Fallback for streams that have transform/path metadata but no paint operator that
+                // the vector parser can safely associate with an element yet.
+                let mut element = Element {
+                    id: format!("ctm_element_{}", object_id.0),
+                    is_pseudo_element: true,
+                    ..Default::default()
+                };
+                let ctms = parse_ctms_from_stream(content_str);
+                element.transform_candidates = ctms
                     .iter()
-                    .any(|e| e.id == element.id);
-                if !is_dup {
-                    result.transform_candidates.push(element);
+                    .map(|&(r, sx, sy, tx, ty)| [r, sx, sy, tx, ty])
+                    .collect();
+                if let Some(&(rot, sx, sy, tx, ty)) = ctms.last() {
+                    element.rotation_deg = rot;
+                    element.scale_x = sx;
+                    element.scale_y = sy;
+                    element.translate_x = tx;
+                    element.translate_y = ty;
+                }
+                let (path_pts, path_closed) = parse_path_geometry(content_str);
+                if !path_pts.is_empty() {
+                    element.corner_radius = detect_corner_radius(&path_pts);
+                    element.path_points = path_pts;
+                    element.path_closed = path_closed;
+                }
+                // Only add if we found meaningful data
+                if element.rotation_deg.abs() > 0.01 || !element.path_points.is_empty() {
+                    let is_dup = result
+                        .transform_candidates
+                        .iter()
+                        .any(|e| e.id == element.id);
+                    if !is_dup {
+                        result.transform_candidates.push(element);
+                    }
                 }
             }
         }
@@ -1344,6 +1762,96 @@ fn element_bounds(elem: &Element) -> (f64, f64, f64, f64) {
 }
 
 /// Convert an ai_parser `Element` to a codegen `LayoutElement` for code generation.
+fn json_color(value: &Value) -> egui::Color32 {
+    if let Some(hex) = value.as_str() {
+        let hex = hex.trim_start_matches('#');
+        if hex.len() >= 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(128);
+            let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(128);
+            let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(128);
+            return egui::Color32::from_rgb(r, g, b);
+        }
+    }
+    let r = value.get("r").and_then(Value::as_u64).unwrap_or(128) as u8;
+    let g = value.get("g").and_then(Value::as_u64).unwrap_or(128) as u8;
+    let b = value.get("b").and_then(Value::as_u64).unwrap_or(128) as u8;
+    let a = value.get("a").and_then(Value::as_u64).unwrap_or(255) as u8;
+    egui::Color32::from_rgba_unmultiplied(r, g, b, a)
+}
+
+fn stroke_gradient_value(value: &Value) -> Option<GradientDef> {
+    let kind = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("linear");
+    if kind != "linear" && kind != "radial" {
+        return None;
+    }
+    let stops = value
+        .get("stops")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|stop| GradientStop {
+                    position: stop.get("position").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+                    color: stop
+                        .get("color")
+                        .map(json_color)
+                        .unwrap_or(egui::Color32::GRAY),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| {
+            vec![
+                GradientStop {
+                    position: 0.0,
+                    color: egui::Color32::GRAY,
+                },
+                GradientStop {
+                    position: 1.0,
+                    color: egui::Color32::LIGHT_GRAY,
+                },
+            ]
+        });
+    Some(GradientDef {
+        gradient_type: if kind == "radial" {
+            GradientType::Radial
+        } else {
+            GradientType::Linear
+        },
+        angle_deg: value.get("angle").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+        center: None,
+        focal_point: None,
+        radius: None,
+        transform: None,
+        stops,
+    })
+}
+
+fn stroke_pattern_value(value: &Value) -> Option<egui_expressive::scene::PatternDef> {
+    let kind = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("pattern");
+    if kind == "linear" || kind == "radial" {
+        return None;
+    }
+    Some(egui_expressive::scene::PatternDef {
+        name: value
+            .get("patternName")
+            .or_else(|| value.get("pattern_name"))
+            .and_then(Value::as_str)
+            .unwrap_or("parser-stroke-pattern")
+            .to_string(),
+        seed: value.get("seed").and_then(Value::as_u64).unwrap_or(0) as u32,
+        foreground: egui::Color32::from_rgba_unmultiplied(120, 120, 120, 220),
+        background: egui::Color32::from_rgba_unmultiplied(240, 240, 240, 48),
+        cell_size: value.get("cellSize").and_then(Value::as_f64).unwrap_or(8.0) as f32,
+        mark_size: value.get("markSize").and_then(Value::as_f64).unwrap_or(2.0) as f32,
+    })
+}
+
 fn element_to_layout(elem: &Element, idx: usize) -> LayoutElement {
     let id = if elem.id.is_empty() {
         format!("elem_{}", idx)
@@ -1393,6 +1901,8 @@ fn element_to_layout(elem: &Element, idx: usize) -> LayoutElement {
         .iter()
         .map(|s| AppearanceStroke {
             color: egui::Color32::from_rgba_unmultiplied(s.r, s.g, s.b, s.a),
+            gradient: s.gradient.as_ref().and_then(stroke_gradient_value),
+            pattern: s.gradient.as_ref().and_then(stroke_pattern_value),
             width: s.width as f32,
             opacity: s.opacity.unwrap_or(1.0) as f32,
             blend_mode: parse_blend_mode(&s.blend_mode),
@@ -1433,11 +1943,22 @@ fn element_to_layout(elem: &Element, idx: usize) -> LayoutElement {
             ));
     }
     for stroke in &layout_elem.appearance_strokes {
+        let paint = if let Some(pattern) = &stroke.pattern {
+            egui_expressive::scene::PaintSource::Pattern(pattern.clone())
+        } else if let Some(gradient) = &stroke.gradient {
+            if gradient.gradient_type == GradientType::Radial {
+                egui_expressive::scene::PaintSource::RadialGradient(gradient.clone())
+            } else {
+                egui_expressive::scene::PaintSource::LinearGradient(gradient.clone())
+            }
+        } else {
+            egui_expressive::scene::PaintSource::Solid(stroke.color)
+        };
         appearance_stack
             .entries
             .push(egui_expressive::scene::AppearanceEntry::Stroke(
                 egui_expressive::scene::StrokeLayer {
-                    paint: egui_expressive::scene::PaintSource::Solid(stroke.color),
+                    paint,
                     width: stroke.width,
                     opacity: stroke.opacity,
                     blend_mode: stroke.blend_mode.clone(),
@@ -1679,17 +2200,72 @@ pub fn generate_per_artboard_output(result: &AiParseResult) -> Vec<serde_json::V
     entries
 }
 
+pub fn generate_canvas_output(result: &AiParseResult) -> Vec<serde_json::Value> {
+    let mut max_x = 0.0f64;
+    let mut max_y = 0.0f64;
+
+    for artboard in &result.artboards {
+        max_x = max_x.max(artboard.x + artboard.width);
+        max_y = max_y.max(artboard.y + artboard.height);
+    }
+    for element in &result.elements {
+        let (x, y, w, h) = element_bounds(element);
+        max_x = max_x.max(x + w);
+        max_y = max_y.max(y + h);
+    }
+
+    let width = max_x.ceil().max(1.0);
+    let height = max_y.ceil().max(1.0);
+    let mut layout_elements: Vec<LayoutElement> = Vec::new();
+    let mut background = LayoutElement::new(
+        "pdf_page_background".to_string(),
+        ElementType::Shape,
+        0.0,
+        0.0,
+        width as f32,
+        height as f32,
+    );
+    background.fill = Some(egui::Color32::WHITE);
+    background.is_opaque = true;
+    layout_elements.push(background);
+
+    layout_elements.extend(result
+        .elements
+        .iter()
+        .filter(|e| !e.is_pseudo_element || !e.path_points.is_empty())
+        .enumerate()
+        .map(|(i, e)| element_to_layout(e, i)));
+    let code = generate_artboard_file(
+        "Full Canvas",
+        width as f32,
+        height as f32,
+        &layout_elements,
+        &std::collections::HashMap::new(),
+    );
+
+    vec![serde_json::json!({
+        "artboard": "Full Canvas",
+        "filename": "full_canvas.rs",
+        "width": width,
+        "height": height,
+        "element_count": layout_elements.len(),
+        "code": code,
+        "elements": result.elements,
+    })]
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: ai-parser <file.ai> [--pretty] [--per-artboard]");
+        eprintln!("Usage: ai-parser <file.ai> [--pretty] [--per-artboard] [--full-canvas]");
         std::process::exit(1);
     }
 
     let path = Path::new(&args[1]);
     let pretty = args.iter().any(|a| a == "--pretty");
     let per_artboard = args.iter().any(|a| a == "--per-artboard");
+    let full_canvas = args.iter().any(|a| a == "--full-canvas");
 
     let result = match parse_ai_file(path) {
         Ok(r) => r,
@@ -1713,8 +2289,12 @@ fn main() {
         }
     };
 
-    if per_artboard {
-        let entries = generate_per_artboard_output(&result);
+    if per_artboard || full_canvas {
+        let entries = if full_canvas {
+            generate_canvas_output(&result)
+        } else {
+            generate_per_artboard_output(&result)
+        };
         let json = if pretty {
             serde_json::to_string_pretty(&entries)
         } else {
@@ -1869,6 +2449,31 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_appearance_stroke_pattern_surfaces_gradient_metadata() {
+        let content = "2 w\n/Pattern CS\n";
+        let (_fills, strokes) = parse_appearance(content);
+        assert_eq!(strokes.len(), 1);
+        assert!(strokes[0].gradient.is_some());
+        let layout = element_to_layout(
+            &Element {
+                id: "stroke_pattern".to_string(),
+                appearance_strokes: strokes,
+                ..Default::default()
+            },
+            0,
+        );
+        let egui_expressive::scene::AppearanceEntry::Stroke(stroke) =
+            &layout.appearance_stack.entries[0]
+        else {
+            panic!("expected stroke");
+        };
+        assert!(matches!(
+            stroke.paint,
+            egui_expressive::scene::PaintSource::Pattern(_)
+        ));
+    }
+
+    #[test]
     fn test_extract_ai_version() {
         let content = "%AI8_CreatorVersion 25.0";
         let version = extract_ai_version(content);
@@ -1890,6 +2495,35 @@ mod tests {
         assert!((sy - 1.0).abs() < 0.001);
         assert!((tx).abs() < 0.001);
         assert!((ty).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_pdf_painted_paths_extracts_code_drawn_fill() {
+        let content = "q 1 0 0 1 10 20 cm 0.1 0.2 0.3 rg 0 0 30 40 re f Q";
+        let elements = parse_pdf_painted_path_elements(content, 7);
+        assert_eq!(elements.len(), 1);
+        let element = &elements[0];
+        assert_eq!(element.path_points.len(), 4);
+        assert!(element.path_closed);
+        assert_eq!(element.appearance_fills.len(), 1);
+        assert_eq!(element.appearance_fills[0].r, 26);
+        assert_eq!(element.appearance_fills[0].g, 51);
+        assert_eq!(element.appearance_fills[0].b, 77);
+        assert_eq!(element.bounds.unwrap(), [10.0, 20.0, 30.0, 40.0]);
+    }
+
+    #[test]
+    fn test_parse_pdf_painted_paths_extracts_stroke_style() {
+        let content = "2 J 1 j 4 M 3 w 0 1 0 RG 10 10 m 50 10 l S";
+        let elements = parse_pdf_painted_path_elements(content, 8);
+        assert_eq!(elements.len(), 1);
+        let strokes = &elements[0].appearance_strokes;
+        assert_eq!(strokes.len(), 1);
+        assert_eq!(strokes[0].g, 255);
+        assert_eq!(strokes[0].width, 3.0);
+        assert_eq!(strokes[0].cap.as_deref(), Some("square"));
+        assert_eq!(strokes[0].join.as_deref(), Some("round"));
+        assert_eq!(strokes[0].miter_limit, Some(4.0));
     }
 
     #[test]
@@ -2045,11 +2679,36 @@ mod tests {
             let result = parse_ai_file(path).unwrap();
             assert!(!result.elements.is_empty(), "Should find elements");
             assert!(!result.artboards.is_empty(), "Should find artboards");
+            assert!(
+                result
+                    .elements
+                    .iter()
+                    .any(|el| !el.appearance_fills.is_empty() || !el.appearance_strokes.is_empty()),
+                "real Illustrator fixture should yield code-drawn vector appearances"
+            );
             let per_artboard = generate_per_artboard_output(&result);
             assert!(
                 !per_artboard.is_empty(),
                 "Should generate per-artboard output"
             );
+
+            let reference_png = Path::new("UI assets from illustrator.png");
+            if reference_png.exists() {
+                let reference = image::open(reference_png).unwrap().to_rgba8();
+                assert_eq!([reference.width(), reference.height()], [5102, 3679]);
+                let max_artboard_width = result
+                    .artboards
+                    .iter()
+                    .map(|artboard| artboard.width)
+                    .fold(0.0, f64::max);
+                let max_artboard_height = result
+                    .artboards
+                    .iter()
+                    .map(|artboard| artboard.height)
+                    .fold(0.0, f64::max);
+                assert!(reference.width() as f64 >= max_artboard_width);
+                assert!(reference.height() as f64 >= max_artboard_height);
+            }
         }
     }
 }

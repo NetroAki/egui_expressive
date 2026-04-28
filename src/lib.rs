@@ -46,6 +46,7 @@ pub mod svg;
 pub mod swiftui;
 pub mod theme;
 pub mod typography;
+pub mod visual_diff;
 
 // Re-export FigmaExportError for ergonomic error handling
 pub use figma::FigmaExportError;
@@ -86,12 +87,12 @@ pub use draw::{
     composite_layers, composite_layers_gpu, dashed_path, dot_matrix, glow, gradient_path_mesh,
     gradient_path_mesh_with_geometry, gradient_path_mesh_with_transform, gradient_rect, icon,
     icon_loop, icon_play, icon_record, icon_stop, inner_shadow, linear_gradient_rect,
-    mesh_gradient_patch, noise_rect, paint_image_from_path, pattern_fill_path, radial_gradient,
-    radial_gradient_rect, radial_gradient_rect_stops, rounded_rect_path, scan_lines,
-    transform_shape, vignette, with_blend_mode, with_clip_path, with_opacity, zstack,
-    zstack_layers, BlendLayer, ClipShape, DashPattern, GradientDir, GradientPathGeometry,
-    LayeredPainter, RadialGradientDir, RichStroke, ShadowOffset, ShapeBuilder, StackAlign,
-    StrokeCap, StrokeJoin, Transform2D,
+    mesh_gradient_patch, noise_rect, paint_image_from_path, paint_image_slot,
+    paint_placeholder_slot, pattern_fill_path, radial_gradient, radial_gradient_rect,
+    radial_gradient_rect_stops, rounded_rect_path, scan_lines, transform_shape, vignette,
+    with_blend_mode, with_clip_path, with_opacity, zstack, zstack_layers, BlendLayer, ClipShape,
+    DashPattern, GradientDir, GradientPathGeometry, LayeredPainter, RadialGradientDir, RichStroke,
+    ShadowOffset, ShapeBuilder, StackAlign, StrokeCap, StrokeJoin, Transform2D,
 };
 pub use figma::design_tokens_from_json;
 #[cfg(feature = "wgpu")]
@@ -124,7 +125,11 @@ pub use tailwind::{
 };
 pub use theme::{border_rect, Border, Elevation, SemanticColors, Theme};
 pub use typography::{
-    render_text, TextDecoration, TextOverflow, TextTransform, TypeLabel, TypeScale, TypeSpec,
+    render_text, render_text_block, TextBlock, TextBlockAlign, TextDecoration, TextOverflow,
+    TextSpan, TextTransform, TypeLabel, TypeScale, TypeSpec,
+};
+pub use visual_diff::{
+    diff_heatmap, diff_image_paths, diff_rgba_images, VisualDiffConfig, VisualDiffReport,
 };
 pub use widgets::{
     ChannelStrip, ClipKind, CollapsePanel, ContextMenuBuilder, ContinuousControl, DotState,

@@ -116,6 +116,15 @@ fn main() {
         // Also copy assets folder if it exists
         let assets_src = generated_src.join("assets");
         let assets_out = generated_out.join("assets");
+        if assets_out.exists() {
+            if let Err(e) = fs::remove_dir_all(&assets_out) {
+                println!(
+                    "cargo:warning=failed to remove stale generated assets {}: {}",
+                    assets_out.display(),
+                    e
+                );
+            }
+        }
         if assets_src.exists() && assets_src.is_dir() {
             if let Err(e) = fs::create_dir_all(&assets_out) {
                 println!(

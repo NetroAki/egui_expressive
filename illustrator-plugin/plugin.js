@@ -201,7 +201,7 @@ function extractRecursive(item, artboardRect, elements, depth) {
 
   const el = {
     id: item.name || `el_${elements.length}`, type: getElementType(item), x, y, w, h, depth,
-    fill: getFill(item), stroke: getStroke(item), text: null, textStyle: null, children: [],
+    fill: getFill(item), stroke: getStroke(item, artboardRect), text: null, textStyle: null, children: [],
     opacity: 1.0, rotation: 0, cornerRadius: 0, gradient: null, blendMode: "normal",
     strokeCap: null, strokeJoin: null, strokeDash: null, strokeMiterLimit: null,
     effects: [], textDecoration: null, textTransform: null, textRuns: null,
@@ -426,8 +426,16 @@ function getFill(item) {
   return null;
 }
 
-function getStroke(item) {
-  try { if (item.stroked && item.strokeColor) { const c = colorToRGB(item.strokeColor); if (c) return { ...c, width: item.strokeWidth || 1 }; } } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); }
+function getStroke(item, artboardRect) {
+  try {
+    if (item.stroked && item.strokeColor) {
+      const c = colorToRGB(item.strokeColor) || { r: 0, g: 0, b: 0, a: 255 };
+      const stroke = { ...c, width: item.strokeWidth || 1 };
+      const gradient = getGradientFromColor(item.strokeColor, artboardRect);
+      if (gradient) stroke.gradient = gradient;
+      return stroke;
+    }
+  } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); }
   return null;
 }
 
@@ -487,35 +495,40 @@ function readGradientMatrix(matrix, artboardRect) {
   ];
 }
 
-function getGradient(item, artboardRect) {
+function getGradientFromColor(color, artboardRect) {
+  if (!color) return null;
   try {
-    if (item.fillColor?.typename === "GradientColor") {
-      const grad = item.fillColor.gradient;
+    if (color.typename === "GradientColor") {
+      const grad = color.gradient;
       if (!grad) return null;
-      const angle = item.fillColor.angle || 0;
+      const angle = color.angle || 0;
       const stops = [];
       try { for (const s of grad.gradientStops) stops.push({ position: s.rampPoint/100, color: gradientColorToRGB(s.color), opacity: s.opacity !== undefined ? s.opacity/100 : 1 }); } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); }
-      const origin = illustratorPointToEgui(item.fillColor.origin, artboardRect);
-      const length = Number(item.fillColor.length);
-      const hiliteLength = Number(item.fillColor.hiliteLength);
-      const hiliteAngle = Number(item.fillColor.hiliteAngle);
+      const origin = illustratorPointToEgui(color.origin, artboardRect);
+      const length = Number(color.length);
+      const hiliteLength = Number(color.hiliteLength);
+      const hiliteAngle = Number(color.hiliteAngle);
       const focalPoint = Number.isFinite(hiliteLength) && Number.isFinite(hiliteAngle)
         ? offsetIllustratorPoint(origin, hiliteLength, -hiliteAngle)
         : origin;
-      const transform = readGradientMatrix(item.fillColor.matrix, artboardRect);
+      const transform = readGradientMatrix(color.matrix, artboardRect);
       return { type: grad.type === 1 ? "linear" : "radial", angle, center: origin, focalPoint, radius: Number.isFinite(length) && length > 0 ? length : null, transform, stops };
     }
     // PatternColor — not a gradient but handled here for consistency
-    if (item.fillColor?.typename === "PatternColor") {
+    if (color.typename === "PatternColor") {
       return {
         type: 'pattern',
-        patternName: item.fillColor.pattern ? item.fillColor.pattern.name : 'unknown',
-        rotation: item.fillColor.rotation || 0,
-        scale: [item.fillColor.scaleFactor || 1, item.fillColor.scaleFactor || 1]
+        patternName: color.pattern ? color.pattern.name : 'unknown',
+        rotation: color.rotation || 0,
+        scale: [color.scaleFactor || 1, color.scaleFactor || 1]
       };
     }
   } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); }
   return null;
+}
+
+function getGradient(item, artboardRect) {
+  return getGradientFromColor(item && item.fillColor, artboardRect);
 }
 
 function gradientColorToRGB(c) {
@@ -536,20 +549,73 @@ function getTextStyle(item) {
 
 function getTextAlign(item) {
   if (item.typename !== "TextFrame") return null;
-  try { const j = item.textRange.paragraphAttributes.justification; if (j === Justification.LEFT) return "left"; if (j === Justification.CENTER) return "center"; if (j === Justification.RIGHT) return "right"; if (j === Justification.FULLJUSTIFY) return "justified"; } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); }
+  try {
+    const j = item.textRange.paragraphAttributes.justification;
+    const name = String(j || "").toUpperCase();
+    if (typeof Justification !== "undefined" && j === Justification.LEFT) return "left";
+    if (typeof Justification !== "undefined" && j === Justification.CENTER) return "center";
+    if (typeof Justification !== "undefined" && j === Justification.RIGHT) return "right";
+    if ((typeof Justification !== "undefined" && j === Justification.FULLJUSTIFY) || name.includes("JUSTIFY")) return "justified";
+  } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); }
   return "left";
 }
 
-function getLetterSpacing(item) { if (item.typename !== "TextFrame") return null; try { return item.textRange.characterAttributes.tracking / 1000; } catch (e) { return null; } }
-function getLineHeight(item) { if (item.typename !== "TextFrame") return null; try { const l = item.textRange.characterAttributes.leading; return l > 0 ? l : null; } catch (e) { return null; } }
-function getTextDecoration(item) { if (item.typename !== "TextFrame") return null; try { const u = item.textRange.characterAttributes.underline, s = item.textRange.characterAttributes.strikeThrough; if (u && s) return "underline_strikethrough"; if (u) return "underline"; if (s) return "strikethrough"; } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); } return null; }
-function getTextTransform(item) { if (item.typename !== "TextFrame") return null; try { if (item.textRange.characterAttributes.allCaps) return "all_caps"; if (item.textRange.characterAttributes.smallCaps) return "small_caps"; } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); } return null; }
+function illustratorTrackingToPx(tracking, fontSize) {
+  const t = Number(tracking);
+  const size = Number(fontSize) || 14;
+  if (!Number.isFinite(t) || t === 0) return null;
+  return (t / 1000) * size;
+}
+
+function illustratorLeadingToMultiplier(leading, fontSize) {
+  const l = Number(leading);
+  const size = Number(fontSize) || 14;
+  if (!Number.isFinite(l) || l <= 0 || size <= 0) return null;
+  return l / size;
+}
+
+function getLetterSpacing(item) {
+  if (item.typename !== "TextFrame") return null;
+  try {
+    const attrs = item.textRange.characterAttributes;
+    return illustratorTrackingToPx(attrs.tracking, attrs.size || 14);
+  } catch (e) { return null; }
+}
+
+function getLineHeight(item) {
+  if (item.typename !== "TextFrame") return null;
+  try {
+    const attrs = item.textRange.characterAttributes;
+    return illustratorLeadingToMultiplier(attrs.leading, attrs.size || 14);
+  } catch (e) { return null; }
+}
+
+function getTextDecoration(item) {
+  if (item.typename !== "TextFrame") return null;
+  try {
+    const u = item.textRange.characterAttributes.underline;
+    const s = item.textRange.characterAttributes.strikeThrough;
+    if (u && s) return "both";
+    if (u) return "underline";
+    if (s) return "strikethrough";
+  } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); }
+  return null;
+}
+
+function getTextTransform(item) {
+  if (item.typename !== "TextFrame") return null;
+  try {
+    if (item.textRange.characterAttributes.smallCaps) return "small_caps";
+    if (item.textRange.characterAttributes.allCaps) return "uppercase";
+  } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); }
+  return null;
+}
 
 function getTextRuns(item) {
   if (item.typename !== "TextFrame") return null;
   try {
     const runs = [], trs = item.textRanges;
-    if (trs && trs.length > 1) { for (const tr of trs) { try { const a = tr.characterAttributes; runs.push({ text: tr.contents || "", style: { size: a.size||14, weight: a.textFont?.name?.includes("Bold") ? 700 : 400, color: colorToRGB(a.fillColor) } }); } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); } } }
+    if (trs && trs.length > 1) { for (const tr of trs) { try { const a = tr.characterAttributes; const fontName = a.textFont?.name || ""; runs.push({ text: tr.contents || "", style: { size: a.size||14, fontSize: a.size||14, weight: fontName.includes("Bold") ? 700 : fontName.includes("Light") ? 300 : 400, family: fontName || null, color: colorToRGB(a.fillColor), letterSpacing: illustratorTrackingToPx(a.tracking, a.size || 14), lineHeight: illustratorLeadingToMultiplier(a.leading, a.size || 14), textDecoration: (a.underline && a.strikeThrough) ? "both" : a.underline ? "underline" : a.strikeThrough ? "strikethrough" : null, textTransform: a.smallCaps ? "small_caps" : a.allCaps ? "uppercase" : null } }); } catch (e) { noteExtractionDiagnostic("optional Illustrator property unavailable", e); } } }
     return runs.length > 0 ? runs : null;
   } catch (e) { return null; }
 }
@@ -828,33 +894,12 @@ function generateModFile(results) {
 }
 
 function generateComponentsFile(comps, colorMap) {
-  let usesRichText = false;
-  for (const comp of comps) {
-    const f = comp.elements[0];
-    if (f.type === "shape" && f.cornerRadius > 0) usesRichText = true;
-    else if (f.type === "text") usesRichText = true;
-  }
-  let c = `// Auto-generated reusable components.\n\n#[allow(unused_imports)]\nuse egui::{Color32, ${usesRichText ? "RichText, " : ""}Ui};\n#[allow(unused_imports)]\nuse super::tokens;\n\n`;
-  for (const comp of comps) {
-    const f = comp.elements[0], fn = comp.suggestedName.replace(/-/g, "_");
-    if (f.type === "shape" && f.cornerRadius > 0) {
-      const col = f.fill ? `tokens::${getColorName(f.fill, colorMap)}` : "tokens::PRIMARY";
-      const onColor = col.includes("PRIMARY") ? "tokens::ON_PRIMARY" : col.includes("SECONDARY") ? "tokens::ON_SECONDARY" : "tokens::ON_SURFACE";
-      c += `pub fn ${fn}(ui: &mut Ui, label: &str) -> egui::Response {\n    let btn = egui::Button::new(RichText::new(label).size(${fmtF32(f.textStyle?.size || 14)}).color(${onColor})).fill(${col}).corner_radius(${Math.min(255, Math.round(f.cornerRadius || 0))}u8);\n    ui.add(btn)\n}\n\n`;
-    } else if (f.type === "text") {
-      const col = f.fill ? `tokens::${getColorName(f.fill, colorMap)}` : "tokens::ON_SURFACE";
-      c += `pub fn ${fn}(ui: &mut Ui, text: &str) {\n    ui.label(RichText::new(text).size(${fmtF32(f.textStyle?.size || 14)}).color(${col}));\n}\n\n`;
-    } else {
-      const col = f.fill ? `tokens::${getColorName(f.fill, colorMap)}` : "tokens::SURFACE";
-      c += `pub fn ${fn}(ui: &mut Ui, rect: egui::Rect) {\n    ui.painter().rect_filled(rect, ${Math.min(255, Math.round(f.cornerRadius || 0))}u8, ${col});\n}\n\n`;
-    }
-  }
-  return c;
+  return `// Auto-generated component hook.\n// Local wrapper primitives are intentionally not emitted here.\n// Reusable design primitives live in egui_expressive (scene, typography, image slots).\n`;
 }
 
 function generateArtboardFile(ab, els, colorMap, stateName, comps, options) {
   const sn = toSnakeName(ab.name);
-  let usesShadow = false, usesBlur = false, usesComponents = comps && comps.length > 0, usesClipPath = false, usesBlendMode = false;
+  let usesShadow = false, usesBlur = false, usesComponents = false, usesClipPath = false, usesBlendMode = false;
   const walk = (elements) => {
     for (const el of elements) {
       if (el.effects?.some(e => e.type === "dropShadow" || e.type === "innerShadow" || e.type === "outerGlow" || e.type === "innerGlow")) usesShadow = true;
@@ -877,8 +922,7 @@ function generateArtboardFile(ab, els, colorMap, stateName, comps, options) {
   let c = `// Auto-generated by egui_expressive Illustrator Exporter\n// Artboard: "${sanitizeComment(ab.name)}" (${Math.round(ab.width)} × ${Math.round(ab.height)} px)\n// Options: naming=${options?.naming !== false}, gaps=${options?.gaps !== false}, native=${options?.native !== false}, sidecar=${options?.sidecar !== false || options?.includeSidecar !== false}\n\n#[allow(unused_imports)]\nuse egui::{${imports.join(", ")}};\n#[allow(unused_imports)]\nuse egui_expressive::{${exprImports.join(", ")}};\n#[allow(unused_imports)]\nuse super::tokens;\nuse super::state::${stateName}State;\n`;
   if (usesComponents) c += `use super::components;\n`;
   c += `\n#[allow(unused_variables)]\npub fn draw_${sn}(ui: &mut Ui, state: &mut ${stateName}State) -> Option<super::state::${stateName}Action> {\n    let origin = ui.cursor().min;\n    ui.allocate_space(egui::vec2(${fmtF32(ab.width)}, ${fmtF32(ab.height)}));\n    let painter = ui.painter();\n\n`;
-  c += `    // Background\n`;
-  c += `    painter.rect_filled(egui::Rect::from_min_size(origin, egui::vec2(${fmtF32(ab.width)}, ${fmtF32(ab.height)})), 0u8, tokens::SURFACE);\n\n`;
+  c += `    // Transparent artboard background; explicit Illustrator background objects are rendered below.\n\n`;
   for (const el of els) c += generateElementCode(el, 1, colorMap, comps, options);
   c += `\n    None\n}\n`;
   return c;
@@ -923,24 +967,18 @@ function generateElementCodeInner(el, indent, colorMap, comps, options) {
   if (el.type === "mesh" || el.type === "chart") {
     const cn = el.fill ? (colorMap.get(`${el.fill.r},${el.fill.g},${el.fill.b}`) || "SURFACE") : "SURFACE";
     const fc = applyBlendExpr(el.opacity < 1.0 ? `with_alpha(tokens::${cn}, ${el.opacity})` : `tokens::${cn}`, el.blendMode);
-    return `${pad}// ${sanitizeComment(el.type)} primitive: ${sanitizeComment(el.id)} — CEP exposes bounds/appearance; emitted as editable bounded vector primitive\n${pad}{\n${pad}    let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(el.x)}, ${fmtF32(el.y)}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)}));\n${pad}    painter.rect_filled(rect, 0u8, ${fc});\n${pad}    painter.rect_stroke(rect, 0u8, egui::Stroke::new(1.0, egui::Color32::from_gray(140)), egui::StrokeKind::Outside);\n${pad}}\n`;
+    return `${pad}// ${sanitizeComment(el.type)} primitive: ${sanitizeComment(el.id)} — Illustrator exposes only bounds/metadata; use shared placeholder primitive.\n${pad}{\n${pad}    let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(el.x)}, ${fmtF32(el.y)}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)}));\n${pad}    egui_expressive::paint_placeholder_slot(&painter, rect, ${fc}, egui::Stroke::new(1.0, egui::Color32::from_gray(140)), ${rustString(el.type === "chart" ? "Chart" : "Mesh")});\n${pad}}\n`;
   }
   c += generateElementComment(el) + "\n";
   for (const n of el.notes || []) c += `${pad}// ${sanitizeComment(n)}\n`;
 
-  if (["circle", "ellipse", "path", "shape"].includes(el.type)) {
-    const earlyAppearanceFills = el.appearance_fills || el.appearanceFills || [];
-    const earlyAppearanceStrokes = el.appearance_strokes || el.appearanceStrokes || [];
-    const earlyHasAppearanceStack = el.appearanceStack?.length > 0 || earlyAppearanceFills.length > 0 || earlyAppearanceStrokes.length > 0;
-    if (earlyHasAppearanceStack) {
-      const earlyLayers = appearanceLayers(el, earlyAppearanceFills, earlyAppearanceStrokes);
-      const synthesizedAppearanceHasEffects = !(el.appearanceStack?.length > 0)
-        && (earlyAppearanceFills.length > 0 || earlyAppearanceStrokes.length > 0)
-        && (el.effects?.length > 0);
-      if (el.type !== "shape" || el.appearanceStack?.length > 0 || appearanceHasNonNormalBlend(earlyLayers) || synthesizedAppearanceHasEffects) {
-        return c + sceneBackedAppearanceCode(el, pad, earlyLayers);
-      }
-    }
+  if (isSceneVectorElement(el)) {
+    return c + sceneBackedAppearanceCode(
+      el,
+      pad,
+      sceneLayersForElement(el),
+      "Vector primitive routed through egui_expressive::scene for exporter/code-first parity."
+    );
   }
 
   const hasShadow = el.effects?.some(e => e.type === "dropShadow" || e.type === "innerShadow" || e.type === "outerGlow" || e.type === "innerGlow");
@@ -1059,79 +1097,7 @@ function generateElementCodeInner(el, indent, colorMap, comps, options) {
     return c;
   }
 
-  if (el.type === "text" && el.text) {
-    // Use absolute painter position to preserve Illustrator coordinates.
-    // el.x/el.y are the top-left of the bounding box from geometricBounds.
-    // Adjust anchor point based on text alignment so egui renders at the correct position.
-    const textAlign = el.textAlign || el.textStyle?.align || "left";
-    // Compute the correct anchor x: left edge for LEFT, center for CENTER, right edge for RIGHT
-    const anchorX = textAlign === "center" ? el.x + (el.w || 0) / 2
-                  : textAlign === "right"  ? el.x + (el.w || 0)
-                  : el.x;
-    const tx = fmtF32(anchorX), ty = fmtF32(el.y);
-    const align2 = textAlign === "center" ? "CENTER_TOP" : textAlign === "right" ? "RIGHT_TOP" : "LEFT_TOP";
-
-    if (el.textRuns && el.textRuns.length > 1) {
-      // Multi-run text — lay out runs left-to-right with line-break support.
-      // For center/right alignment, compute total first-line width and shift the
-      // block start so the composed line aligns correctly within the bounding box.
-      const defaultSz = el.textStyle?.size || 14;
-      // Estimate total width of the first line across all runs (for alignment offset).
-      // Stop accumulating as soon as any run contains a newline — subsequent runs
-      // are on line 2+ and should not contribute to the first-line width.
-      let firstLineWidth = 0;
-      let firstLineDone = false;
-      for (const run of el.textRuns) {
-        if (!run.text || firstLineDone) continue;
-        const newlineIdx = run.text.indexOf("\n");
-        const firstLinePart = newlineIdx >= 0 ? run.text.slice(0, newlineIdx) : run.text;
-        const runSz = run.style?.size || defaultSz;
-        firstLineWidth += firstLinePart.length * runSz * 0.55;
-        if (newlineIdx >= 0) firstLineDone = true;
-      }
-      // blockStartX: left edge of the composed text block, adjusted for alignment
-      const blockStartX = textAlign === "center" ? el.x + (el.w || 0) / 2 - firstLineWidth / 2
-                        : textAlign === "right"  ? el.x + (el.w || 0) - firstLineWidth
-                        : el.x;
-      c += `${pad}{\n`;
-      c += `${pad}    let _text_x0 = ${fmtF32(blockStartX)}f32;\n`;
-      c += `${pad}    let _text_y0 = ${fmtF32(el.y)}f32;\n`;
-      let xOffset = 0;
-      let yOffset = 0;
-      for (const run of el.textRuns) {
-        if (!run.text) continue;
-        // Split on newlines to handle multi-line runs
-        const lines = run.text.split("\n");
-        const runSz = run.style?.size || defaultSz;
-        const runWt = run.style?.weight || el.textStyle?.weight || 400;
-        const runColor = run.style?.color;
-        const runCn = runColor ? (colorMap.get(`${runColor.r},${runColor.g},${runColor.b}`) || "ON_SURFACE") : "ON_SURFACE";
-        const fontFamily = runWt >= 600 ? `egui::FontFamily::Name("Bold".into())` : `egui::FontFamily::Proportional`;
-        for (let li = 0; li < lines.length; li++) {
-          const lineText = lines[li];
-          if (li > 0) {
-            // Newline: advance y, reset x to block start
-            yOffset += runSz * 1.2;
-            xOffset = 0;
-          }
-          if (!lineText) continue;
-          const runTxt = lineText.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/\0/g, "\\0");
-          c += `${pad}    painter.text(origin + egui::vec2(_text_x0 + ${fmtF32(xOffset)}, _text_y0 + ${fmtF32(yOffset)}), egui::Align2::LEFT_TOP, "${runTxt}", egui::FontId::new(${fmtF32(runSz)}, ${fontFamily}), tokens::${runCn});\n`;
-          xOffset += lineText.length * runSz * 0.55;
-        }
-      }
-      c += `${pad}}\n`;
-    } else {
-      // Single-style text at absolute position
-      const cn = el.fill ? (colorMap.get(`${el.fill.r},${el.fill.g},${el.fill.b}`) || "ON_SURFACE") : "ON_SURFACE";
-      const sz = el.textStyle?.size || 14;
-      const wt = el.textStyle?.weight || 400;
-      const txt = el.text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/\0/g, "\\0");
-      const fontFamily = wt >= 600 ? `egui::FontFamily::Name("Bold".into())` : `egui::FontFamily::Proportional`;
-      c += `${pad}painter.text(origin + egui::vec2(${tx}, ${ty}), egui::Align2::${align2}, "${txt}", egui::FontId::new(${fmtF32(sz)}, ${fontFamily}), tokens::${cn});\n`;
-    }
-    return c;
-  }
+  if (el.type === "text" && el.text) return c + textBlockCode(el, pad, colorMap);
 
   if (el.type === "path") {
     // Open path — emit sampled Bezier geometry instead of dropping control handles.
@@ -1377,14 +1343,19 @@ function generateElementCodeInner(el, indent, colorMap, comps, options) {
     }
     const alpha = clampByte((el.opacity !== undefined ? el.opacity : 1.0) * 255, 255);
     const tintExpr = alpha === 255 ? "egui::Color32::WHITE" : `egui::Color32::from_rgba_unmultiplied(255, 255, 255, ${alpha})`;
-    c += `${pad}    if !egui_expressive::paint_image_from_path(ui, &painter, rect, ${rustString(assetPath)}, ${rustString("illustrator_img_" + sanitize(el.id))}, ${tintExpr}) {\n`;
-    c += `${pad}        // Linked asset was not found at runtime; copy it to preview/generated/assets/.\n`;
-    c += `${pad}        painter.rect_filled(rect, 0u8, egui::Color32::from_rgba_unmultiplied(255, 0, 0, 30));\n`;
-    c += `${pad}        painter.rect_stroke(rect, 0u8, egui::Stroke::new(1.0, egui::Color32::RED), egui::StrokeKind::Outside);\n`;
-    c += `${pad}        painter.text(rect.center(), egui::Align2::CENTER_CENTER, "Missing Image", egui::FontId::proportional(12.0), egui::Color32::RED);\n`;
-    c += `${pad}    }\n`;
+    const pathExpr = el.imagePath ? `Some(${rustString(assetPath)})` : "None";
+    c += `${pad}    egui_expressive::paint_image_slot(ui, &painter, rect, ${pathExpr}, ${rustString("illustrator_img_" + sanitize(el.id))}, ${tintExpr}, "Missing Image");\n`;
     c += `${pad}}\n`;
     return c;
+  }
+
+  if (el.type === "group" && el.children?.length > 0 && isSceneRenderableElement(el)) {
+    return c + sceneBackedAppearanceCode(
+      el,
+      pad,
+      sceneLayersForElement(el),
+      "Group routed through egui_expressive::scene so clipping/blending stays in core primitives."
+    );
   }
 
   if (el.type === "group" && el.children?.length > 0) {
@@ -1494,6 +1465,7 @@ function tryGenerateBlendLayers(children, indent, colorMap, comps, options) {
 }
 
 function generateElementCode(el, indent, colorMap, comps, options) {
+  if (isSceneVectorElement(el)) return generateElementCodeInner(el, indent, colorMap, comps, options);
   if (el.blendMode && el.blendMode !== "normal") {
     const variant = blendModeRust(el.blendMode);
     if (variant) {
@@ -1593,6 +1565,91 @@ function effectDefExpr(effect) {
   return `egui_expressive::codegen::EffectDef { effect_type: ${effectTypeExpr(ty)}, x: ${fmtF32(effect.x || 0)}, y: ${fmtF32(effect.y || 0)}, blur: ${fmtF32(effect.blur || 0)}, spread: ${fmtF32(effect.spread || 0)}, color: ${rgbaExpr(effect.color || { r: 0, g: 0, b: 0, a: 1 }, 1)}, blend_mode: ${codegenBlendModeExpr(effect.blendMode || effect.blend_mode)}, depth: ${fmtF32(effect.depth || 0)}, angle: ${fmtF32(effect.angle || 0)}, highlight: ${optionColorExpr(effect.highlight)}, shadow_color: ${optionColorExpr(effect.shadowColor || effect.shadow)}, radius: ${fmtF32(effect.radius || 0)}, amount: ${fmtF32(effect.amount || 0)}, scale: ${fmtF32(effect.scale || 1)}, seed: ${Math.max(0, Math.round(effect.seed || 0))} }`;
 }
 
+function textBlockAlignExpr(align) {
+  const value = String(align || "left").toLowerCase();
+  if (value === "center" || value === "centre") return "egui_expressive::TextBlockAlign::Center";
+  if (value === "right") return "egui_expressive::TextBlockAlign::Right";
+  return "egui_expressive::TextBlockAlign::Left";
+}
+
+function textDecorationExpr(decoration) {
+  const value = String(decoration || "none").toLowerCase();
+  if (value === "underline") return "egui_expressive::TextDecoration::Underline";
+  if (value === "strikethrough" || value === "line-through") return "egui_expressive::TextDecoration::Strikethrough";
+  if (value === "both" || value === "underline_strikethrough") return "egui_expressive::TextDecoration::Both";
+  return "egui_expressive::TextDecoration::None";
+}
+
+function textTransformExpr(transform) {
+  const value = String(transform || "none").toLowerCase();
+  if (value === "uppercase" || value === "all_caps" || value === "small_caps") return "egui_expressive::TextTransform::Uppercase";
+  if (value === "lowercase") return "egui_expressive::TextTransform::Lowercase";
+  if (value === "capitalize") return "egui_expressive::TextTransform::Capitalize";
+  return "egui_expressive::TextTransform::None";
+}
+
+function normalizedAlpha(value, fallback) {
+  const raw = Number(value);
+  if (!Number.isFinite(raw)) return fallback;
+  return raw > 1 ? raw / 255 : raw;
+}
+
+function textColorExpr(color, colorMap, fallback, opacity) {
+  const alpha = normalizedAlpha(opacity, 1) * normalizedAlpha(color && color.a !== undefined ? color.a : 1, 1);
+  const base = color ? `tokens::${colorMap.get(`${color.r},${color.g},${color.b}`) || "ON_SURFACE"}` : (fallback || "tokens::ON_SURFACE");
+  return alpha < 0.999 ? `egui_expressive::with_alpha(${base}, ${fmtF32(alpha)})` : base;
+}
+
+function typeSpecExpr(style, colorExpr, inherited) {
+  const resolved = style || {};
+  const parent = inherited || {};
+  const size = resolved.size || resolved.fontSize || parent.size || parent.fontSize || 14;
+  const weight = resolved.weight || parent.weight || 400;
+  const family = resolved.family || resolved.fontFamily || parent.family || parent.fontFamily || null;
+  const letterSpacing = resolved.letterSpacing !== undefined ? resolved.letterSpacing : (parent.letterSpacing || 0);
+  const decoration = resolved.textDecoration || parent.textDecoration || "none";
+  const transform = resolved.textTransform || parent.textTransform || "none";
+  let expr = `egui_expressive::TypeSpec::new(${fmtF32(size)}).weight(${Math.round(weight)}).letter_spacing(${fmtF32(letterSpacing)}).color(${colorExpr}).decoration(${textDecorationExpr(decoration)}).text_transform(${textTransformExpr(transform)})`;
+  if (family && String(family).trim()) expr += `.font_family(${rustString(family)})`;
+  else if (weight >= 600) expr += `.font_family("Bold")`;
+  return expr;
+}
+
+function textBlockCode(el, pad, colorMap) {
+  const spans = [];
+  const inherited = {
+    ...(el.textStyle || {}),
+    letterSpacing: el.letterSpacing !== undefined ? el.letterSpacing : el.textStyle?.letterSpacing,
+    lineHeight: el.lineHeight !== undefined ? el.lineHeight : el.textStyle?.lineHeight,
+    textDecoration: el.textDecoration,
+    textTransform: el.textTransform,
+  };
+  if (el.textRuns && el.textRuns.length > 0) {
+    for (const run of el.textRuns) {
+      if (!run.text) continue;
+      const runColor = run.style?.color || el.fill || null;
+      const runOpacity = (run.style && run.style.opacity !== undefined ? run.style.opacity : 1) * (el.opacity !== undefined ? el.opacity : 1);
+      spans.push({ text: run.text, spec: typeSpecExpr(run.style || {}, textColorExpr(runColor, colorMap, null, runOpacity), inherited) });
+    }
+  } else {
+    spans.push({ text: el.text || "", spec: typeSpecExpr(el.textStyle || {}, textColorExpr(el.fill, colorMap, null, el.opacity), inherited) });
+  }
+  const spanExpr = spans.map(span => `egui_expressive::TextSpan::new(${rustString(span.text)}, ${span.spec})`).join(", ");
+  const lineHeight = el.lineHeight || el.textStyle?.lineHeight || 1.2;
+  const layoutWidth = Number.isFinite(Number(el.w)) && Number(el.w) > 0 ? fmtF32(el.w) : null;
+  const align = textBlockAlignExpr(el.textAlign || el.textStyle?.align);
+  let c = `${pad}// Text routed through egui_expressive::TextBlock primitive.\n`;
+  c += `${pad}{\n`;
+  c += `${pad}    let text_block = egui_expressive::TextBlock::from_spans(vec![${spanExpr}])\n`;
+  c += `${pad}        .align(${align})\n`;
+  c += `${pad}        .line_height(${fmtF32(lineHeight)})`;
+  if (layoutWidth) c += `\n${pad}        .layout_width(${layoutWidth})`;
+  c += `;\n`;
+  c += `${pad}    egui_expressive::render_text_block(&painter, origin + egui::vec2(${fmtF32(el.x)}, ${fmtF32(el.y)}), &text_block);\n`;
+  c += `${pad}}\n`;
+  return c;
+}
+
 function gradientDefExpr(g) {
   const kind = g.type === "radial" ? "Radial" : "Linear";
   const stops = (g.stops || []).map(s => {
@@ -1632,15 +1689,8 @@ function rustLocalPointsVec(points) {
   return `vec![${points.map(p => `egui::pos2(${fmtF32(p[0])}, ${fmtF32(p[1])})`).join(", ")}]`;
 }
 
-function sceneGeometryExpr(el) {
-  if (el.pathPoints && el.pathPoints.length >= 2) {
-    const sampled = samplePathPoints(el.pathPoints, el.pathClosed !== false);
-    return `egui_expressive::scene::Geometry::Path { points: ${rustLocalPointsVec(sampled)}, closed: ${el.pathClosed === false ? "false" : "true"} }`;
-  }
-  if (el.type === "circle" || el.type === "ellipse") {
-    return `egui_expressive::scene::Geometry::Ellipse { rect: egui::Rect::from_min_size(egui::pos2(${fmtF32(el.x)}, ${fmtF32(el.y)}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)})) }`;
-  }
-  return `egui_expressive::scene::Geometry::Rect { rect: egui::Rect::from_min_size(egui::pos2(${fmtF32(el.x)}, ${fmtF32(el.y)}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)})), corner_radius: ${fmtF32(el.cornerRadius || 0)} }`;
+function rectExpr(el) {
+  return `egui::Rect::from_min_size(egui::pos2(${fmtF32(el.x)}, ${fmtF32(el.y)}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)}))`;
 }
 
 function appearanceLayerKind(layer) {
@@ -1659,6 +1709,46 @@ function appearanceLayers(el, appearanceFills, appearanceStrokes) {
   ];
 }
 
+function sceneLayersForElement(el) {
+  const appearanceFills = el.appearance_fills || el.appearanceFills || [];
+  const appearanceStrokes = el.appearance_strokes || el.appearanceStrokes || [];
+  if (el.appearanceStack?.length > 0 || appearanceFills.length > 0 || appearanceStrokes.length > 0) {
+    return appearanceLayers(el, appearanceFills, appearanceStrokes);
+  }
+
+  const layers = [];
+  if (el.gradient) layers.push({ type: "fill", gradient: el.gradient, opacity: 1.0, blendMode: "normal" });
+  else if (el.fill) layers.push({ type: "fill", color: el.fill, opacity: 1.0, blendMode: "normal" });
+
+  for (const effect of el.effects || []) {
+    layers.push({ ...effect, type: effect.type || effect.effectType || "effect", entryType: "effect" });
+  }
+
+  if (el.stroke) {
+    layers.push({
+      type: "stroke",
+      color: el.stroke,
+      width: el.stroke.width || 1,
+      opacity: 1.0,
+      blendMode: "normal",
+      cap: el.strokeCap,
+      join: el.strokeJoin,
+      dash: el.strokeDash,
+      miterLimit: el.strokeMiterLimit
+    });
+  }
+  return layers;
+}
+
+function isSceneVectorElement(el) {
+  return ["circle", "ellipse", "path", "shape"].includes(el.type);
+}
+
+function isSceneRenderableElement(el) {
+  if (isSceneVectorElement(el)) return true;
+  return el.type === "group" && (el.children || []).every(isSceneRenderableElement);
+}
+
 function appearanceHasNonNormalBlend(layers) {
   return layers.some(layer => {
     const mode = layer.blendMode || layer.blend_mode;
@@ -1666,42 +1756,70 @@ function appearanceHasNonNormalBlend(layers) {
   });
 }
 
-function sceneAppearanceEntriesExpr(layers, pad) {
-  let c = "";
-  for (const layer of layers) {
-    const kind = appearanceLayerKind(layer);
-    const opacity = appearanceOpacity(layer, 1);
-    const blend = codegenBlendModeExpr(layer.blendMode || layer.blend_mode);
-    if (kind === "fill") {
-      c += `${pad}        egui_expressive::scene::AppearanceEntry::Fill(egui_expressive::scene::FillLayer { paint: ${paintSourceExpr(layer)}, opacity: ${fmtF32(opacity)}, blend_mode: ${blend} }),\n`;
-    } else if (kind === "stroke") {
-      const dash = layer.dash || layer.strokeDash;
-      const dashExpr = dash && dash.length > 0 ? `Some(vec![${dash.map(fmtF32).join(", ")}])` : "None";
-      c += `${pad}        egui_expressive::scene::AppearanceEntry::Stroke(egui_expressive::scene::StrokeLayer { paint: egui_expressive::scene::PaintSource::Solid(${rgbaExpr(layer.color || layer, 1)}), width: ${fmtF32(layer.width || 1)}, opacity: ${fmtF32(opacity)}, blend_mode: ${blend}, cap: Some(egui_expressive::codegen::StrokeCap::${strokeCapVariant(layer.cap)}), join: Some(egui_expressive::codegen::StrokeJoin::${strokeJoinVariant(layer.join, layer.miterLimit || layer.miter_limit)}), dash: ${dashExpr}, miter_limit: ${Number.isFinite(Number(layer.miterLimit || layer.miter_limit)) ? `Some(${fmtF32(layer.miterLimit || layer.miter_limit)})` : "None"} }),\n`;
-    } else if (kind === "effect") {
-      c += `${pad}        egui_expressive::scene::AppearanceEntry::Effect(egui_expressive::scene::EffectLayer { effect_type: ${effectTypeExpr(layer.effectType || layer.effect_type || layer.type)}, params: ${effectDefExpr(layer)}, opacity: ${fmtF32(opacity)}, blend_mode: ${blend} }),\n`;
-    }
+function sceneLayerChainExpr(layer) {
+  const kind = appearanceLayerKind(layer);
+  const opacity = appearanceOpacity(layer, 1);
+  const blend = codegenBlendModeExpr(layer.blendMode || layer.blend_mode);
+  const chainOpacity = Math.abs(opacity - 1) > 0.0001 ? `.opacity(${fmtF32(opacity)})` : "";
+  const chainBlend = blend.endsWith("::Normal") ? "" : `.blend_mode(${blend})`;
+
+  if (kind === "fill") {
+    return `.with_fill_layer(egui_expressive::scene::FillLayer::paint(${paintSourceExpr(layer)})${chainOpacity}${chainBlend})`;
+  }
+
+  if (kind === "stroke") {
+    const dash = layer.dash || layer.strokeDash;
+    let expr = `.with_stroke_layer(egui_expressive::scene::StrokeLayer::new(${fmtF32(layer.width || 1)}, egui_expressive::scene::PaintSource::Solid(${rgbaExpr(layer.color || layer, 1)}))${chainOpacity}${chainBlend}`;
+    if (layer.cap) expr += `.cap(egui_expressive::codegen::StrokeCap::${strokeCapVariant(layer.cap)})`;
+    if (layer.join) expr += `.join(egui_expressive::codegen::StrokeJoin::${strokeJoinVariant(layer.join, layer.miterLimit || layer.miter_limit)})`;
+    if (dash && dash.length > 0) expr += `.dash(vec![${dash.map(fmtF32).join(", ")}])`;
+    if (Number.isFinite(Number(layer.miterLimit || layer.miter_limit))) expr += `.miter_limit(${fmtF32(layer.miterLimit || layer.miter_limit)})`;
+    return expr + `)`;
+  }
+
+  if (kind === "effect") {
+    return `.with_effect_layer(egui_expressive::scene::EffectLayer::new(${effectDefExpr(layer)})${chainOpacity}${chainBlend})`;
+  }
+
+  return "";
+}
+
+function sceneNodeExpr(el, pad, layers) {
+  const pathBacked = el.pathPoints && el.pathPoints.length >= 2;
+  const nodeLayers = layers || sceneLayersForElement(el);
+  let c;
+  if (el.type === "group") {
+    c = el.clipMask
+      ? `egui_expressive::scene::SceneNode::clip_group(${rustString(el.id)}, ${rectExpr(el)})`
+      : `egui_expressive::scene::SceneNode::group(${rustString(el.id)}, ${rectExpr(el)})`;
+  } else if (pathBacked) {
+    const sampled = samplePathPoints(el.pathPoints, el.pathClosed !== false);
+    c = `egui_expressive::scene::SceneNode::path(${rustString(el.id)}, ${rustLocalPointsVec(sampled)}, ${el.pathClosed === false ? "false" : "true"})`;
+  } else if (el.type === "circle" || el.type === "ellipse") {
+    c = `egui_expressive::scene::SceneNode::ellipse(${rustString(el.id)}, ${rectExpr(el)})`;
+  } else {
+    c = `egui_expressive::scene::SceneNode::rect(${rustString(el.id)}, ${rectExpr(el)}, ${fmtF32(el.cornerRadius || 0)})`;
+  }
+  for (const layer of nodeLayers) {
+    const chain = sceneLayerChainExpr(layer);
+    if (chain) c += `\n${pad}    ${chain}`;
+  }
+  const opacity = el.opacity !== undefined ? Number(el.opacity) : 1;
+  if (Number.isFinite(opacity) && Math.abs(opacity - 1) > 0.0001) c += `\n${pad}    .with_opacity(${fmtF32(opacity)})`;
+  const blendMode = codegenBlendModeExpr(el.blendMode);
+  if (!blendMode.endsWith("::Normal")) c += `\n${pad}    .with_blend_mode(${blendMode})`;
+  if (!pathBacked && Number(el.rotation || 0) !== 0) c += `\n${pad}    .with_rotation(${fmtF32(el.rotation || 0)})`;
+  for (const child of el.children || []) {
+    if (isSceneRenderableElement(child)) c += `\n${pad}    .with_child(${sceneNodeExpr(child, pad + "        ")})`;
   }
   return c;
 }
 
-function sceneBackedAppearanceCode(el, pad, layers) {
-  const pathBacked = el.pathPoints && el.pathPoints.length >= 2;
-  let c = `${pad}// Appearance stack contains layer blend modes; route through scene renderer for ordered compositing parity.\n`;
+function sceneBackedAppearanceCode(el, pad, layers, reason) {
+  let c = `${pad}// ${sanitizeComment(reason || "Vector appearance routed through egui_expressive::scene primitives")}\n`;
   c += `${pad}{\n`;
-  c += `${pad}    let scene_node = egui_expressive::scene::SceneNode {\n`;
-  c += `${pad}        id: ${rustString(el.id)}.to_string(),\n`;
-  c += `${pad}        geometry: ${sceneGeometryExpr(el)},\n`;
-  c += `${pad}        appearance: egui_expressive::scene::AppearanceStack { entries: vec![\n`;
-  c += sceneAppearanceEntriesExpr(layers, pad);
-  c += `${pad}        ] },\n`;
-  c += `${pad}        opacity: ${fmtF32(el.opacity !== undefined ? el.opacity : 1)},\n`;
-  c += `${pad}        blend_mode: ${codegenBlendModeExpr(el.blendMode)},\n`;
-  c += `${pad}        rotation_deg: ${pathBacked ? "0.0" : fmtF32(el.rotation || 0)},\n`;
-  c += `${pad}        clip_children: false,\n`;
-  c += `${pad}        children: vec![],\n`;
-  c += `${pad}    };\n`;
-  c += `${pad}    egui_expressive::scene::render_node(ui, painter, origin.to_vec2(), &scene_node, 1.0);\n`;
+  c += `${pad}    let scene_node = ${sceneNodeExpr(el, pad + "        ", layers)};\n`;
+  c += `${pad}    egui_expressive::scene::render_node(ui, &painter, origin.to_vec2(), &scene_node, 1.0);\n`;
   c += `${pad}}\n`;
   return c;
 }
@@ -1850,13 +1968,93 @@ function sidecarType(t) {
   }
 }
 
-function generateSidecar(ab, els, colorMap) {
+function mergeParityStatus(a, b) {
+  const rank = { exact: 0, approximate: 1, unsupported: 2 };
+  return rank[b] > rank[a] ? b : a;
+}
+
+function hasGradientStroke(el) {
+  if ((el.stroke && el.stroke.gradient) || el.strokeGradient) return true;
+  const strokes = el.appearance_strokes || el.appearanceStrokes || [];
+  return strokes.some(stroke => stroke && stroke.gradient);
+}
+
+function isMixedClipGroup(el) {
+  return el && el.clipMask && el.children && el.children.length > 0 && !el.children.every(isSceneRenderableElement);
+}
+
+function parityFindingsForElement(el) {
+  const findings = [];
+  const type = sidecarType(el.type);
+  const add = (status, reason) => findings.push({ status, reason });
+
+  if (el.embeddedRaster) add("unsupported", "embedded raster requires an extracted image asset before parity can be guaranteed");
+  if (el.isChart) add("unsupported", "Illustrator chart/graph objects need expansion or chart-specific primitive support");
+  if (el.isGradientMesh && !(el.mesh_patches && el.mesh_patches.length > 0)) add("unsupported", "gradient mesh has no parsed mesh patches");
+  if (el.isCompoundPath) add("unsupported", "compound paths/holes are not yet represented as parity-safe geometry");
+  if (hasGradientStroke(el)) add("unsupported", "gradient strokes are not yet rendered by the scene stroke primitive");
+  if (isMixedClipGroup(el)) add("unsupported", "mixed clipping groups with text/images are not parity-safe yet");
+  if ((type === "text" || type === "image") && el.blendMode && el.blendMode !== "normal") add("unsupported", "non-normal blend modes for text/images are not parity-safe yet");
+  if (String(el.textAlign || "").toLowerCase() === "justified") add("unsupported", "justified text is not represented by TextBlock yet");
+  if (String(el.textTransform || "").toLowerCase() === "small_caps") add("unsupported", "small caps are approximated as uppercase in TextBlock");
+  if (el.type === "symbol") add("approximate", "symbol instances preserve metadata; expand symbols for editable parity");
+  if (el.clipMask && !isMixedClipGroup(el)) add("approximate", "clipping masks are supported for vector scene groups but should be image-diff verified");
+  if (el.isGradientMesh && el.mesh_patches && el.mesh_patches.length > 0) add("approximate", "gradient mesh patches are editable approximations until covered by visual fixtures");
+  if (el.parserOnly) add("approximate", "ai-parser-only vectors are code-drawn but lack Illustrator hierarchy/depth context until matched with DOM ordering");
+
+  return findings;
+}
+
+function parityStatusForElement(el) {
+  let status = "exact";
+  for (const finding of parityFindingsForElement(el)) status = mergeParityStatus(status, finding.status);
+  for (const child of el.children || []) status = mergeParityStatus(status, parityStatusForElement(child));
+  return status;
+}
+
+function parityReasonsForElement(el) {
+  const reasons = parityFindingsForElement(el).map(finding => `[${finding.status}] ${finding.reason}`);
+  for (const child of el.children || []) reasons.push(...parityReasonsForElement(child));
+  return [...new Set(reasons)];
+}
+
+function parityStatusForElements(elements) {
+  let status = "exact";
+  for (const el of elements || []) status = mergeParityStatus(status, parityStatusForElement(el));
+  return status;
+}
+
+function parserParityFindings(options) {
+  const diagnostics = [
+    ...((options && Array.isArray(options.parserDiagnostics)) ? options.parserDiagnostics : []),
+    ...getAiParserDiagnostics(),
+  ];
+  const hasParserGap = diagnostics.some(diagnostic => {
+    const id = String(diagnostic.id || "").toLowerCase();
+    const note = String(diagnostic.note || diagnostic.message || "").toLowerCase();
+    return id === "ai-parser" && /(skipped|unavailable|not found|failed|cannot|no document path)/.test(note);
+  });
+  if (hasParserGap || (aiParserStatus.checked && !aiParserStatus.available)) {
+    return [{ status: "approximate", reason: "ai-parser enrichment unavailable; DOM extraction is best-effort for parser-only Illustrator appearance data" }];
+  }
+  return [];
+}
+
+function generateSidecar(ab, els, colorMap, options) {
+  const parserFindings = parserParityFindings(options);
   const mapElement = (el, childDepth) => {
+    const parityReasons = [
+      ...parityReasonsForElement(el),
+      ...parserFindings.map(finding => `[${finding.status}] ${finding.reason}`),
+    ];
+    let elementParityStatus = parityStatusForElement(el);
+    for (const finding of parserFindings) elementParityStatus = mergeParityStatus(elementParityStatus, finding.status);
     const result = {
       id: el.id, type: sidecarType(el.type), x: el.x, y: el.y, w: el.w, h: el.h, depth: childDepth !== undefined ? childDepth : el.depth,
       fill: colorToHex(el.fill),
       stroke: colorToHex(el.stroke),
       strokeWidth: el.stroke?.width || undefined,
+      strokeGradient: mapGradientForSidecar(el.stroke && el.stroke.gradient),
       text: el.text || undefined,
       textStyle: el.textStyle ? { fontSize: el.textStyle.size, fontWeight: el.textStyle.weight, fontFamily: el.textStyle.family } : undefined,
       opacity: el.opacity !== 1 ? el.opacity : undefined, rotation: el.rotation !== 0 ? el.rotation : undefined,
@@ -1865,14 +2063,14 @@ function generateSidecar(ab, els, colorMap) {
       blendMode: el.blendMode !== "normal" ? el.blendMode : undefined, strokeCap: el.strokeCap, strokeJoin: el.strokeJoin,
       strokeDash: el.strokeDash, strokeMiterLimit: el.strokeMiterLimit,
       appearanceFills: el.appearance_fills && el.appearance_fills.length > 0 ? el.appearance_fills.map(f => ({ color: colorToHex(f.color || f), opacity: f.opacity, blendMode: f.blendMode || f.blend_mode, gradient: mapGradientForSidecar(f.gradient) })) : undefined,
-      appearanceStrokes: el.appearance_strokes && el.appearance_strokes.length > 0 ? el.appearance_strokes.map(s => ({ color: colorToHex(s.color || s), width: s.width, opacity: s.opacity, blendMode: s.blendMode || s.blend_mode, cap: s.cap, join: s.join, dash: s.dash, miterLimit: s.miterLimit })) : undefined,
+      appearanceStrokes: el.appearance_strokes && el.appearance_strokes.length > 0 ? el.appearance_strokes.map(s => ({ color: colorToHex(s.color || s), width: s.width, opacity: s.opacity, blendMode: s.blendMode || s.blend_mode, gradient: mapGradientForSidecar(s.gradient), cap: s.cap, join: s.join, dash: s.dash, miterLimit: s.miterLimit })) : undefined,
       effects: el.effects.length > 0 ? el.effects.map(mapEffectForSidecar) : undefined,
       appearanceStack: el.appearanceStack || (
         (el.appearance_fills?.length || el.appearance_strokes?.length || el.effects?.length) ?
         [
           ...(el.appearance_fills || []).map(f => ({ type: 'fill', color: colorToHex(f.color || f), opacity: f.opacity, blendMode: f.blendMode || f.blend_mode, gradient: mapGradientForSidecar(f.gradient) })),
           ...(el.effects || []).map(e => ({ ...mapEffectForSidecar(e), entryType: 'effect', effectType: e.type })),
-          ...(el.appearance_strokes || []).map(s => ({ type: 'stroke', color: colorToHex(s.color || s), width: s.width, opacity: s.opacity, blendMode: s.blendMode || s.blend_mode, cap: s.cap, join: s.join, dash: s.dash, miterLimit: s.miterLimit }))
+          ...(el.appearance_strokes || []).map(s => ({ type: 'stroke', color: colorToHex(s.color || s), width: s.width, opacity: s.opacity, blendMode: s.blendMode || s.blend_mode, gradient: mapGradientForSidecar(s.gradient), cap: s.cap, join: s.join, dash: s.dash, miterLimit: s.miterLimit }))
         ] : undefined
       ),
       textAlign: el.textAlign, letterSpacing: el.letterSpacing, lineHeight: el.lineHeight,
@@ -1885,6 +2083,8 @@ function generateSidecar(ab, els, colorMap) {
       pathPoints: el.pathPoints ? el.pathPoints.map(p => ({ ...p, left_ctrl: p.leftDir, right_ctrl: p.rightDir })) : undefined, pathClosed: el.pathClosed || undefined,
       imagePath: el.imagePath ? portableAssetPath(el.imagePath) : undefined,
       embeddedRaster: el.embeddedRaster || undefined,
+      parityStatus: elementParityStatus,
+      parityReasons: parityReasons.length > 0 ? parityReasons : undefined,
     };
     // Preserve full nesting — recursively map children
     if (el.children?.length > 0) {
@@ -1892,8 +2092,16 @@ function generateSidecar(ab, els, colorMap) {
     }
     return result;
   };
+  let artboardParityStatus = parityStatusForElements(els);
+  for (const finding of parserFindings) artboardParityStatus = mergeParityStatus(artboardParityStatus, finding.status);
   return JSON.stringify({
-    artboard: { name: ab.name, width: ab.width, height: ab.height },
+    artboard: {
+      name: ab.name,
+      width: ab.width,
+      height: ab.height,
+      parityStatus: artboardParityStatus,
+      parityReasons: parserFindings.length > 0 ? parserFindings.map(finding => `[${finding.status}] ${finding.reason}`) : undefined,
+    },
     colors: [...colorMap.entries()].map(([k, n]) => { const [r, g, b] = k.split(",").map(Number); return { name: n, r, g, b }; }),
     elements: els.map(mapElement),
   }, null, 2);
@@ -2102,7 +2310,76 @@ function parserPathPoints(aiEl) {
     }));
 }
 
-function mergeAiParserData(domElements, aiParserResult) {
+function parserBounds(aiEl) {
+    if (Array.isArray(aiEl.bounds) && aiEl.bounds.length >= 4) {
+        return aiEl.bounds.map(value => Number(value) || 0);
+    }
+    const pathPoints = parserPathPoints(aiEl) || [];
+    if (!pathPoints.length) return [Number(aiEl.translate_x) || 0, Number(aiEl.translate_y) || 0, Number(aiEl.scale_x) || 1, Number(aiEl.scale_y) || 1];
+    const xs = [];
+    const ys = [];
+    for (const point of pathPoints) {
+        for (const coord of [point.anchor, point.leftDir, point.rightDir]) {
+            if (Array.isArray(coord)) {
+                xs.push(Number(coord[0]) || 0);
+                ys.push(Number(coord[1]) || 0);
+            }
+        }
+    }
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+    return [minX, minY, Math.max(1, maxX - minX), Math.max(1, maxY - minY)];
+}
+
+function normalizedArtboardName(name) {
+    return String(name || "").trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function parserElementBelongsToArtboard(aiEl, artboardName) {
+    if (!artboardName || !aiEl.artboard_name) return true;
+    return normalizedArtboardName(aiEl.artboard_name) === normalizedArtboardName(artboardName);
+}
+
+function parserElementToDomElement(aiEl, artboardName) {
+    const [x, y, w, h] = parserBounds(aiEl);
+    const pathPoints = parserPathPoints(aiEl);
+    const liveEffects = effectsFromLiveEffects(aiEl.live_effects || []);
+    return {
+        id: aiEl.id || `parser_${Math.round(x)}_${Math.round(y)}`,
+        parserId: aiEl.id,
+        parserOnly: true,
+        artboardName: aiEl.artboard_name || artboardName,
+        type: pathPoints && pathPoints.length >= 2 ? "path" : (aiEl.element_type || "shape"),
+        x,
+        y,
+        w,
+        h,
+        fill: null,
+        stroke: null,
+        opacity: 1,
+        rotation: Number(aiEl.rotation_deg || 0),
+        scaleX: Number(aiEl.scale_x || 1),
+        scaleY: Number(aiEl.scale_y || 1),
+        translateX: Number(aiEl.translate_x || 0),
+        translateY: Number(aiEl.translate_y || 0),
+        cornerRadius: Number(aiEl.corner_radius || 0),
+        pathPoints,
+        pathClosed: aiEl.path_closed !== undefined ? !!aiEl.path_closed : true,
+        live_effects: aiEl.live_effects?.length ? aiEl.live_effects : undefined,
+        effects: liveEffects.length ? liveEffects : [],
+        appearance_fills: aiEl.appearance_fills || [],
+        appearance_strokes: aiEl.appearance_strokes || [],
+        mesh_patches: aiEl.mesh_patches || [],
+        envelope_mesh: aiEl.envelope_mesh,
+        three_d: aiEl.three_d,
+        notes: [],
+        children: []
+    };
+}
+
+function mergeAiParserData(domElements, aiParserResult, artboardName) {
     const parserElements = flattenAiParserElements(aiParserResult);
     if (!parserElements.length) return domElements;
     const usedIds = new Set();
@@ -2138,7 +2415,18 @@ function mergeAiParserData(domElements, aiParserResult) {
         };
     };
 
-    return domElements.map(mergeElement);
+    const merged = domElements.map(mergeElement);
+    for (const aiEl of parserElements) {
+        if (aiEl.id && usedIds.has(aiEl.id)) continue;
+        if (aiEl.is_pseudo_element) continue;
+        if (!parserElementBelongsToArtboard(aiEl, artboardName)) continue;
+        const pathPoints = parserPathPoints(aiEl);
+        const hasVectorPaint = (aiEl.appearance_fills?.length || aiEl.appearance_strokes?.length || aiEl.mesh_patches?.length);
+        if (!hasVectorPaint && (!pathPoints || pathPoints.length < 2)) continue;
+        merged.push(parserElementToDomElement(aiEl, artboardName));
+        if (aiEl.id) usedIds.add(aiEl.id);
+    }
+    return merged;
 }
 
 async function extractFromProjectFile(artboardsData, documentPath) {
@@ -2156,7 +2444,8 @@ async function extractFromProjectFile(artboardsData, documentPath) {
 
         // Merge ai-parser data into each artboard's elements
         for (const artboard of artboardsData) {
-            artboard.elements = mergeAiParserData(artboard.elements, aiParserResult);
+            const artboardName = artboard.artboard?.name || artboard.name;
+            artboard.elements = mergeAiParserData(artboard.elements, aiParserResult, artboardName);
         }
 
         return artboardsData;
@@ -2223,7 +2512,7 @@ async function exportArtboards(selectedIndices, options, selectedTiles) {
   for (const r of results) {
     const sn = toSnakeName(r.artboard.name), st = toStructName(r.artboard.name);
     files[`${sn}.rs`] = generateArtboardFile(r.artboard, r.elements, colorMap, st, comps, options);
-    if (options?.sidecar || options?.includeSidecar) files[`${sn}.json`] = generateSidecar(r.artboard, r.elements, colorMap);
+    if (options?.sidecar || options?.includeSidecar) files[`${sn}.json`] = generateSidecar(r.artboard, r.elements, colorMap, options);
   }
 
   const assets = {};
@@ -2259,7 +2548,7 @@ function exportFromRawData(results, options) {
   for (const r of results) {
     const sn = toSnakeName(r.artboard.name), st = toStructName(r.artboard.name);
     files[`${sn}.rs`] = generateArtboardFile(r.artboard, r.elements, colorMap, st, comps, options);
-    if (options?.sidecar || options?.includeSidecar) files[`${sn}.json`] = generateSidecar(r.artboard, r.elements, colorMap);
+    if (options?.sidecar || options?.includeSidecar) files[`${sn}.json`] = generateSidecar(r.artboard, r.elements, colorMap, options);
   }
 
   const assets = {};
@@ -2281,15 +2570,17 @@ function collectWarnings(elements, options) {
   const warnings = [];
   if (options && Array.isArray(options.parserDiagnostics)) warnings.push(...options.parserDiagnostics);
   warnings.push(...getAiParserDiagnostics());
+  for (const finding of parserParityFindings(options)) warnings.push({ id: "ai-parser", parityStatus: finding.status, note: `[${finding.status}] ${finding.reason}` });
   warnings.push(...consumeExtractionDiagnostics());
   const walk = (els) => { for (const el of els) {
+    for (const finding of parityFindingsForElement(el)) warnings.push({ id: el.id, parityStatus: finding.status, note: `[${finding.status}] ${finding.reason}` });
     if (el.isGradientMesh) warnings.push({ id: el.id, note: "Gradient mesh — emitted as mesh primitive when patches are available, otherwise bounded editable primitive" });
     if (el.isChart) warnings.push({ id: el.id, note: "Chart/graph — emitted as bounded editable vector primitive with preserved chart metadata" });
     if (el.type === "image" && el.embeddedRaster) warnings.push({ id: el.id, note: "Embedded raster — emitted as an image asset slot with embedded-raster metadata" });
     else if (el.type === "image" && !el.imagePath) warnings.push({ id: el.id, note: "Image element has no linked file path; generated code emits an editable image asset slot" });
     if (el.type === "image" && el.imagePath) warnings.push({ id: el.id, note: `Linked image asset reference: ${portableAssetPath(el.imagePath) || basename(el.imagePath)}` });
     if (el.clipMask) warnings.push({ id: el.id, note: "Clipping mask — emitted through shape/stencil clipping primitive metadata" });
-    if (el.blendMode !== "normal") warnings.push({ id: el.id, note: `Blend mode ${el.blendMode} — emitted through compositing primitive metadata` });
+    if (el.blendMode && el.blendMode !== "normal") warnings.push({ id: el.id, note: `Blend mode ${el.blendMode} — emitted through compositing primitive metadata` });
     if (el.thirdPartyEffects?.length > 0) for (const fx of el.thirdPartyEffects) warnings.push({ id: el.id, note: fx.note });
     if (el.children) walk(el.children);
   } };
@@ -2357,6 +2648,11 @@ if (typeof module !== "undefined" && module.exports) {
     getGradient,
     generateSidecar,
     exportFromRawData,
+    illustratorTrackingToPx,
+    illustratorLeadingToMultiplier,
+    getTextAlign,
+    parityStatusForElement,
+    parityFindingsForElement,
   };
 }
 

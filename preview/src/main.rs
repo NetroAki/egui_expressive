@@ -307,10 +307,13 @@ impl PreviewApp {
         ui.separator();
 
         // Sidebar + main area
+        let preview_height = ui.available_height();
         ui.horizontal(|ui| {
+            ui.set_min_height(preview_height);
             ui.vertical(|ui| {
                 ui.set_min_width(180.0);
                 ui.set_max_width(240.0);
+                ui.set_min_height(preview_height);
                 ui.heading("Artboards");
                 ui.separator();
                 egui::ScrollArea::vertical()
@@ -329,6 +332,7 @@ impl PreviewApp {
 
             ui.vertical(|ui| {
                 ui.set_min_width(600.0);
+                ui.set_min_height(preview_height);
                 if let Some(ref name) = self.selected {
                     egui::ScrollArea::both()
                         .id_salt(("preview_artboard_canvas", name))

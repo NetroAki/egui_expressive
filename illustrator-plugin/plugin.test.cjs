@@ -11,6 +11,13 @@ const sandbox = {
   console: { warn() {}, error() {} },
   URL,
   process,
+  Justification: {
+    LEFT: 'LEFT',
+    CENTER: 'CENTER',
+    RIGHT: 'RIGHT',
+    FULLJUSTIFY: 'FULLJUSTIFY',
+    FULLJUSTIFYLASTLINELEFT: 'FULLJUSTIFYLASTLINELEFT'
+  },
 };
 vm.runInNewContext(pluginSourceForVm, sandbox, { filename: 'plugin.js' });
 const plugin = sandbox.module.exports;
@@ -49,10 +56,115 @@ function testMergeParserDataByBounds() {
   assert.deepStrictEqual(merged[0].pathPoints[0].rightDir, [20, 20]);
 }
 
+function testMergeParserDataAddsUnmatchedCodeDrawnVectors() {
+  const parser = {
+    elements: [{
+      id: 'pdf_path_1_0',
+      element_type: 'shape',
+      artboard_name: 'Page_1',
+      bounds: [10, 20, 30, 40],
+      path_closed: true,
+      path_points: [
+        { anchor: [10, 20], left_ctrl: [10, 20], right_ctrl: [10, 20] },
+        { anchor: [40, 20], left_ctrl: [40, 20], right_ctrl: [40, 20] },
+        { anchor: [40, 60], left_ctrl: [40, 60], right_ctrl: [40, 60] },
+      ],
+      appearance_fills: [{ r: 12, g: 34, b: 56, a: 255, opacity: 1, blend_mode: 'normal' }]
+    }, {
+      id: 'pdf_path_2_0',
+      element_type: 'shape',
+      artboard_name: 'Page_2',
+      bounds: [0, 0, 10, 10],
+      path_points: [{ anchor: [0, 0], left_ctrl: [0, 0], right_ctrl: [0, 0] }],
+      appearance_fills: [{ r: 1, g: 2, b: 3, a: 255 }]
+    }]
+  };
+  const merged = plugin.mergeAiParserData([], parser, 'Page_1');
+  assert.strictEqual(merged.length, 1);
+  assert.strictEqual(merged[0].parserOnly, true);
+  assert.strictEqual(merged[0].type, 'path');
+  assert.strictEqual(merged[0].appearance_fills[0].r, 12);
+  assert.strictEqual(plugin.parityStatusForElement(merged[0]), 'approximate');
+  assert(plugin.parityFindingsForElement(merged[0]).some(finding => finding.reason.includes('hierarchy/depth')));
+
+  const exported = plugin.exportFromRawData([{ artboard: { name: 'Page_1', width: 100, height: 100 }, elements: merged }], { includeSidecar: true });
+  const code = exported.files['page_1.rs'];
+  assert(code.includes('scene::render_node'), 'parser-only vectors should reach generated scene code');
+  assert(code.includes('egui::Color32::from_rgba_unmultiplied(12, 34, 56, 255)'), 'parser fill color should be drawn as code');
+  const sidecar = JSON.parse(exported.files['page_1.json']);
+  assert.strictEqual(sidecar.elements[0].parityStatus, 'approximate');
+}
+
 function testWarningsUsePortableImagePath() {
   const warnings = plugin.collectWarnings([{ id: 'img', type: 'image', imagePath: '/tmp/Secret Folder/photo.jpg', blendMode: 'normal' }], {});
   assert(warnings.some(w => w.note.includes('_photo.jpg')));
   assert(!warnings.some(w => w.note.includes('/tmp/Secret Folder')));
+}
+
+function testTextUnitsOpacityAndParityStatus() {
+  assert(Math.abs(plugin.illustratorTrackingToPx(200, 12) - 2.4) < 0.0001);
+  assert.strictEqual(plugin.illustratorLeadingToMultiplier(18, 12), 1.5);
+  assert.strictEqual(plugin.getTextAlign({
+    typename: 'TextFrame',
+    textRange: { paragraphAttributes: { justification: sandbox.Justification.FULLJUSTIFYLASTLINELEFT } }
+  }), 'justified');
+
+  const results = [{
+    artboard: { name: 'Artboard 1', width: 100, height: 100 },
+    elements: [{
+      id: 'headline', type: 'text', x: 0, y: 0, w: 90, h: 30, depth: 0,
+      text: 'Hello', fill: { r: 255, g: 0, b: 0 }, opacity: 0.5,
+      textStyle: { size: 12, weight: 700 }, letterSpacing: 2.4, lineHeight: 1.5,
+      textDecoration: 'both', textTransform: 'uppercase', effects: [], notes: []
+    }]
+  }];
+  const exported = plugin.exportFromRawData ? plugin.exportFromRawData(results, { naming: false, sidecar: true }) : null;
+  if (exported) {
+    const code = exported.files['artboard_1.rs'];
+    assert(code.includes('.letter_spacing(2.4)'), 'Tracking should be converted to px letter spacing');
+    assert(code.includes('.line_height(1.5)'), 'Leading should be converted to TextBlock line-height multiplier');
+    assert(code.includes('with_alpha(tokens::'), 'Text opacity should be applied to token color');
+    assert(code.includes('TextDecoration::Both'), 'Underline + strikethrough should map to Both');
+    assert(code.includes('TextTransform::Uppercase'), 'All caps should map to Uppercase');
+    assert(code.includes('.layout_width(90.0)'), 'Text alignment frame should use layout_width');
+  }
+}
+
+function testParityStatusMarksUnsupportedSubset() {
+  const colorMap = new Map();
+  const sidecar = JSON.parse(plugin.generateSidecar(
+    { name: 'Artboard 1', width: 100, height: 100 },
+    [
+      { id: 'embedded', type: 'image', x: 0, y: 0, w: 10, h: 10, depth: 0, embeddedRaster: true, effects: [], notes: [] },
+      { id: 'smallcaps', type: 'text', x: 0, y: 20, w: 50, h: 10, depth: 1, text: 'Hi', textAlign: 'justified', textTransform: 'small_caps', effects: [], notes: [] }
+    ],
+    colorMap
+  ));
+  assert.strictEqual(sidecar.artboard.parityStatus, 'unsupported');
+  assert.strictEqual(sidecar.elements[0].parityStatus, 'unsupported');
+  assert(sidecar.elements[0].parityReasons.some(reason => reason.includes('embedded raster')));
+  assert(sidecar.elements[1].parityReasons.some(reason => reason.includes('justified text')));
+
+  const warnings = plugin.collectWarnings(sidecar.elements, {});
+  assert(warnings.some(w => w.parityStatus === 'unsupported'));
+}
+
+function testParserAndGradientStrokeParityStatus() {
+  const sidecar = JSON.parse(plugin.generateSidecar(
+    { name: 'Artboard 1', width: 100, height: 100 },
+    [{
+      id: 'stroke_gradient', type: 'shape', x: 0, y: 0, w: 20, h: 20, depth: 0,
+      stroke: { r: 0, g: 0, b: 0, width: 2, gradient: { type: 'linear', stops: [] } },
+      effects: [], notes: []
+    }],
+    new Map(),
+    { parserDiagnostics: [{ id: 'ai-parser', note: 'Bundled ai-parser not found' }] }
+  ));
+  assert.strictEqual(sidecar.artboard.parityStatus, 'unsupported');
+  assert(sidecar.artboard.parityReasons.some(reason => reason.includes('ai-parser enrichment unavailable')));
+  assert.strictEqual(sidecar.elements[0].parityStatus, 'unsupported');
+  assert(sidecar.elements[0].parityReasons.some(reason => reason.includes('gradient strokes')));
+  assert(sidecar.elements[0].strokeGradient, 'Sidecar should expose stroke gradient metadata');
 }
 
 function testStaticSecurityChecks() {
@@ -132,6 +244,10 @@ function testAriaPressedToggle() {
 
 function testHostJsx() {
   const hostSource = fs.readFileSync(path.join(__dirname, 'host.jsx'), 'utf8');
+  assert(hostSource.includes('center: origin'), 'CEP host gradients should include radial center');
+  assert(hostSource.includes('focalPoint: focalPoint'), 'CEP host gradients should include focal point');
+  assert(hostSource.includes('getTextAlign(item)'), 'CEP host text extraction should include alignment');
+  assert(hostSource.includes('illustratorTrackingToPx'), 'CEP host text extraction should convert tracking to px');
   const writes = [];
   const hostSandbox = {
     Folder: function(path) { this.fsName = path; this.create = function() {}; },
@@ -153,7 +269,7 @@ function testHostJsx() {
 
   vm.runInNewContext(hostSource, hostSandbox, { filename: 'host.jsx' });
 
-  assert(writes.some(w => w.fsName === '/tmp/Documents/egui_expressive_export.log' && w.mode === 'w' && w.buffer.includes('host.jsx loaded')));
+  assert(writes.some(w => w.fsName === '/tmp/Documents/egui_expressive_export.log' && w.mode === 'a' && w.buffer.includes('host.jsx loaded')));
 
   const assetPath = hostSandbox.portableAssetPath('C:\\test\\image.png');
   assert(assetPath.startsWith('assets/'));
@@ -309,7 +425,7 @@ function testGenerateSidecar() {
   assert(stack.some(e => e.entryType === 'effect' && e.effectType === 'dropShadow'));
 }
 
-function testNoWithBlendModeEmission() {
+function testBlendModeUsesSceneBuilder() {
   const results = [{
     artboard: { name: "Artboard 1", width: 100, height: 100 },
     elements: [{
@@ -322,9 +438,9 @@ function testNoWithBlendModeEmission() {
   const exported = plugin.exportFromRawData ? plugin.exportFromRawData(results, options) : null;
   if (exported) {
     const code = exported.files["artboard_1.rs"];
-    assert(!code.includes("with_blend_mode"), "Should not emit with_blend_mode");
-    assert(code.includes("composite_layers_gpu"), "Should emit composite_layers_gpu");
-    assert(code.includes("BlendLayer"), "Should emit BlendLayer");
+    assert(code.includes("with_blend_mode"), "Should emit readable scene blend builder");
+    assert(code.includes("scene::render_node"), "Should route blended vector through scene renderer");
+    assert(code.includes("egui_expressive::codegen::BlendMode::Multiply"), "Should preserve blend mode in scene primitive");
   }
 }
 
@@ -412,13 +528,13 @@ function testRichCircleAndStrokeOpacityEmission() {
   const exported = plugin.exportFromRawData ? plugin.exportFromRawData(results, { naming: false }) : null;
   if (exported) {
     const code = exported.files["artboard_1.rs"];
-    assert(code.includes("egui_expressive::dashed_path"), "Circle rich stroke should use dashed_path");
-    assert(code.includes("egui_expressive::StrokeCap::Round"), "Circle cap should be preserved");
-    assert(code.includes("0..=48"), "Circle rich stroke path should be closed");
-    assert(code.includes("pts.push(pts[0])"), "Rotated rich stroke path should be closed");
-    assert(code.includes("origin + egui::vec2(15.0, 50.0)"), "Ellipse should use parser path points");
-    assert(code.includes("with_alpha(tokens::COLOR_00FF00, 0.5)"), "Normal stroke opacity should be emitted");
-    assert(code.includes("egui_expressive::BlendMode::Multiply"), "Stroke blend mode should be emitted");
+    assert(code.includes("scene::render_node"), "Vector strokes should use scene renderer");
+    assert(code.includes("egui_expressive::codegen::StrokeCap::Round"), "Circle cap should be preserved");
+    assert(code.includes(".dash(vec![2.0, 4.0])"), "Circle dash should be preserved");
+    assert(code.includes(".with_rotation(15.0)"), "Rotated stroke should preserve rotation in scene node");
+    assert(code.includes("egui::pos2(15.0, 50.0)"), "Ellipse should use parser path points");
+    assert(code.includes(".with_opacity(0.5)"), "Normal stroke opacity should be emitted");
+    assert(code.includes("egui_expressive::codegen::BlendMode::Multiply"), "Stroke blend mode should be emitted");
   }
 }
 
@@ -465,18 +581,17 @@ function testGradientOnlyVectorPaths() {
   const exported = plugin.exportFromRawData ? plugin.exportFromRawData(results, { naming: false }) : null;
   if (exported) {
     const code = exported.files["artboard_1.rs"];
-    const meshMatches = code.match(/egui_expressive::gradient_path_mesh/g);
-    assert(meshMatches && meshMatches.length >= 3, "Should emit gradient_path_mesh for gradient-only vector paths");
+    assert(code.includes("PaintSource::LinearGradient"), "Linear gradient should use scene paint source");
+    assert(code.includes("PaintSource::RadialGradient"), "Radial gradient should use scene paint source");
     assert(!code.includes("radial_gradient_rect_stops"), "Should not emit radial_gradient_rect_stops for vector paths");
     assert(!code.includes("linear_gradient_rect"), "Should not emit linear_gradient_rect for vector paths");
-    assert(code.includes("Some(origin + egui::vec2(44.0, 9.0))"), "Radial center should be emitted");
-    assert(code.includes("Some(origin + egui::vec2(46.0, 11.0))"), "Radial focal point should be emitted");
+    assert(code.includes("center: Some([44.0, 9.0])"), "Radial center should be emitted");
+    assert(code.includes("focal_point: Some([46.0, 11.0])"), "Radial focal point should be emitted");
     assert(code.includes("Some(18.0)"), "Radial radius should be emitted");
-    assert(code.includes("egui_expressive::Transform2D"), "Radial transform should be emitted");
-    assert(code.includes("egui_expressive::rounded_rect_path(rect, 6.0)"), "Rounded gradient rect should use rounded path clip");
-    assert((code.match(/rounded_rect_path\(rect, 6\.0\)/g) || []).length >= 2, "Rounded gradient stroke should reuse rounded path");
-    assert(code.includes("origin + egui::vec2(30.0, 10.0)"), "Ellipse should use parser path points");
-    assert(code.includes("origin + egui::vec2(20.0, 30.0)"), "Path should use parser path points");
+    assert(code.includes("transform: Some([1.0, 0.0, 0.0, 1.0, 4.0, 5.0])"), "Radial transform should be emitted");
+    assert(code.includes('SceneNode::rect("rounded_gradient"') && code.includes(", 6.0)"), "Rounded gradient rect should preserve corner radius");
+    assert(code.includes("egui::pos2(30.0, 10.0)"), "Ellipse should use parser path points");
+    assert(code.includes("egui::pos2(20.0, 30.0)"), "Path should use parser path points");
   }
 }
 
@@ -500,12 +615,12 @@ function testPatternFillEmitsVectorPrimitive() {
   const exported = plugin.exportFromRawData ? plugin.exportFromRawData(results, { naming: false, includeSidecar: true }) : null;
   if (exported) {
     const code = exported.files["artboard_1.rs"];
-    assert(code.includes("egui_expressive::pattern_fill_path"), "Pattern fill should emit vector pattern primitive");
-    assert(code.includes("Pattern fill \"Diagonal Dots\""), "Pattern metadata should be preserved in generated code");
-    assert(code.includes("Pattern fill \"conic\""), "Unknown gradient metadata should be preserved as a vector pattern primitive");
+    assert(code.includes("PaintSource::Pattern"), "Pattern fill should emit scene pattern primitive");
+    assert(code.includes('name: "Diagonal Dots".to_string()'), "Pattern metadata should be preserved in generated code");
+    assert(code.includes('name: "conic".to_string()'), "Unknown gradient metadata should be preserved as a vector pattern primitive");
     assert(!code.includes("approximate with solid fill"), "Pattern fill should not fall back to solid fill");
     assert(!code.includes("linear_gradient_rect(rect"), "Pattern fill should not be treated as a linear gradient");
-    const seedMatch = code.match(/pattern_fill_path\([^,]+,\s*(\d+)u32,\s*egui::Color32::from_rgba_unmultiplied\([^)]+\),\s*egui::Color32::from_rgba_unmultiplied\([^)]+\),\s*([\d.]+),\s*([\d.]+)\)/);
+    const seedMatch = code.match(/PatternDef \{ name: "Diagonal Dots"\.to_string\(\), seed: (\d+)u32, foreground: egui::Color32::from_rgba_unmultiplied\([^)]+\), background: egui::Color32::from_rgba_unmultiplied\([^)]+\), cell_size: ([\d.]+), mark_size: ([\d.]+) \}/);
     assert(seedMatch, "Pattern code should include seed/cell/mark parameters");
     const sidecar = JSON.parse(exported.files["artboard_1.json"]);
     assert.strictEqual(sidecar.elements[0].gradient.seed, Number(seedMatch[1]));
@@ -579,18 +694,19 @@ function testAppearanceBlendStackUsesSceneRenderer() {
   if (exported) {
     const code = exported.files["artboard_1.rs"];
     assert(code.includes("scene::render_node"), "Blend appearance stack should route through scene renderer");
-    assert(code.includes("Appearance stack contains layer blend modes"));
+    assert(code.includes("scene::render_node(ui, &painter"), "Scene renderer should receive painter by reference");
+    assert(code.includes("Vector primitive routed through egui_expressive::scene"));
     assert(code.includes("egui_expressive::codegen::BlendMode::Multiply"));
     assert(code.includes("egui_expressive::codegen::BlendMode::Screen"));
     assert(code.includes("PaintSource::LinearGradient"));
-    assert(code.includes("id: \"circle_stack\".to_string()"), "Circle appearance stack should use scene renderer");
-    assert(code.includes("id: \"path_stack\".to_string()"), "Path appearance stack should use scene renderer");
-    assert(code.includes("id: \"open_path_stack\".to_string()"), "Open 2-point path appearance stack should use scene renderer");
-    assert(code.includes("closed: false"), "Open path should remain open scene path");
-    assert(code.includes("id: \"shape_effect_stack\".to_string()"), "Explicit shape effect stack should use scene renderer");
-    assert(code.includes("id: \"parser_effect_stack\".to_string()"), "Parser-sourced fill/effect/stroke stack should use scene renderer");
+    assert(code.includes('SceneNode::ellipse("circle_stack"'), "Circle appearance stack should use scene renderer");
+    assert(code.includes('SceneNode::path("path_stack"'), "Path appearance stack should use scene renderer");
+    assert(code.includes('SceneNode::path("open_path_stack"'), "Open 2-point path appearance stack should use scene renderer");
+    assert(code.includes('SceneNode::path("open_path_stack"') && code.includes(", false)"), "Open path should remain open scene path");
+    assert(code.includes('SceneNode::rect("shape_effect_stack"'), "Explicit shape effect stack should use scene renderer");
+    assert(code.includes('SceneNode::rect("parser_effect_stack"'), "Parser-sourced fill/effect/stroke stack should use scene renderer");
     assert(code.includes("EffectType::DropShadow"), "Appearance-stack effects should be preserved in scene renderer");
-    assert(code.includes("Geometry::Path"), "Path appearance stack should preserve path geometry");
+    assert(code.includes("SceneNode::path"), "Path appearance stack should preserve path geometry");
   }
 }
 
@@ -631,13 +747,17 @@ testAppearanceBlendStackUsesSceneRenderer();
 testPortableAssetPath();
 testApplyBlendExpr();
 testGenerateSidecar();
-testNoWithBlendModeEmission();
+testBlendModeUsesSceneBuilder();
 testImageOpacityEmission();
 testPathRichStrokeAndAppearanceEmission();
 testRichCircleAndStrokeOpacityEmission();
 testBundledParserCandidates();
 testMergeParserDataByBounds();
+testMergeParserDataAddsUnmatchedCodeDrawnVectors();
 testWarningsUsePortableImagePath();
+testTextUnitsOpacityAndParityStatus();
+testParityStatusMarksUnsupportedSubset();
+testParserAndGradientStrokeParityStatus();
 testStaticSecurityChecks();
 testIndexBootstrap();
 testAriaPressedToggle();

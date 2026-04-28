@@ -456,6 +456,62 @@ pub fn paint_image_from_path(
     true
 }
 
+/// Paint a reusable placeholder slot for assets or Illustrator primitives that
+/// are intentionally unavailable at runtime.
+///
+/// This keeps generated exporters and hand-authored egui_expressive code on the
+/// same visible fallback primitive instead of duplicating ad-hoc red rectangles
+/// in generated files.
+pub fn paint_placeholder_slot(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    fill: egui::Color32,
+    stroke: egui::Stroke,
+    label: impl AsRef<str>,
+) {
+    painter.rect_filled(rect, 0.0, fill);
+    painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Outside);
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label.as_ref(),
+        egui::FontId::proportional(12.0),
+        stroke.color,
+    );
+}
+
+/// Paint an optional image path and draw a shared placeholder when it cannot be
+/// loaded.
+///
+/// Returns `true` when the image was decoded and painted, `false` when the
+/// fallback slot was painted. Use this from generated Illustrator code and from
+/// code-first egui_expressive UIs that accept user-provided assets.
+pub fn paint_image_slot(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    path: Option<&str>,
+    texture_id: &str,
+    tint: egui::Color32,
+    fallback_label: &str,
+) -> bool {
+    if let Some(path) = path.filter(|p| !p.trim().is_empty()) {
+        if paint_image_from_path(ui, painter, rect, path, texture_id, tint) {
+            return true;
+        }
+    }
+
+    let alpha = tint.a();
+    paint_placeholder_slot(
+        painter,
+        rect,
+        egui::Color32::from_rgba_unmultiplied(255, 0, 0, (30_u16 * alpha as u16 / 255) as u8),
+        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 0, 0, alpha)),
+        fallback_label,
+    );
+    false
+}
+
 // ─── Gradients ────────────────────────────────────────────────────────────────
 
 /// Direction for linear gradients.

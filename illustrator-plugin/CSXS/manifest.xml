@@ -10,13 +10,13 @@
 
   <ExecutionEnvironment>
     <HostList>
-      <Host Name="ILST" Version="[26.0,99.9]" />
+      <Host Name="ILST" Version="[25.0,99.9]" />
     </HostList>
     <LocaleList>
       <Locale Code="All" />
     </LocaleList>
     <RequiredRuntimeList>
-      <RequiredRuntime Name="CSXS" Version="10.0" />
+      <RequiredRuntime Name="CSXS" Version="9.0" />
     </RequiredRuntimeList>
   </ExecutionEnvironment>
 
@@ -29,6 +29,9 @@
           <CEFCommandLine>
             <Parameter>--allow-file-access-from-files</Parameter>
             <Parameter>--enable-nodejs</Parameter>
+            <Parameter>--disable-gpu</Parameter>
+            <Parameter>--disable-gpu-compositing</Parameter>
+            <Parameter>--disable-accelerated-2d-canvas</Parameter>
           </CEFCommandLine>
         </Resources>
         <Lifecycle>

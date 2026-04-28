@@ -14,7 +14,7 @@
 - **Immediate-mode ergonomics** — APIs compose with `egui::Ui`, `egui::Painter`, `egui::Shape`, and `egui::Response`.
 - **Performance-first rendering** — use CPU/epaint meshes for cheap vector primitives, viewport culling for huge canvases, and GPU/WGPU-backed callbacks only when an effect genuinely needs shader or render-target support.
 - **Beautiful by default, escape hatches always available** — higher-level builders terminate into egui-native concepts, and you can drop down to raw egui at any point.
-- **Code output over screenshots** — design-tool exports aim to generate editable Rust primitives and effect code. Current exports cover an incremental subset of features (vector/primitive export target). Limitations include embedded rasters, unsupported live effects, and complex blend/mask cases.
+- **Code output over screenshots** — design-tool exports aim to generate editable Rust primitives and effect code. Current exports target a measured supported subset and emit parity warnings/status for unsupported or approximate Illustrator features.
 
 In short: **egui is the floor, not the ceiling.** This crate exists so applications can stay immediate-mode and lightweight while still looking expressive, polished, and aiming for design-tool fidelity.
 
@@ -89,6 +89,20 @@ eframe = "0.34"
 | `daw` | *(feature-gated)* — Convenience re-export module for DAW-oriented widgets and utilities (gated behind `daw` feature) |
 | `gpu` | *(feature-gated)* — GPU-accelerated effects pipeline using `wgpu` (gated behind `wgpu` feature) |
 | `scene` | Retained-mode scene graph for complex vector rendering and effect compositing |
+| `visual_diff` | PNG/RGBA image-diff utilities for Illustrator-vs-egui parity tests with explicit tolerances |
+
+## Illustrator parity contract
+
+The Illustrator plugin is designed to export editable Rust code that uses the same `egui_expressive` primitives code-first designers can write by hand: `scene::SceneNode`, `PaintSource`, appearance layers, `TextBlock`, image slots, masks, blend metadata, and shared placeholder primitives. It does not generate private one-off primitives for Illustrator-only output.
+
+Parity is treated as a measured contract, not a blanket promise for every Illustrator document. Exported sidecars include `parityStatus` and `parityReasons` so unsupported or approximate cases are visible instead of silently claimed as exact. The target workflow is:
+
+1. Export a reference PNG from Illustrator.
+2. Render the generated `egui_expressive` output.
+3. Compare with `egui_expressive::diff_image_paths` / `diff_rgba_images` using a committed tolerance.
+4. Promote features from `approximate`/`unsupported` to supported only once they pass visual fixtures.
+
+Known hard cases still require explicit support and image-diff fixtures: Adobe-specific live effects, font shaping differences, color-management differences, embedded rasters without extracted assets, justified/small-caps text, mixed clipping groups containing text/images, and top-level gradient strokes until every export path renders them with fixture coverage.
 
 ## Feature Flags
 

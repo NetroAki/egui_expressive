@@ -46,6 +46,112 @@ impl SceneNode {
         }
     }
 
+    pub fn group(id: impl Into<String>, bounds: egui::Rect) -> Self {
+        Self {
+            id: id.into(),
+            geometry: Geometry::Group { bounds },
+            appearance: AppearanceStack::default(),
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            rotation_deg: 0.0,
+            clip_children: false,
+            children: Vec::new(),
+        }
+    }
+
+    pub fn clip_group(id: impl Into<String>, bounds: egui::Rect) -> Self {
+        Self::group(id, bounds).with_clip_children(true)
+    }
+
+    pub fn ellipse(id: impl Into<String>, rect: egui::Rect) -> Self {
+        Self {
+            id: id.into(),
+            geometry: Geometry::Ellipse { rect },
+            appearance: AppearanceStack::default(),
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            rotation_deg: 0.0,
+            clip_children: false,
+            children: Vec::new(),
+        }
+    }
+
+    pub fn path(id: impl Into<String>, points: Vec<egui::Pos2>, closed: bool) -> Self {
+        Self {
+            id: id.into(),
+            geometry: Geometry::Path { points, closed },
+            appearance: AppearanceStack::default(),
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            rotation_deg: 0.0,
+            clip_children: false,
+            children: Vec::new(),
+        }
+    }
+
+    pub fn with_fill(mut self, paint: PaintSource) -> Self {
+        self.appearance.entries.push(FillLayer::paint(paint).into());
+        self
+    }
+
+    pub fn with_fill_layer(mut self, fill: FillLayer) -> Self {
+        self.appearance.entries.push(fill.into());
+        self
+    }
+
+    pub fn with_stroke(mut self, paint: PaintSource, width: f32) -> Self {
+        self.appearance
+            .entries
+            .push(StrokeLayer::new(width, paint).into());
+        self
+    }
+
+    pub fn with_stroke_layer(mut self, stroke: StrokeLayer) -> Self {
+        self.appearance.entries.push(stroke.into());
+        self
+    }
+
+    pub fn with_effect(mut self, effect: EffectDef) -> Self {
+        self.appearance
+            .entries
+            .push(EffectLayer::new(effect).into());
+        self
+    }
+
+    pub fn with_effect_layer(mut self, effect: EffectLayer) -> Self {
+        self.appearance.entries.push(effect.into());
+        self
+    }
+
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
+    pub fn with_blend_mode(mut self, blend_mode: BlendMode) -> Self {
+        self.blend_mode = blend_mode;
+        self
+    }
+
+    pub fn with_rotation(mut self, rotation_deg: f32) -> Self {
+        self.rotation_deg = rotation_deg;
+        self
+    }
+
+    pub fn with_clip_children(mut self, clip_children: bool) -> Self {
+        self.clip_children = clip_children;
+        self
+    }
+
+    pub fn with_child(mut self, child: SceneNode) -> Self {
+        self.children.push(child);
+        self
+    }
+
+    pub fn push_child(&mut self, child: SceneNode) {
+        self.children.push(child);
+    }
+
     /// Convert a LayoutElement into a SceneNode, preserving rich fidelity.
     pub fn from_layout_element(elem: &crate::codegen::LayoutElement) -> Self {
         let path_backed_geometry = !elem.path_points.is_empty();
@@ -102,10 +208,21 @@ impl SceneNode {
                 }
 
                 for stroke in &elem.appearance_strokes {
+                    let paint = if let Some(pattern) = &stroke.pattern {
+                        PaintSource::Pattern(pattern.clone())
+                    } else if let Some(grad) = &stroke.gradient {
+                        if grad.gradient_type == crate::codegen::GradientType::Radial {
+                            PaintSource::RadialGradient(grad.clone())
+                        } else {
+                            PaintSource::LinearGradient(grad.clone())
+                        }
+                    } else {
+                        PaintSource::Solid(stroke.color)
+                    };
                     appearance
                         .entries
                         .push(AppearanceEntry::Stroke(StrokeLayer {
-                            paint: PaintSource::Solid(stroke.color),
+                            paint,
                             width: stroke.width,
                             opacity: stroke.opacity,
                             blend_mode: stroke.blend_mode.clone(),
@@ -257,6 +374,36 @@ pub struct FillLayer {
     pub blend_mode: BlendMode,
 }
 
+impl FillLayer {
+    pub fn solid(color: egui::Color32) -> Self {
+        Self::paint(PaintSource::Solid(color))
+    }
+
+    pub fn paint(paint: PaintSource) -> Self {
+        Self {
+            paint,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+        }
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
+    pub fn blend_mode(mut self, blend_mode: BlendMode) -> Self {
+        self.blend_mode = blend_mode;
+        self
+    }
+}
+
+impl From<FillLayer> for AppearanceEntry {
+    fn from(layer: FillLayer) -> Self {
+        Self::Fill(layer)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct StrokeLayer {
     pub paint: PaintSource,
@@ -269,12 +416,94 @@ pub struct StrokeLayer {
     pub miter_limit: Option<f32>,
 }
 
+impl StrokeLayer {
+    pub fn new(width: f32, paint: PaintSource) -> Self {
+        Self {
+            paint,
+            width,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            cap: None,
+            join: None,
+            dash: None,
+            miter_limit: None,
+        }
+    }
+
+    pub fn solid(width: f32, color: egui::Color32) -> Self {
+        Self::new(width, PaintSource::Solid(color))
+    }
+
+    pub fn dash(mut self, dash: Vec<f32>) -> Self {
+        self.dash = Some(dash);
+        self
+    }
+
+    pub fn cap(mut self, cap: StrokeCap) -> Self {
+        self.cap = Some(cap);
+        self
+    }
+
+    pub fn join(mut self, join: StrokeJoin) -> Self {
+        self.join = Some(join);
+        self
+    }
+
+    pub fn miter_limit(mut self, miter_limit: f32) -> Self {
+        self.miter_limit = Some(miter_limit);
+        self
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
+    pub fn blend_mode(mut self, blend_mode: BlendMode) -> Self {
+        self.blend_mode = blend_mode;
+        self
+    }
+}
+
+impl From<StrokeLayer> for AppearanceEntry {
+    fn from(layer: StrokeLayer) -> Self {
+        Self::Stroke(layer)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct EffectLayer {
     pub effect_type: EffectType,
     pub params: EffectDef,
     pub opacity: f32,
     pub blend_mode: BlendMode,
+}
+
+impl EffectLayer {
+    pub fn new(effect: EffectDef) -> Self {
+        Self {
+            effect_type: effect.effect_type.clone(),
+            params: effect,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+        }
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
+    pub fn blend_mode(mut self, blend_mode: BlendMode) -> Self {
+        self.blend_mode = blend_mode;
+        self
+    }
+}
+
+impl From<EffectLayer> for AppearanceEntry {
+    fn from(layer: EffectLayer) -> Self {
+        Self::Effect(layer)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
