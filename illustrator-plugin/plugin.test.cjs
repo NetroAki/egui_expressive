@@ -741,6 +741,7 @@ function testAppearanceBlendStackUsesSceneRenderer() {
   const exported = plugin.exportFromRawData ? plugin.exportFromRawData(results, { naming: false }) : null;
   if (exported) {
     const code = exported.files["artboard_1.rs"];
+    assert(code.includes("let painter = ui.painter().clone();"), "Generated scene renderer code should not hold a Ui-borrowed painter");
     assert(code.includes("scene::render_node"), "Blend appearance stack should route through scene renderer");
     assert(code.includes("scene::render_node(ui, &painter"), "Scene renderer should receive painter by reference");
     assert(code.includes("Vector primitive routed through egui_expressive::scene"));
