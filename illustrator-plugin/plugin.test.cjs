@@ -93,6 +93,9 @@ function testMergeParserDataAddsUnmatchedCodeDrawnVectors() {
   assert(code.includes('egui::Color32::from_rgba_unmultiplied(12, 34, 56, 255)'), 'parser fill color should be drawn as code');
   const sidecar = JSON.parse(exported.files['page_1.json']);
   assert.strictEqual(sidecar.elements[0].parityStatus, 'approximate');
+
+  const artboardAliasMerged = plugin.mergeAiParserData([], parser, 'Artboard 1');
+  assert.strictEqual(artboardAliasMerged.length, 1, 'Parser Page_1 data should merge into Illustrator Artboard 1 exports');
 }
 
 function testWarningsUsePortableImagePath() {
@@ -136,7 +139,8 @@ function testParityStatusMarksUnsupportedSubset() {
     { name: 'Artboard 1', width: 100, height: 100 },
     [
       { id: 'embedded', type: 'image', x: 0, y: 0, w: 10, h: 10, depth: 0, embeddedRaster: true, effects: [], notes: [] },
-      { id: 'smallcaps', type: 'text', x: 0, y: 20, w: 50, h: 10, depth: 1, text: 'Hi', textAlign: 'justified', textTransform: 'small_caps', effects: [], notes: [] }
+      { id: 'smallcaps', type: 'text', x: 0, y: 20, w: 50, h: 10, depth: 1, text: 'Hi', textAlign: 'justified', textTransform: 'small_caps', effects: [], notes: [] },
+      { id: 'plugin_item', type: 'plugin', x: 10, y: 30, w: 40, h: 20, depth: 0, fill: { r: 12, g: 34, b: 56 }, effects: [], notes: [] }
     ],
     colorMap
   ));
@@ -144,9 +148,29 @@ function testParityStatusMarksUnsupportedSubset() {
   assert.strictEqual(sidecar.elements[0].parityStatus, 'unsupported');
   assert(sidecar.elements[0].parityReasons.some(reason => reason.includes('embedded raster')));
   assert(sidecar.elements[1].parityReasons.some(reason => reason.includes('justified text')));
+  assert.strictEqual(sidecar.elements[2].parityStatus, 'unsupported');
+  assert(sidecar.elements[2].parityReasons.some(reason => reason.includes('plugin item')));
 
   const warnings = plugin.collectWarnings(sidecar.elements, {});
   assert(warnings.some(w => w.parityStatus === 'unsupported'));
+  const placeholderWarnings = plugin.collectWarnings([
+    { id: 'chart_item', type: 'shape', isChart: true, x: 0, y: 0, w: 10, h: 10, effects: [], notes: [] },
+    { id: 'mesh_item', type: 'shape', isGradientMesh: true, x: 0, y: 0, w: 10, h: 10, effects: [], notes: [] }
+  ], {});
+  assert.strictEqual(plugin.parityStatusForElement({ id: 'chart_item', type: 'shape', isChart: true }), 'unsupported');
+  assert(placeholderWarnings.some(w => w.note.includes('Chart/graph') && w.note.includes('shared editable placeholder')));
+  assert(placeholderWarnings.some(w => w.note.includes('Gradient mesh') && w.note.includes('shared editable placeholder')));
+
+  const exported = plugin.exportFromRawData ? plugin.exportFromRawData([{ artboard: { name: 'Artboard 1', width: 100, height: 100 }, elements: [
+    { id: 'plugin_item', type: 'plugin', x: 10, y: 30, w: 40, h: 20, depth: 0, fill: { r: 12, g: 34, b: 56 }, effects: [], notes: [] },
+    { id: 'chart_item', type: 'shape', isChart: true, x: 10, y: 60, w: 40, h: 20, depth: 1, fill: { r: 12, g: 34, b: 56 }, effects: [], notes: [] }
+  ] }], { naming: false }) : null;
+  if (exported) {
+    const code = exported.files['artboard_1.rs'];
+    assert(code.includes('paint_placeholder_slot'), 'Plugin-only Illustrator items should emit a code-drawn placeholder instead of disappearing');
+    assert(code.includes('"Plugin"'), 'Plugin placeholder should identify the unsupported Illustrator item');
+    assert(code.includes('"Chart"'), 'Chart-like Illustrator items should emit a chart placeholder');
+  }
 }
 
 function testParserAndGradientStrokeParityStatus() {
@@ -554,7 +578,8 @@ function testRichCircleAndStrokeOpacityEmission() {
     assert(code.includes("egui_expressive::codegen::StrokeCap::Round"), "Circle cap should be preserved");
     assert(code.includes(".dash(vec![2.0, 4.0])"), "Circle dash should be preserved");
     assert(code.includes(".with_rotation(15.0)"), "Rotated stroke should preserve rotation in scene node");
-    assert(code.includes("egui::pos2(15.0, 50.0)"), "Ellipse should use parser path points");
+    assert(code.includes("egui_expressive::scene::path_points"), "Scene paths should use compact tuple helper");
+    assert(code.includes("(15.0, 50.0)"), "Ellipse should use parser path points");
     assert(code.includes(".with_opacity(0.5)"), "Normal stroke opacity should be emitted");
     assert(code.includes("egui_expressive::codegen::BlendMode::Multiply"), "Stroke blend mode should be emitted");
   }
@@ -612,8 +637,9 @@ function testGradientOnlyVectorPaths() {
     assert(code.includes("Some(18.0)"), "Radial radius should be emitted");
     assert(code.includes("transform: Some([1.0, 0.0, 0.0, 1.0, 4.0, 5.0])"), "Radial transform should be emitted");
     assert(code.includes('SceneNode::rect("rounded_gradient"') && code.includes(", 6.0)"), "Rounded gradient rect should preserve corner radius");
-    assert(code.includes("egui::pos2(30.0, 10.0)"), "Ellipse should use parser path points");
-    assert(code.includes("egui::pos2(20.0, 30.0)"), "Path should use parser path points");
+    assert(code.includes("egui_expressive::scene::path_points"), "Vector paths should use compact tuple helper");
+    assert(code.includes("(30.0, 10.0)"), "Ellipse should use parser path points");
+    assert(code.includes("(20.0, 30.0)"), "Path should use parser path points");
   }
 }
 
@@ -722,9 +748,9 @@ function testAppearanceBlendStackUsesSceneRenderer() {
     assert(code.includes("egui_expressive::codegen::BlendMode::Screen"));
     assert(code.includes("PaintSource::LinearGradient"));
     assert(code.includes('SceneNode::ellipse("circle_stack"'), "Circle appearance stack should use scene renderer");
-    assert(code.includes('SceneNode::path("path_stack"'), "Path appearance stack should use scene renderer");
-    assert(code.includes('SceneNode::path("open_path_stack"'), "Open 2-point path appearance stack should use scene renderer");
-    assert(code.includes('SceneNode::path("open_path_stack"') && code.includes(", false)"), "Open path should remain open scene path");
+    assert(code.includes('SceneNode::path(') && code.includes('"path_stack"'), "Path appearance stack should use scene renderer");
+    assert(code.includes('SceneNode::path(') && code.includes('"open_path_stack"'), "Open 2-point path appearance stack should use scene renderer");
+    assert(code.includes('"open_path_stack"') && code.includes('false,'), "Open path should remain open scene path");
     assert(code.includes('SceneNode::rect("shape_effect_stack"'), "Explicit shape effect stack should use scene renderer");
     assert(code.includes('SceneNode::rect("parser_effect_stack"'), "Parser-sourced fill/effect/stroke stack should use scene renderer");
     assert(code.includes("EffectType::DropShadow"), "Appearance-stack effects should be preserved in scene renderer");

@@ -16,6 +16,22 @@ pub struct ArtboardScene {
     pub nodes: Vec<SceneNode>,
 }
 
+/// Convert compact `(x, y)` tuples into egui path points.
+///
+/// This keeps generated Illustrator paths readable while still producing normal
+/// `egui::Pos2` values for code-first callers and the scene renderer.
+pub fn path_points(points: &[(f32, f32)]) -> Vec<egui::Pos2> {
+    points.iter().map(|&(x, y)| egui::pos2(x, y)).collect()
+}
+
+/// Convert artboard-relative `(x, y)` tuples into absolute egui path points.
+pub fn offset_path_points(origin: egui::Pos2, points: &[(f32, f32)]) -> Vec<egui::Pos2> {
+    points
+        .iter()
+        .map(|&(x, y)| origin + egui::vec2(x, y))
+        .collect()
+}
+
 /// A retained scene node. Bounds are artboard-relative.
 #[derive(Clone, Debug)]
 pub struct SceneNode {
@@ -1586,6 +1602,18 @@ mod tests {
         );
         assert_eq!(node.geometry.bounds().min, egui::pos2(1.0, 2.0));
         assert_eq!(node.geometry.bounds().max, egui::pos2(4.0, 6.0));
+    }
+
+    #[test]
+    fn path_point_helpers_create_egui_points() {
+        assert_eq!(
+            path_points(&[(1.0, 2.0), (3.0, 4.0)]),
+            vec![egui::pos2(1.0, 2.0), egui::pos2(3.0, 4.0)]
+        );
+        assert_eq!(
+            offset_path_points(egui::pos2(10.0, 20.0), &[(1.0, 2.0), (3.0, 4.0)]),
+            vec![egui::pos2(11.0, 22.0), egui::pos2(13.0, 24.0)]
+        );
     }
 
     #[test]

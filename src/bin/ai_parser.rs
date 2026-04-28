@@ -2229,12 +2229,14 @@ pub fn generate_canvas_output(result: &AiParseResult) -> Vec<serde_json::Value> 
     background.is_opaque = true;
     layout_elements.push(background);
 
-    layout_elements.extend(result
-        .elements
-        .iter()
-        .filter(|e| !e.is_pseudo_element || !e.path_points.is_empty())
-        .enumerate()
-        .map(|(i, e)| element_to_layout(e, i)));
+    layout_elements.extend(
+        result
+            .elements
+            .iter()
+            .filter(|e| !e.is_pseudo_element || !e.path_points.is_empty())
+            .enumerate()
+            .map(|(i, e)| element_to_layout(e, i)),
+    );
     let code = generate_artboard_file(
         "Full Canvas",
         width as f32,

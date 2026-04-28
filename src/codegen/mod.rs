@@ -2174,11 +2174,18 @@ fn generate_scene_node_code(node: &crate::scene::SceneNode, indent: usize) -> St
             out.push_str(&format!("egui_expressive::scene::Geometry::Ellipse {{ rect: egui::Rect::from_min_max(egui::pos2({:.1}, {:.1}), egui::pos2({:.1}, {:.1})) }},\n", rect.min.x, rect.min.y, rect.max.x, rect.max.y));
         }
         crate::scene::Geometry::Path { points, closed } => {
-            out.push_str("egui_expressive::scene::Geometry::Path { points: vec![");
+            out.push_str("egui_expressive::scene::Geometry::Path {\n");
+            out.push_str(&format!(
+                "{}        points: egui_expressive::scene::path_points(&[\n",
+                ind
+            ));
             for p in points {
-                out.push_str(&format!("egui::pos2({:.1}, {:.1}), ", p.x, p.y));
+                out.push_str(&format!("{}            ({:.1}, {:.1}),\n", ind, p.x, p.y));
             }
-            out.push_str(&format!("], closed: {} }},\n", closed));
+            out.push_str(&format!(
+                "{}        ]),\n{}        closed: {},\n{}    }},\n",
+                ind, ind, closed, ind
+            ));
         }
         crate::scene::Geometry::MeshPatch {
             corners,
@@ -6015,6 +6022,7 @@ fn test_rich_element_generates_scene_node() {
     assert!(code.contains("RichScene: rich_path"));
     assert!(code.contains("egui_expressive::scene::SceneNode"));
     assert!(code.contains("egui_expressive::scene::Geometry::Path"));
+    assert!(code.contains("egui_expressive::scene::path_points"));
     assert!(code.contains("egui_expressive::scene::AppearanceStack"));
     assert!(code.contains("egui_expressive::scene::render_node"));
 }

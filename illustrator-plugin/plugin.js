@@ -940,12 +940,38 @@ function generateElementComment(el) {
   return comment;
 }
 
+function hasMeshPatches(el) {
+  return !!(el && el.mesh_patches && el.mesh_patches.length > 0);
+}
+
+function isPlaceholderPrimitiveElement(el) {
+  if (!el) return false;
+  return el.type === "unknown"
+    || el.type === "plugin"
+    || el.type === "chart"
+    || el.isChart
+    || ((el.type === "mesh" || el.isGradientMesh) && !hasMeshPatches(el));
+}
+
+function placeholderPrimitiveLabel(el) {
+  if (el && (el.type === "chart" || el.isChart)) return "Chart";
+  if (el && (el.type === "mesh" || el.isGradientMesh)) return "Mesh";
+  if (el && el.type === "plugin") return "Plugin";
+  return "Unsupported";
+}
+
 function generateElementCodeInner(el, indent, colorMap, comps, options) {
   const pad = "    ".repeat(indent);
   let c = "";
 
-  if (el.type === "unknown") return `${pad}// Skipped: ${sanitizeComment(el.id)} (${el.type})\n`;
-  if (el.mesh_patches && el.mesh_patches.length > 0) {
+  if (isPlaceholderPrimitiveElement(el)) {
+    const cn = el.fill ? (colorMap.get(`${el.fill.r},${el.fill.g},${el.fill.b}`) || "SURFACE") : "SURFACE";
+    const opacity = el.opacity !== undefined ? el.opacity : 1.0;
+    const fc = applyBlendExpr(opacity < 1.0 ? `with_alpha(tokens::${cn}, ${opacity})` : `tokens::${cn}`, el.blendMode);
+    const label = placeholderPrimitiveLabel(el);
+    return `${pad}// ${sanitizeComment(el.type)} primitive: ${sanitizeComment(el.id)} — Illustrator exposes only bounds/metadata; emitted as a shared placeholder primitive.\n${pad}{\n${pad}    let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(el.x)}, ${fmtF32(el.y)}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)}));\n${pad}    egui_expressive::paint_placeholder_slot(&painter, rect, ${fc}, egui::Stroke::new(1.0, egui::Color32::from_gray(140)), ${rustString(label)});\n${pad}}\n`;
+  }
+  if (hasMeshPatches(el)) {
     c += `${pad}// Gradient mesh: ${sanitizeComment(el.id)} — emitted as code-generated mesh patches\n`;
     c += `${pad}{\n`;
     el.mesh_patches.forEach((patch, i) => {
@@ -963,11 +989,6 @@ function generateElementCodeInner(el, indent, colorMap, comps, options) {
     });
     c += `${pad}}\n`;
     return c;
-  }
-  if (el.type === "mesh" || el.type === "chart") {
-    const cn = el.fill ? (colorMap.get(`${el.fill.r},${el.fill.g},${el.fill.b}`) || "SURFACE") : "SURFACE";
-    const fc = applyBlendExpr(el.opacity < 1.0 ? `with_alpha(tokens::${cn}, ${el.opacity})` : `tokens::${cn}`, el.blendMode);
-    return `${pad}// ${sanitizeComment(el.type)} primitive: ${sanitizeComment(el.id)} — Illustrator exposes only bounds/metadata; use shared placeholder primitive.\n${pad}{\n${pad}    let rect = egui::Rect::from_min_size(origin + egui::vec2(${fmtF32(el.x)}, ${fmtF32(el.y)}), egui::vec2(${fmtF32(el.w)}, ${fmtF32(el.h)}));\n${pad}    egui_expressive::paint_placeholder_slot(&painter, rect, ${fc}, egui::Stroke::new(1.0, egui::Color32::from_gray(140)), ${rustString(el.type === "chart" ? "Chart" : "Mesh")});\n${pad}}\n`;
   }
   c += generateElementComment(el) + "\n";
   for (const n of el.notes || []) c += `${pad}// ${sanitizeComment(n)}\n`;
@@ -1040,7 +1061,7 @@ function generateElementCodeInner(el, indent, colorMap, comps, options) {
         const sampled = el.pathPoints && el.pathPoints.length > 1 ? samplePathPoints(el.pathPoints, true) : null;
         c += `${pad}{\n`;
         c += sampled
-          ? `${pad}    let path_pts = ${rustPointsVec(sampled)};\n`
+          ? `${pad}    let path_pts = ${rustPointsVec(sampled, pad + "    ")};\n`
           : `${pad}    let path_pts: Vec<egui::Pos2> = (0..=${circleSegments}).map(|i| { let a = i as f32 * std::f32::consts::TAU / ${fmtF32(circleSegments)}; origin + egui::vec2(${cx} + ${radius} * a.cos(), ${cy} + ${radius} * a.sin()) }).collect();\n`;
         c += `${pad}    let rich_stroke = ${richStrokeExpr(el, colorMap, scn)};\n`;
         c += `${pad}    egui_expressive::dashed_path(&painter, &path_pts, &rich_stroke);\n`;
@@ -1059,7 +1080,7 @@ function generateElementCodeInner(el, indent, colorMap, comps, options) {
     if (el.pathPoints && el.pathPoints.length > 2) {
       const sampled = samplePathPoints(el.pathPoints, true);
       c += `${pad}{\n`;
-      c += `${pad}    let path_pts = ${rustPointsVec(sampled)};\n`;
+      c += `${pad}    let path_pts = ${rustPointsVec(sampled, pad + "    ")};\n`;
       if (el.gradient) c += gradientPathMeshCode(el.gradient, "&path_pts", pad + "    ", el.opacity !== undefined ? el.opacity : 1.0);
       else if (el.fill) c += `${pad}    painter.add(egui::Shape::Path(egui::epaint::PathShape { points: path_pts.clone(), closed: true, fill: ${fc}, stroke: egui::epaint::PathStroke::NONE }));\n`;
       if (el.stroke) {
@@ -1108,7 +1129,7 @@ function generateElementCodeInner(el, indent, colorMap, comps, options) {
       const sw = el.stroke?.width || 1;
       const sampled = samplePathPoints(el.pathPoints, !!el.pathClosed);
       c += `${pad}{\n`;
-      c += `${pad}    let path_pts = ${rustPointsVec(sampled)};\n`;
+      c += `${pad}    let path_pts = ${rustPointsVec(sampled, pad + "    ")};\n`;
       if (el.gradient && el.pathClosed !== false) c += gradientPathMeshCode(el.gradient, "&path_pts", pad + "    ", el.opacity !== undefined ? el.opacity : 1.0);
       if (el.stroke && hasRichStrokeSemantics(el)) {
         c += `${pad}    let rich_stroke = ${richStrokeExpr(el, colorMap, scn)};\n`;
@@ -1148,7 +1169,7 @@ function generateElementCodeInner(el, indent, colorMap, comps, options) {
     if (!isRectangular && el.pathPoints.length > 2) {
       const sampled = samplePathPoints(el.pathPoints, el.pathClosed !== false);
       c += `${pad}{\n`;
-      c += `${pad}    let path_pts = ${rustPointsVec(sampled)};\n`;
+      c += `${pad}    let path_pts = ${rustPointsVec(sampled, pad + "    ")};\n`;
       if (hasAppearanceStack) {
         c += `${pad}    // Illustrator appearance stack on sampled path geometry\n`;
         const renderPathFill = (layer) => {
@@ -1369,7 +1390,7 @@ function generateElementCodeInner(el, indent, colorMap, comps, options) {
         const { code: layersCode, success } = tryGenerateBlendLayers(el.children, indent, colorMap, comps, options);
         if (success) {
           const sampled = samplePathPoints(el.pathPoints, el.pathClosed !== false);
-          c += `${pad}    let clip_path = ${rustPointsVec(sampled)};\n`;
+          c += `${pad}    let clip_path = ${rustPointsVec(sampled, pad + "    ")};\n`;
           c += `${pad}    egui_expressive::clipped_layers_gpu(ui, &clip_path, vec![\n`;
           c += layersCode;
           c += `${pad}    ]);\n`;
@@ -1377,7 +1398,7 @@ function generateElementCodeInner(el, indent, colorMap, comps, options) {
         } else {
           c += `${pad}    // WARNING: Non-rect clip group children not representable as BlendLayer shapes. Falling back without exact parity.\n`;
           const sampled = samplePathPoints(el.pathPoints, el.pathClosed !== false);
-          c += `${pad}    let clip_path = ${rustPointsVec(sampled)};\n`;
+          c += `${pad}    let clip_path = ${rustPointsVec(sampled, pad + "    ")};\n`;
           c += `${pad}    let painter = egui_expressive::with_clip_path(&painter, clip_path);\n`;
         }
       } else {
@@ -1401,7 +1422,7 @@ function isSimpleVectorElement(el) {
   if (el.type === "text") return false;
   if (el.type === "symbol") return false;
   if (el.type === "plugin") return false;
-  if (el.mesh_patches && el.mesh_patches.length > 0) return false;
+  if (hasMeshPatches(el)) return false;
   return true;
 }
 
@@ -1685,8 +1706,14 @@ function paintSourceExpr(layer) {
   return `egui_expressive::scene::PaintSource::Solid(${rgbaExpr(layer.color || layer, 1)})`;
 }
 
-function rustLocalPointsVec(points) {
-  return `vec![${points.map(p => `egui::pos2(${fmtF32(p[0])}, ${fmtF32(p[1])})`).join(", ")}]`;
+function rustPointTuples(points, indent) {
+  const pad = indent || "";
+  if (!points || points.length === 0) return "&[]";
+  return `&[\n${points.map(p => `${pad}    (${fmtF32(p[0])}, ${fmtF32(p[1])}),`).join("\n")}\n${pad}]`;
+}
+
+function rustLocalPointsVec(points, indent) {
+  return `egui_expressive::scene::path_points(${rustPointTuples(points, indent)})`;
 }
 
 function rectExpr(el) {
@@ -1794,7 +1821,7 @@ function sceneNodeExpr(el, pad, layers) {
       : `egui_expressive::scene::SceneNode::group(${rustString(el.id)}, ${rectExpr(el)})`;
   } else if (pathBacked) {
     const sampled = samplePathPoints(el.pathPoints, el.pathClosed !== false);
-    c = `egui_expressive::scene::SceneNode::path(${rustString(el.id)}, ${rustLocalPointsVec(sampled)}, ${el.pathClosed === false ? "false" : "true"})`;
+    c = `egui_expressive::scene::SceneNode::path(\n${pad}        ${rustString(el.id)},\n${pad}        ${rustLocalPointsVec(sampled, pad + "        ")},\n${pad}        ${el.pathClosed === false ? "false" : "true"},\n${pad}    )`;
   } else if (el.type === "circle" || el.type === "ellipse") {
     c = `egui_expressive::scene::SceneNode::ellipse(${rustString(el.id)}, ${rectExpr(el)})`;
   } else {
@@ -1913,8 +1940,8 @@ function samplePathPoints(pathPoints, closed) {
   return pts;
 }
 
-function rustPointsVec(points) {
-  return `vec![${points.map(p => `origin + egui::vec2(${fmtF32(p[0])}, ${fmtF32(p[1])})`).join(", ")}]`;
+function rustPointsVec(points, indent) {
+  return `egui_expressive::scene::offset_path_points(origin, ${rustPointTuples(points, indent)})`;
 }
 
 // ─── JSON Sidecar ────────────────────────────────────────────────────────────
@@ -1989,8 +2016,10 @@ function parityFindingsForElement(el) {
   const add = (status, reason) => findings.push({ status, reason });
 
   if (el.embeddedRaster) add("unsupported", "embedded raster requires an extracted image asset before parity can be guaranteed");
-  if (el.isChart) add("unsupported", "Illustrator chart/graph objects need expansion or chart-specific primitive support");
-  if (el.isGradientMesh && !(el.mesh_patches && el.mesh_patches.length > 0)) add("unsupported", "gradient mesh has no parsed mesh patches");
+  if (el.type === "plugin") add("unsupported", "Illustrator plugin item exposes only bounds/metadata; emitted as an editable placeholder");
+  if (el.type === "unknown") add("unsupported", "unknown Illustrator item exposes only bounds/metadata; emitted as an editable placeholder");
+  if (el.type === "chart" || el.isChart) add("unsupported", "Illustrator chart/graph object exposes only bounds/metadata; emitted as an editable placeholder");
+  if ((el.type === "mesh" || el.isGradientMesh) && !hasMeshPatches(el)) add("unsupported", "gradient mesh has no parsed mesh patches; emitted as an editable placeholder");
   if (el.isCompoundPath) add("unsupported", "compound paths/holes are not yet represented as parity-safe geometry");
   if (hasGradientStroke(el)) add("unsupported", "gradient strokes are not yet rendered by the scene stroke primitive");
   if (isMixedClipGroup(el)) add("unsupported", "mixed clipping groups with text/images are not parity-safe yet");
@@ -1999,7 +2028,7 @@ function parityFindingsForElement(el) {
   if (String(el.textTransform || "").toLowerCase() === "small_caps") add("unsupported", "small caps are approximated as uppercase in TextBlock");
   if (el.type === "symbol") add("approximate", "symbol instances preserve metadata; expand symbols for editable parity");
   if (el.clipMask && !isMixedClipGroup(el)) add("approximate", "clipping masks are supported for vector scene groups but should be image-diff verified");
-  if (el.isGradientMesh && el.mesh_patches && el.mesh_patches.length > 0) add("approximate", "gradient mesh patches are editable approximations until covered by visual fixtures");
+  if (el.isGradientMesh && hasMeshPatches(el)) add("approximate", "gradient mesh patches are editable approximations until covered by visual fixtures");
   if (el.parserOnly) add("approximate", "ai-parser-only vectors are code-drawn but lack Illustrator hierarchy/depth context until matched with DOM ordering");
 
   return findings;
@@ -2334,7 +2363,9 @@ function parserBounds(aiEl) {
 }
 
 function normalizedArtboardName(name) {
-    return String(name || "").trim().toLowerCase().replace(/\s+/g, "_");
+    const normalized = String(name || "").trim().toLowerCase().replace(/\s+/g, "_");
+    const numbered = normalized.match(/^(?:artboard|page)_?0*(\d+)$/);
+    return numbered ? `artboard_${Number(numbered[1])}` : normalized;
 }
 
 function parserElementBelongsToArtboard(aiEl, artboardName) {
@@ -2574,8 +2605,8 @@ function collectWarnings(elements, options) {
   warnings.push(...consumeExtractionDiagnostics());
   const walk = (els) => { for (const el of els) {
     for (const finding of parityFindingsForElement(el)) warnings.push({ id: el.id, parityStatus: finding.status, note: `[${finding.status}] ${finding.reason}` });
-    if (el.isGradientMesh) warnings.push({ id: el.id, note: "Gradient mesh — emitted as mesh primitive when patches are available, otherwise bounded editable primitive" });
-    if (el.isChart) warnings.push({ id: el.id, note: "Chart/graph — emitted as bounded editable vector primitive with preserved chart metadata" });
+    if (el.type === "mesh" || el.isGradientMesh) warnings.push({ id: el.id, note: "Gradient mesh — emitted as editable mesh patches when patches are available, otherwise shared editable placeholder" });
+    if (el.type === "chart" || el.isChart) warnings.push({ id: el.id, note: "Chart/graph — emitted as a shared editable placeholder with preserved bounds/metadata" });
     if (el.type === "image" && el.embeddedRaster) warnings.push({ id: el.id, note: "Embedded raster — emitted as an image asset slot with embedded-raster metadata" });
     else if (el.type === "image" && !el.imagePath) warnings.push({ id: el.id, note: "Image element has no linked file path; generated code emits an editable image asset slot" });
     if (el.type === "image" && el.imagePath) warnings.push({ id: el.id, note: `Linked image asset reference: ${portableAssetPath(el.imagePath) || basename(el.imagePath)}` });
