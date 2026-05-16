@@ -295,3 +295,112 @@ pub fn blurred_image_shape(
     );
     (shape, handle)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect_fill_alpha(shape: &Shape) -> u8 {
+        match shape {
+            Shape::Rect(rect) => rect.fill.a(),
+            other => panic!("expected rect shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blur_quality_sample_counts_are_stable() {
+        assert_eq!(BlurQuality::Fast.samples(), 6);
+        assert_eq!(BlurQuality::Medium.samples(), 12);
+        assert_eq!(BlurQuality::High.samples(), 24);
+    }
+
+    #[test]
+    fn soft_shadow_uses_gaussian_weighted_layers() {
+        let rect = Rect::from_min_max(Pos2::new(10.0, 20.0), Pos2::new(30.0, 40.0));
+        let shapes = soft_shadow(
+            rect,
+            Color32::from_rgba_unmultiplied(20, 40, 80, 180),
+            9.0,
+            2.0,
+            ShadowOffset::new(3.0, 4.0),
+            BlurQuality::Fast,
+        );
+
+        assert!(shapes.len() <= BlurQuality::Fast.samples());
+        assert!(shapes.len() >= BlurQuality::Fast.samples() - 1);
+        assert!(rect_fill_alpha(&shapes[0]) > rect_fill_alpha(shapes.last().unwrap()));
+
+        match &shapes[0] {
+            Shape::Rect(shadow) => {
+                assert_eq!(shadow.rect.min, Pos2::new(11.0, 22.0));
+                assert_eq!(shadow.rect.max, Pos2::new(35.0, 46.0));
+            }
+            other => panic!("expected rect shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn soft_shadow_is_documented_approximate_blur_fallback() {
+        let mut report = crate::render::RenderReport::new(
+            crate::render::RenderBackendKind::EguiPainter,
+            crate::render::RenderQuality::Exact,
+        );
+        report.add_issue(crate::render::RenderIssue::new(
+            crate::render::RenderFeature::Blur,
+            crate::render::RenderIssueKind::ApproximateFallback,
+            crate::render::RenderQuality::Exact,
+            crate::render::RenderQuality::Approximate,
+            "soft_shadow is a deterministic shape-layer approximation, not exact sampled blur",
+        ));
+
+        assert_eq!(
+            report.actual_quality,
+            crate::render::RenderQuality::Approximate
+        );
+        assert!(!report.is_exact());
+    }
+
+    #[test]
+    fn soft_inner_shadow_stops_when_inset_exhausts_rect() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(4.0));
+        let shapes = soft_inner_shadow(
+            rect,
+            Color32::from_rgba_unmultiplied(0, 0, 0, 255),
+            12.0,
+            BlurQuality::High,
+        );
+
+        assert!(shapes.len() < BlurQuality::High.samples());
+        assert!(shapes.iter().all(|shape| matches!(shape, Shape::Rect(_))));
+    }
+
+    #[test]
+    fn blur_image_spreads_center_pixel_with_clamped_edges() {
+        let transparent = Color32::TRANSPARENT;
+        let red = Color32::from_rgba_unmultiplied(255, 0, 0, 255);
+        let image = ColorImage {
+            size: [3, 3],
+            pixels: vec![
+                transparent,
+                transparent,
+                transparent,
+                transparent,
+                red,
+                transparent,
+                transparent,
+                transparent,
+                transparent,
+            ],
+            source_size: egui::Vec2::new(3.0, 3.0),
+        };
+
+        let blurred = blur_image(&image, 1);
+
+        assert_eq!(blurred.size, [3, 3]);
+        assert!(blurred.pixels[4].a() > 0);
+        assert!(blurred.pixels[0].a() > 0);
+        assert!(blurred.pixels.iter().all(|pixel| pixel.a() > 0));
+        assert_eq!(blurred.pixels[4].g(), 0);
+        assert_eq!(blurred.pixels[4].b(), 0);
+    }
+}

@@ -5,19 +5,25 @@ edition = "2021"
 description = "Expressive design system and authoring layer for beautiful egui UI without giving up immediate mode"
 license = "MIT"
 readme = "README.md"
-keywords = ["egui", "gui", "ui", "widget", "daw"]
+keywords = ["egui", "gui", "ui", "widget", "canvas"]
 categories = ["gui"]
 
 [features]
 default = ["debug"]
 debug = []
 daw = []
+creative-editors = []
 clip-mask = ["tiny-skia"]
 wgpu = ["dep:egui-wgpu"]
 gpu-effects = ["wgpu"]
+native-backdrop = []
+native-backdrop-x11 = ["native-backdrop"]
+native-backdrop-macos = ["native-backdrop"]
+native-backdrop-windows = ["native-backdrop"]
+native-backdrop-wayland = ["native-backdrop"]
 
 [dependencies]
-egui = "0.34"
+egui = { version = "0.34", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 lopdf = "0.34"
@@ -26,6 +32,10 @@ regex = "1"
 tiny-skia = { version = "0.11", optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 egui-wgpu = { version = "0.34", optional = true }
+lyon_tessellation = "1"
+vtracer = "0.6.5"
+visioncortex = "0.8.10"
+rustybuzz = "0.20"
 
 [dev-dependencies]
 eframe = "0.34"
@@ -49,3 +59,51 @@ path = "examples/step_sequencer.rs"
 [[example]]
 name = "timeline"
 path = "examples/timeline.rs"
+
+[[example]]
+name = "primitive_gallery"
+path = "examples/primitive_gallery.rs"
+
+[[example]]
+name = "compat_gallery"
+path = "examples/compat_gallery.rs"
+
+[[example]]
+name = "generic_editor_canvas"
+path = "examples/generic_editor_canvas.rs"
+
+[[example]]
+name = "tailwind_style_gallery"
+path = "examples/tailwind_style_gallery.rs"
+
+[[example]]
+name = "state_accessibility_gallery"
+path = "examples/state_accessibility_gallery.rs"
+
+[[example]]
+name = "layout_grid_position_gallery"
+path = "examples/layout_grid_position_gallery.rs"
+
+[[example]]
+name = "forms_gallery"
+path = "examples/forms_gallery.rs"
+
+[[example]]
+name = "neutraudio_shell"
+path = "examples/neutraudio_shell.rs"
+
+[[example]]
+name = "responsive_dashboard"
+path = "examples/responsive_dashboard.rs"
+
+[[example]]
+name = "data_explorer_dashboard"
+path = "examples/data_explorer_dashboard.rs"
+
+[[example]]
+name = "command_center_shell"
+path = "examples/command_center_shell.rs"
+
+[[example]]
+name = "accessibility_platform_gallery"
+path = "examples/accessibility_platform_gallery.rs"

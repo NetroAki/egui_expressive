@@ -1,0 +1,32 @@
+/// Meter visualization mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum MeterMode {
+    #[default]
+    Peak,
+    Vu,
+    Rms,
+    Level,
+    Lufs,
+    IntegratedLufs,
+    Loudness,
+    Output,
+    PeakHold,
+    TruePeak,
+    Spectrum,
+    Spectrogram,
+    Waveform,
+    Stereo,
+    StereoImage,
+    Correlation,
+    Phase,
+    Goniometer,
+    Balance,
+    MidSide,
+    Multiband,
+    Bass,
+    Mid,
+    High,
+    Dynamics,
+    Compression,
+    History,
+}

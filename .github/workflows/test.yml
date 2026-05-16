@@ -1,0 +1,54 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run Rust tests
+        run: cargo test --all-targets -j 1
+
+      - name: Run visual-diff parity harness
+        run: cargo test --test visual_diff_harness
+
+      - name: Build examples
+        run: cargo build --examples
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Check Illustrator plugin syntax
+        run: |
+          node --check illustrator-plugin/plugin.js
+          node --check illustrator-plugin/plugin.test.cjs
+
+      - name: Run Illustrator plugin tests
+        run: node illustrator-plugin/plugin.test.cjs
+
+      - name: Check preview crate
+        run: cargo check --manifest-path preview/Cargo.toml
+
+      - name: Test preview crate
+        run: cargo test --manifest-path preview/Cargo.toml
+
+      - name: Upload visual diff heatmaps
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff-heatmaps
+          path: test-results/visual-diff/*.png
+          if-no-files-found: ignore

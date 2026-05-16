@@ -73,6 +73,29 @@ pub mod chars {
     pub const LAYERS: char = '\u{E53B}';
 }
 
+/// Phosphor icon codepoints used by the Neutraudio mockup.
+///
+/// Register the Phosphor font family as `phosphor` in egui, then use
+/// [`Icon::phosphor`] / [`IconButton::phosphor`]. Material constants remain
+/// available through [`chars`] for compatibility.
+pub mod phosphor {
+    pub const PLAY: char = '\u{E8B2}';
+    pub const PAUSE: char = '\u{E8A0}';
+    pub const STOP: char = '\u{EAA0}';
+    pub const RECORD: char = '\u{E9AA}';
+    pub const MAGNIFYING_GLASS: char = '\u{E7D6}';
+    pub const SLIDERS_HORIZONTAL: char = '\u{EA80}';
+    pub const DOTS_THREE_VERTICAL: char = '\u{E5D4}';
+    pub const CARET_RIGHT: char = '\u{E138}';
+    pub const CHECK: char = '\u{E182}';
+    pub const FOLDER: char = '\u{E6BA}';
+    pub const WAVEFORM: char = '\u{EB26}';
+    pub const PIANO_KEYS: char = '\u{E8F2}';
+    pub const PLUG: char = '\u{E946}';
+    pub const PALETTE: char = '\u{E80A}';
+    pub const GEAR: char = '\u{E6A8}';
+}
+
 /// Deprecated: use `chars` instead.
 #[deprecated(note = "use `egui_expressive::icons::chars` instead")]
 pub use chars as icons;
@@ -84,6 +107,23 @@ pub enum IconSize {
     Md,
     Lg,
     Xl,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IconFamily {
+    Material,
+    Phosphor,
+    Custom(String),
+}
+
+impl IconFamily {
+    fn font_family(&self) -> FontFamily {
+        match self {
+            IconFamily::Material => FontFamily::Name("icons".into()),
+            IconFamily::Phosphor => FontFamily::Name("phosphor".into()),
+            IconFamily::Custom(name) => FontFamily::Name(name.clone().into()),
+        }
+    }
 }
 
 impl IconSize {
@@ -102,6 +142,7 @@ pub struct Icon {
     codepoint: char,
     size: f32,
     color: Option<Color32>,
+    family: IconFamily,
 }
 
 impl Icon {
@@ -110,7 +151,17 @@ impl Icon {
             codepoint,
             size: 20.0,
             color: None,
+            family: IconFamily::Material,
         }
+    }
+
+    pub fn phosphor(codepoint: char) -> Self {
+        Self::new(codepoint).icon_family(IconFamily::Phosphor)
+    }
+
+    pub fn icon_family(mut self, family: IconFamily) -> Self {
+        self.family = family;
+        self
     }
 
     pub fn size(mut self, size: f32) -> Self {
@@ -136,7 +187,7 @@ impl Widget for Icon {
 
         let color = self.color.unwrap_or_else(|| ui.visuals().text_color());
 
-        let font_id = FontId::new(self.size, FontFamily::Name("icons".into()));
+        let font_id = FontId::new(self.size, self.family.font_family());
 
         let painter = ui.painter();
         let galley = painter.layout(self.codepoint.to_string(), font_id, color, f32::INFINITY);
@@ -155,6 +206,7 @@ pub struct IconButton {
     size: f32,
     color: Option<Color32>,
     active: bool,
+    family: IconFamily,
 }
 
 impl IconButton {
@@ -164,7 +216,17 @@ impl IconButton {
             size: 24.0,
             color: None,
             active: false,
+            family: IconFamily::Material,
         }
+    }
+
+    pub fn phosphor(codepoint: char) -> Self {
+        Self::new(codepoint).icon_family(IconFamily::Phosphor)
+    }
+
+    pub fn icon_family(mut self, family: IconFamily) -> Self {
+        self.family = family;
+        self
     }
 
     pub fn size(mut self, size: f32) -> Self {
@@ -204,7 +266,7 @@ impl Widget for IconButton {
 
         let color = self.color.unwrap_or_else(|| ui.visuals().text_color());
 
-        let font_id = FontId::new(self.size, FontFamily::Name("icons".into()));
+        let font_id = FontId::new(self.size, self.family.font_family());
 
         let painter = ui.painter();
         let galley = painter.layout(self.codepoint.to_string(), font_id, color, f32::INFINITY);
@@ -214,5 +276,22 @@ impl Widget for IconButton {
         painter.add(egui::epaint::TextShape::new(pos, galley, color));
 
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn phosphor_icons_use_phosphor_family() {
+        let icon = Icon::phosphor(phosphor::PLAY).icon_size(IconSize::Sm);
+        assert_eq!(icon.family, IconFamily::Phosphor);
+    }
+
+    #[test]
+    fn material_icons_remain_default() {
+        let icon = Icon::new(chars::PLAY);
+        assert_eq!(icon.family, IconFamily::Material);
     }
 }

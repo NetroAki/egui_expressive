@@ -7,7 +7,7 @@ setlocal EnableExtensions DisableDelayedExpansion
 set "EXT_ID=com.egui-expressive.illustrator-exporter"
 set "EXT_NAME=egui_expressive Exporter"
 set "SCRIPT_DIR=%~dp0"
-set "ZXP_FILE=%SCRIPT_DIR%egui_expressive_export-1.0.0.zxp"
+set "ZXP_FILE=%SCRIPT_DIR%egui_expressive_export-1.0.0-win32.zxp"
 
 echo ============================================
 echo  %EXT_NAME% Installer
@@ -15,9 +15,9 @@ echo ============================================
 echo.
 
 if exist "%ZXP_FILE%" goto zxp_found
-set "ZXP_FILE=%SCRIPT_DIR%..\dist\egui_expressive_export-1.0.0.zxp"
+set "ZXP_FILE=%SCRIPT_DIR%..\dist\egui_expressive_export-1.0.0-win32.zxp"
 if exist "%ZXP_FILE%" goto zxp_found
-echo [ERROR] egui_expressive_export-1.0.0.zxp not found.
+echo [ERROR] egui_expressive_export-1.0.0-win32.zxp not found.
 echo [ERROR] Place the .zxp next to this script, or run installer\build_zxp.bat first.
 pause
 exit /b 1

@@ -115,6 +115,7 @@
       padding: 3px 0;
     }
     .option-row label { color: var(--on-surface-variant); font-size: 11px; line-height: 1.2; }
+    .option-note { color: var(--on-surface-variant); font-size: 10px; line-height: 1.3; padding-top: 5px; }
     .toggle {
       width: 32px; height: 16px;
       background: var(--outline);
@@ -395,21 +396,18 @@
 
   <section class="options-section" aria-label="Export Options">
     <div class="option-row">
-      <label>Use naming conventions</label>
-      <div class="toggle on" id="toggle-naming" role="button" aria-pressed="true" tabindex="0" aria-label="Use naming conventions" onclick="toggleOption('naming')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('naming')}"></div>
-    </div>
-    <div class="option-row">
-      <label for="toggle-gaps">Infer Gaps</label>
-      <div class="toggle on" id="toggle-gaps" role="button" aria-pressed="true" tabindex="0" aria-label="Infer gaps between elements" onclick="toggleOption('gaps')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('gaps')}"></div>
+      <label>Semantic color names</label>
+      <div class="toggle on" id="toggle-naming" role="button" aria-pressed="true" tabindex="0" aria-label="Use semantic color names" onclick="toggleOption('naming')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('naming')}"></div>
     </div>
     <div class="option-row">
       <label for="toggle-sidecar">Include Sidecar JSON</label>
       <div class="toggle on" id="toggle-sidecar" role="button" aria-pressed="true" tabindex="0" aria-label="Include sidecar JSON" onclick="toggleOption('sidecar')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('sidecar')}"></div>
     </div>
     <div class="option-row">
-      <label for="toggle-native">Library-Native Emit</label>
-      <div class="toggle on" id="toggle-native" role="button" aria-pressed="true" tabindex="0" aria-label="Use library-native emit" onclick="toggleOption('native')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('native')}"></div>
+      <label for="toggle-codeOnlyStrict">Strict Code-Only</label>
+      <div class="toggle on" id="toggle-codeOnlyStrict" role="button" aria-pressed="true" tabindex="0" aria-label="Strict code-only export" onclick="toggleOption('codeOnlyStrict')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOption('codeOnlyStrict')}"></div>
     </div>
+    <div class="option-note">Linked and extractable embedded raster/images are traced into vector paths, including supported rotation/effects when transform metadata is available; no image slots are exported.</div>
   </section>
 
   <div role="region" aria-label="Export Action">
@@ -444,7 +442,7 @@
   <!-- Plugin codegen library loaded for both UXP and CEP panel contexts -->
   <script src="plugin.js"></script>
   <script>
-    const options = { naming: true, gaps: true, sidecar: true, native: true };
+    const options = { naming: true, sidecar: true, codeOnlyStrict: true };
     const CEP_EVAL_ERROR = 'EvalScript error.';
     const CEP_HOST_READY = '__HOST_READY__';
     const CEP_HOST_MISSING = '__HOST_MISSING__';
@@ -518,116 +516,8 @@
       });
     }
 
-    let currentHostLogPath = '';
-
-    function buildHostLogScript(functionName, payload) {
-      return functionName + '(' + JSON.stringify(JSON.stringify(payload || {})) + ')';
-    }
-
-    async function appendHostExportLog(stage, detail) {
-      if (!window.__adobe_cep__) return null;
-      try {
-        const result = await evalCepScript(buildHostLogScript('appendHostLogJSON', { stage, detail }));
-        if (result.ok && result.result) {
-          const parsed = JSON.parse(result.result);
-          currentHostLogPath = parsed.path || currentHostLogPath;
-          return parsed;
-        }
-      } catch (ignored) { /* host logging must never block export */ }
-      return null;
-    }
-
-    function summarizeForLog(value, maxLen) {
-      const max = maxLen || 500;
-      const text = String(value == null ? '' : value).replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\t/g, '\\t');
-      return text.length > max ? text.slice(0, max) + '…' : text;
-    }
-
-    function countTreeElements(elements) {
-      if (!Array.isArray(elements)) return 0;
-      return elements.reduce((total, el) => total + 1 + countTreeElements(el.children || []), 0);
-    }
-
-    function collectElementStats(elements, stats, depth) {
-      const target = stats || { total: 0, maxDepth: 0, types: {}, parserOnly: 0, unsupportedHints: 0 };
-      const currentDepth = depth || 0;
-      if (!Array.isArray(elements)) return target;
-      for (const el of elements) {
-        target.total += 1;
-        target.maxDepth = Math.max(target.maxDepth, currentDepth);
-        const type = el && el.type ? el.type : 'unknown';
-        target.types[type] = (target.types[type] || 0) + 1;
-        if (el && el.parserOnly) target.parserOnly += 1;
-        if (el && Array.isArray(el.notes) && el.notes.length) target.unsupportedHints += 1;
-        collectElementStats((el && el.children) || [], target, currentDepth + 1);
-      }
-      return target;
-    }
-
-    function describeElementForLog(el, depth) {
-      const parts = [];
-      parts.push('depth=' + depth);
-      parts.push('id=' + summarizeForLog(el && el.id, 80));
-      parts.push('type=' + ((el && el.type) || 'unknown'));
-      parts.push('bounds=' + [el && el.x, el && el.y, el && el.w, el && el.h].join(','));
-      parts.push('children=' + (Array.isArray(el && el.children) ? el.children.length : 0));
-      if (el && el.parserOnly) parts.push('parserOnly=true');
-      if (el && el.fill) parts.push('fill=' + JSON.stringify(el.fill));
-      if (el && el.stroke) parts.push('stroke=' + JSON.stringify(el.stroke));
-      if (el && el.gradient) parts.push('gradient=' + JSON.stringify(el.gradient));
-      if (el && el.appearance_fills) parts.push('appearance_fills=' + el.appearance_fills.length);
-      if (el && el.appearance_strokes) parts.push('appearance_strokes=' + el.appearance_strokes.length);
-      if (el && el.pathPoints) parts.push('pathPoints=' + el.pathPoints.length + ' closed=' + !!el.pathClosed);
-      if (el && el.text != null) parts.push('textLen=' + String(el.text).length + ' text="' + summarizeForLog(el.text, 120) + '"');
-      if (el && el.textRuns) parts.push('textRuns=' + el.textRuns.length);
-      if (el && el.imagePath) parts.push('imagePath=' + summarizeForLog(el.imagePath, 180));
-      if (el && el.notes && el.notes.length) parts.push('notes=' + summarizeForLog(el.notes.join('|'), 240));
-      return parts.join(' ');
-    }
-
-    async function logElementTreeForExport(stage, elements, depth, limit) {
-      if (!Array.isArray(elements) || limit.count >= limit.max) return;
-      for (const el of elements) {
-        if (limit.count >= limit.max) return;
-        limit.count += 1;
-        await appendHostExportLog(stage + ' element', describeElementForLog(el, depth || 0));
-        await logElementTreeForExport(stage, (el && el.children) || [], (depth || 0) + 1, limit);
-      }
-    }
-
-    async function logArtboardDataForExport(stage, data) {
-      if (!Array.isArray(data)) {
-        await appendHostExportLog(stage + ' summary', 'not-array type=' + typeof data);
-        return;
-      }
-      await appendHostExportLog(stage + ' summary', 'artboards=' + data.length);
-      for (let i = 0; i < data.length; i += 1) {
-        const entry = data[i] || {};
-        const ab = entry.artboard || {};
-        const elements = entry.elements || [];
-        await appendHostExportLog(stage + ' artboard', 'i=' + i + ' name=' + summarizeForLog(ab.name, 120) + ' size=' + ab.width + 'x' + ab.height + ' bounds=' + JSON.stringify(ab.bounds || null) + ' elements=' + elements.length + ' treeElements=' + countTreeElements(elements) + ' docPath=' + summarizeForLog(entry.documentPath || '', 220));
-        await appendHostExportLog(stage + ' stats', JSON.stringify(collectElementStats(elements)));
-        await logElementTreeForExport(stage, elements, 0, { count: 0, max: 2000 });
-      }
-    }
-
-    async function logGeneratedFilesForExport(files, assets, warnings) {
-      const fileEntries = Object.entries(files || {});
-      const assetEntries = Object.entries(assets || {});
-      await appendHostExportLog('generated files summary', 'files=' + fileEntries.length + ' assets=' + assetEntries.length + ' warnings=' + (warnings || []).length);
-      for (const [filename, content] of fileEntries) {
-        await appendHostExportLog('generated file', 'name=' + filename + ' chars=' + String(content || '').length);
-      }
-      for (const [assetPath, sourcePath] of assetEntries) {
-        await appendHostExportLog('generated asset', 'asset=' + assetPath + ' source=' + summarizeForLog(sourcePath, 220));
-      }
-      for (const warning of warnings || []) {
-        await appendHostExportLog('generated warning', JSON.stringify(warning));
-      }
-    }
-
     function withHostLogHint(message) {
-      return currentHostLogPath ? message + ' — log: ' + currentHostLogPath : message;
+      return message;
     }
 
     function getExtensionRootPath() {
@@ -899,75 +789,54 @@
               return;
             }
 
-            await appendHostExportLog('cep export clicked', 'selected=' + selected.join(',') + ' options=' + JSON.stringify(options));
-            await appendHostExportLog('cep export', 'querying artboards');
-
             const abResult = await evalCepScript('getArtboardsJSON()');
             if (!abResult.ok) {
               document.getElementById('export-btn').disabled = false;
-              await appendHostExportLog('cep export error', 'getArtboardsJSON failed: ' + abResult.error);
               setStatus(withHostLogHint('evalScript error — host.jsx is still unavailable'));
               return;
             } else if (!abResult.result || abResult.result === 'undefined') {
               document.getElementById('export-btn').disabled = false;
-              await appendHostExportLog('cep export error', 'getArtboardsJSON returned empty');
               setStatus(withHostLogHint('No document open in Illustrator'));
               return;
             }
-            await appendHostExportLog('cep export artboards raw', 'chars=' + String(abResult.result || '').length + ' tail=' + summarizeForLog(String(abResult.result || '').slice(-500), 500));
-
-            await appendHostExportLog('cep export', 'extracting selected artboards');
             const result = await evalCepScript('extractArtboardDataJSON(' + JSON.stringify(JSON.stringify(exportPayload)) + ')');
             if (!result.ok) {
               document.getElementById('export-btn').disabled = false;
-              await appendHostExportLog('cep export error', 'extractArtboardDataJSON failed: ' + result.error);
               setStatus(withHostLogHint('evalScript error — host.jsx is still unavailable'));
               return;
             } else if (!result.result || result.result === 'undefined') {
               document.getElementById('export-btn').disabled = false;
-              await appendHostExportLog('cep export error', 'extractArtboardDataJSON returned empty');
               setStatus(withHostLogHint('Could not extract artboard data'));
               return;
             }
 
             try {
-              await appendHostExportLog('cep export', 'parsing extracted JSON chars=' + result.result.length);
               const rawData = JSON.parse(result.result);
               if (rawData && rawData.error) {
                 document.getElementById('export-btn').disabled = false;
-                await appendHostExportLog('cep export error', 'Illustrator error: ' + rawData.error);
                 setStatus(withHostLogHint('Illustrator error: ' + rawData.error));
                 return;
               }
-              await logArtboardDataForExport('raw extraction', rawData);
               const docPath = Array.isArray(rawData) && rawData.length ? rawData[0].documentPath : null;
               const hostDiagnostics = Array.isArray(rawData)
                 ? rawData.flatMap(entry => Array.isArray(entry.hostDiagnostics) ? entry.hostDiagnostics : [])
                 : [];
-              await appendHostExportLog('cep export diagnostics', 'count=' + hostDiagnostics.length);
-              for (const diagnostic of hostDiagnostics) {
-                await appendHostExportLog('cep export diagnostic', JSON.stringify(diagnostic));
-              }
-              await appendHostExportLog('cep export', 'running parser/codegen docPath=' + (docPath || '<none>') + ' artboards=' + (Array.isArray(rawData) ? rawData.length : 0));
               const enrichedData = typeof extractFromProjectFile === 'function'
                 ? await extractFromProjectFile(rawData, docPath)
                 : rawData;
-              await logArtboardDataForExport('enriched extraction', enrichedData);
-              await appendHostExportLog('cep export', 'generating Rust files');
-              const exportResult = exportFromRawData(enrichedData, Object.assign({}, options, { parserDiagnostics: hostDiagnostics }));
-              await logGeneratedFilesForExport(exportResult.files, exportResult.assets, exportResult.warnings || []);
+              const vectorizedData = typeof vectorizeRasterImagesForResults === 'function'
+                ? await vectorizeRasterImagesForResults(enrichedData)
+                : enrichedData;
+              const exportResult = exportFromRawData(vectorizedData, Object.assign({}, options, { parserDiagnostics: hostDiagnostics }));
               handleExportResult({ payload: { files: exportResult.files, assets: exportResult.assets, filesArray: Object.entries(exportResult.files).map(([filename, content]) => ({filename, content})), colorMap: exportResult.colorMap, warnings: exportResult.warnings || [] } });
               document.getElementById('export-btn').disabled = false;
-              await appendHostExportLog('cep export done', 'files=' + Object.keys(exportResult.files).length + ' warnings=' + (exportResult.warnings || []).length);
               setStatus(withHostLogHint('Exported ' + Object.keys(exportResult.files).length + ' files'));
             } catch(e) {
               document.getElementById('export-btn').disabled = false;
-              await appendHostExportLog('cep export exception', e.message || String(e));
               setStatus(withHostLogHint('Error processing export: ' + e.message));
             }
           })().catch(e => {
             document.getElementById('export-btn').disabled = false;
-            appendHostExportLog('cep export rejected', e.message || String(e));
             setStatus(withHostLogHint('Error processing export: ' + e.message));
           });
         } else {
@@ -1028,10 +897,10 @@
       const available = typeof status === 'object' ? !!status.available : !!status;
       const title = typeof status === 'object' && status.diagnostics && status.diagnostics.length
         ? status.diagnostics.map(d => d.note).join('\n')
-        : 'Project file analysis via bundled ai-parser';
+        : 'Project file analysis via bundled ai-parser; required for Strict Code-Only export';
       el.className = 'ai-parser-status ' + (available ? 'available' : 'unavailable');
       el.title = title;
-      el.innerHTML = `<span class="dot"></span>Project file analysis: ${available ? 'Available' : 'Not available'}`;
+      el.innerHTML = `<span class="dot"></span>Project file analysis: ${available ? 'Available' : 'Required for Strict Code-Only'}`;
     }
 
     function handleExportResult(msg) {
@@ -1192,9 +1061,7 @@
         if (!window.cep || !window.cep.fs || typeof window.cep.fs.showOpenDialogEx !== 'function') {
           return { unavailable: true };
         }
-        await appendHostExportLog('save folder picker', 'using CEP showOpenDialogEx');
         const result = window.cep.fs.showOpenDialogEx(false, true, 'Select destination folder', '', [], 'Select');
-        await appendHostExportLog('save folder picker result', JSON.stringify(result || null));
         if (!result) return { unavailable: true };
         if (result.err && Number(result.err) !== 0) return { error: 'CEP folder picker failed with code ' + result.err };
         if (!result.data || !result.data.length) return { canceled: true };
@@ -1211,35 +1078,29 @@
       }
 
       setStatus('Select a folder...');
-      await appendHostExportLog('save to folder', 'files=' + Object.keys(generatedFiles || {}).length + ' assets=' + Object.keys(window.generatedAssets || {}).length);
       let selected = await selectFolderWithCepDialog();
       if (selected.unavailable) {
         const folderResult = await evalCepScript('selectSaveFolderJSON()');
         if (!folderResult.ok) {
-          await appendHostExportLog('save to folder error', folderResult.error || 'folder picker failed');
           setStatus(withHostLogHint('Failed to select folder: ' + folderResult.error));
           return;
         }
         try {
           selected = JSON.parse(folderResult.result);
         } catch (e) {
-          await appendHostExportLog('save to folder exception', 'folder result parse: ' + (e.message || String(e)));
           setStatus(withHostLogHint('Error parsing folder result'));
           return;
         }
       }
 
       if (selected.canceled) {
-        await appendHostExportLog('save to folder', 'canceled');
         setStatus(withHostLogHint('Save canceled'));
         return;
       }
       if (selected.error || !selected.folder) {
-        await appendHostExportLog('save to folder error', selected.error || 'missing folder path');
         setStatus(withHostLogHint('Save error: ' + (selected.error || 'missing folder path')));
         return;
       }
-      await appendHostExportLog('save to folder selected', 'folder=' + selected.folder);
 
       const saved = [];
       const folder = selected.folder;
@@ -1247,20 +1108,17 @@
         for (const [filename, contentValue] of Object.entries(generatedFiles || {})) {
           const content = String(contentValue || '');
           const chunkCount = Math.max(1, Math.ceil(content.length / CEP_SAVE_CHUNK_SIZE));
-          await appendHostExportLog('save file start', 'name=' + filename + ' chars=' + content.length + ' chunks=' + chunkCount);
           setStatus('Saving ' + filename + ' (' + chunkCount + ' chunks)...');
           for (let index = 0; index < chunkCount; index += 1) {
             const start = index * CEP_SAVE_CHUNK_SIZE;
             const chunk = content.slice(start, start + CEP_SAVE_CHUNK_SIZE);
             const payload = { folder, filename, content: chunk, mode: index === 0 ? 'w' : 'a' };
             const script = 'writeGeneratedFileChunkJSON(' + JSON.stringify(JSON.stringify(payload)) + ')';
-            await appendHostExportLog('save file chunk', 'name=' + filename + ' chunk=' + (index + 1) + '/' + chunkCount + ' start=' + start + ' chars=' + chunk.length + ' mode=' + payload.mode);
             const result = await evalCepScript(script);
             if (!result.ok) throw new Error(result.error || 'evalScript failed while writing ' + filename);
             const parsed = JSON.parse(result.result);
             if (parsed.error) throw new Error(parsed.error);
           }
-          await appendHostExportLog('save file done', 'name=' + filename + ' chars=' + content.length);
           saved.push(filename);
         }
 
@@ -1268,19 +1126,15 @@
           setStatus('Copying ' + assetPath + '...');
           const payload = { folder, assetPath, sourcePath };
           const script = 'copyGeneratedAssetJSON(' + JSON.stringify(JSON.stringify(payload)) + ')';
-          await appendHostExportLog('save asset start', 'asset=' + assetPath + ' source=' + summarizeForLog(sourcePath, 220));
           const result = await evalCepScript(script);
           if (!result.ok) throw new Error(result.error || 'evalScript failed while copying ' + assetPath);
           const parsed = JSON.parse(result.result);
           if (parsed.error) throw new Error(parsed.error);
-          await appendHostExportLog('save asset done', 'asset=' + assetPath);
           saved.push(assetPath);
         }
 
-        await appendHostExportLog('save to folder done', 'saved=' + saved.length + ' folder=' + folder);
         setStatus(withHostLogHint('Saved ' + saved.length + ' files to ' + folder));
       } catch (e) {
-        await appendHostExportLog('save to folder error', e.message || String(e));
         setStatus(withHostLogHint('Save error: ' + (e.message || String(e))));
       }
     }

@@ -21,10 +21,9 @@ RELEASE_DIR="$OUTPUT_DIR/release"
 
 # Detect platform
 case "$(uname -s)" in
-    Darwin*) PLATFORM="darwin" ;;
     Linux*) PLATFORM="linux" ;;
     MINGW*|MSYS*|CYGWIN*) PLATFORM="win32" ;;
-    *) PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')" ;;
+    *) echo "ERROR: build_zxp.sh supports canonical linux/win32 packages only." >&2; exit 1 ;;
 esac
 
 EXTENSION_ID="com.egui-expressive.illustrator-exporter"
@@ -49,9 +48,6 @@ prune_stale_packages() {
 write_release_readme() {
     local readme_path="$1"
     local packaged_zxp_name="$ZXP_NAME"
-    if [ "$PLATFORM" = "win32" ]; then
-        packaged_zxp_name="egui_expressive_export-${VERSION}.zxp"
-    fi
     cat > "$readme_path" <<EOF
 # egui_expressive Illustrator Exporter — ${PLATFORM} package
 
@@ -64,15 +60,7 @@ Install only on a matching ${PLATFORM} host. Do not install this ZXP on another 
 ## Install
 
 EOF
-    if [ "$PLATFORM" = "darwin" ]; then
-        cat >> "$readme_path" <<EOF
-Run:
-
-    chmod +x install.sh && ./install.sh
-
-The helper requires ${ZXP_NAME} and refuses non-matching platform packages.
-EOF
-    elif [ "$PLATFORM" = "win32" ]; then
+    if [ "$PLATFORM" = "win32" ]; then
         cat >> "$readme_path" <<EOF
 Run install.bat on Windows. The helper expects ${packaged_zxp_name} next to the script.
 EOF
@@ -86,22 +74,15 @@ EOF
 sync_release_bundle() {
     local zxp_path="$1"
     mkdir -p "$RELEASE_DIR"
-    rm -f "$RELEASE_DIR/install.sh" "$RELEASE_DIR/install.bat" "$RELEASE_DIR/install_zxp.bat"
+    rm -f "$RELEASE_DIR/install.bat" "$RELEASE_DIR/install_zxp.bat"
     cp "$zxp_path" "$RELEASE_DIR/$ZXP_NAME"
     write_release_readme "$RELEASE_DIR/README.md"
 
     local zip_path="$OUTPUT_DIR/${ZXP_NAME%.zxp}-installer.zip"
     rm -f "$zip_path" "$RELEASE_DIR/${ZXP_NAME%.zxp}-installer.zip"
-    if [ "$PLATFORM" = "darwin" ]; then
-        cp "$PLUGIN_DIR/install.sh" "$RELEASE_DIR/install.sh"
-        zip -j "$zip_path" "$zxp_path" "$RELEASE_DIR/README.md" "$PLUGIN_DIR/install.sh" >/dev/null
-    elif [ "$PLATFORM" = "win32" ]; then
+    if [ "$PLATFORM" = "win32" ]; then
         cp "$PLUGIN_DIR/install.bat" "$RELEASE_DIR/install.bat"
-        local installer_zxp_name="egui_expressive_export-${VERSION}.zxp"
-        local installer_zxp_path="$OUTPUT_DIR/$installer_zxp_name"
-        cp "$zxp_path" "$installer_zxp_path"
-        cp "$zxp_path" "$RELEASE_DIR/$installer_zxp_name"
-        zip -j "$zip_path" "$installer_zxp_path" "$RELEASE_DIR/README.md" "$PLUGIN_DIR/install.bat" >/dev/null
+        zip -j "$zip_path" "$zxp_path" "$RELEASE_DIR/README.md" "$PLUGIN_DIR/install.bat" >/dev/null
     else
         zip -j "$zip_path" "$zxp_path" "$RELEASE_DIR/README.md" >/dev/null
     fi
@@ -341,7 +322,7 @@ package_unsigned() {
     warn "Package is UNSIGNED — will not pass Creative Cloud verification."
     info "Unsigned package: ${output%.zip}.zxp ($size)"
     info "Install manually by extracting to:"
-    echo "  macOS:   ~/Library/Application Support/Adobe/CEP/extensions/"
+    echo "  Linux CEP test host: your CEP extension manager/extensions directory"
     echo "  Windows: %APPDATA%\\Adobe\\CEP\\extensions\\"
 }
 
@@ -395,10 +376,7 @@ main() {
         echo ""
         info "Done! Built platform-specific package for $PLATFORM. Install on matching host with:"
         echo ""
-        if [ "$PLATFORM" = "darwin" ]; then
-            echo "  macOS:"
-            echo "    \"/Library/Application Support/Adobe/Adobe Desktop Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent\" /install \"$OUTPUT_DIR/$ZXP_NAME\""
-        elif [ "$PLATFORM" = "win32" ]; then
+        if [ "$PLATFORM" = "win32" ]; then
             echo "  Windows:"
             echo "    \"C:\\Program Files\\Common Files\\Adobe\\Adobe Desktop Common\\RemoteComponents\\UPI\\UnifiedPluginInstallerAgent\\UnifiedPluginInstallerAgent.exe\" /install \"$OUTPUT_DIR\\$ZXP_NAME\""
         else

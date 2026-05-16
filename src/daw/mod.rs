@@ -1,7 +1,8 @@
-//! DAW (Digital Audio Workstation) specific widgets and utilities.
+//! Compatibility namespace for audio and creative-editor aliases.
 //!
-//! These are domain-specific composites for audio software. Enable with the `daw` feature.
-//! For general-purpose controls, use the root crate modules directly.
+//! Stage 6 keeps this module for existing `daw` feature users, but the public
+//! library guidance is to use the generic root modules and `widgets::editor_tools`
+//! for non-audio editor canvases. Enable with `daw` or `creative-editors`.
 
 pub use crate::widgets::{
     ChannelStrip, ClipKind, DotState, Fader, Meter, Ruler, StepGrid, TimelineClip, ToggleDot,

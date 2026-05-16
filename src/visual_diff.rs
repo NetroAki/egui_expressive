@@ -142,6 +142,25 @@ pub fn diff_image_paths(
     Ok(diff_rgba_images(&expected, &actual, config))
 }
 
+/// Compare two image files and write a heatmap when they do not pass.
+///
+/// The heatmap uses red channel intensity for the per-pixel maximum channel
+/// delta. It is intended for CI artifacts and local fixture-regeneration loops.
+pub fn diff_image_paths_with_heatmap(
+    expected_path: impl AsRef<Path>,
+    actual_path: impl AsRef<Path>,
+    heatmap_path: impl AsRef<Path>,
+    config: VisualDiffConfig,
+) -> ImageResult<VisualDiffReport> {
+    let expected = image::open(expected_path)?.to_rgba8();
+    let actual = image::open(actual_path)?.to_rgba8();
+    let report = diff_rgba_images(&expected, &actual, config);
+    if !report.passed {
+        diff_heatmap(&expected, &actual).save(heatmap_path)?;
+    }
+    Ok(report)
+}
+
 /// Build a red heatmap showing per-pixel differences.
 pub fn diff_heatmap(expected: &RgbaImage, actual: &RgbaImage) -> RgbaImage {
     let width = expected.width().min(actual.width());
@@ -194,5 +213,34 @@ mod tests {
         let report = diff_rgba_images(&expected, &actual, VisualDiffConfig::default());
         assert!(!report.passed);
         assert!(report.dimension_mismatch);
+    }
+
+    #[test]
+    fn heatmap_is_written_for_failed_path_diff() {
+        let dir = std::env::temp_dir().join(format!(
+            "egui_expressive_visual_diff_heatmap_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let expected_path = dir.join("expected.png");
+        let actual_path = dir.join("actual.png");
+        let heatmap_path = dir.join("heatmap.png");
+        RgbaImage::from_pixel(1, 1, Rgba([10, 20, 30, 255]))
+            .save(&expected_path)
+            .unwrap();
+        RgbaImage::from_pixel(1, 1, Rgba([100, 20, 30, 255]))
+            .save(&actual_path)
+            .unwrap();
+
+        let report = diff_image_paths_with_heatmap(
+            &expected_path,
+            &actual_path,
+            &heatmap_path,
+            VisualDiffConfig::default(),
+        )
+        .unwrap();
+
+        assert!(!report.passed);
+        assert!(heatmap_path.exists());
     }
 }

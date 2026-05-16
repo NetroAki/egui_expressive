@@ -12,13 +12,22 @@
 //! - [`draw`]       — Layered painter helpers and fluent shape builders
 //! - [`style`]      — Visual state system (hover/press/select variants)
 //! - [`state`]      — Typed persistent state and state machines
-//! - [`interaction`]— Drag, pan/zoom, and gesture helpers
+//! - [`interaction`]— Commands, shortcuts, focus, undo/redo, feedback, drag, and gestures
 //! - [`animation`]  — Easing curves and spring physics
 //! - [`surface`]    — Large canvas viewport culling (50k+ px)
 //! - [`widgets`]    — Reusable controls (Knob, Fader, Meter, StepGrid, and more)
 //! - [`debug`]      — Visual debugging overlays
 //! - [`devtools`]   — Runtime visual property editor
-//! - `daw`          — DAW-specific widgets (Fader, Meter, ChannelStrip, StepGrid, Waveform, etc.)
+//! - `daw`          — Compatibility feature namespace for audio/creative editor aliases
+//!
+//! ## Public API status
+//!
+//! This crate exposes a broad pre-1.0 API surface. Prefer the stable/preferred and
+//! beta-supported paths documented in `docs/ui-framework/api-stability.md`.
+//! Compatibility namespaces such as `daw` and `widgets::daw_editors` remain for
+//! older app code; new code should use neutral module paths when available. Optional
+//! acceleration and diagnostic surfaces are feature-gated or experimental unless the
+//! API stability map says otherwise.
 //!
 //! ## Quick Start
 //!
@@ -30,22 +39,32 @@
 //! }
 //! ```
 
+pub mod accessibility;
 pub mod animation;
+pub mod backdrop;
 pub mod blur;
 pub mod codegen;
+pub mod compat;
 pub mod debug;
 pub mod devtools;
 pub mod draw;
+pub mod editor;
 pub mod figma;
+pub mod forms;
 #[cfg(feature = "wgpu")]
 pub mod gpu;
 pub mod icons;
 pub mod m3;
+pub mod platform;
+pub mod render;
+pub mod responsive;
+#[path = "scene.rs"]
 pub mod scene;
 pub mod svg;
 pub mod swiftui;
 pub mod theme;
 pub mod typography;
+pub mod vectorize;
 pub mod visual_diff;
 
 // Re-export FigmaExportError for ergonomic error handling
@@ -58,14 +77,24 @@ pub mod surface;
 pub mod tailwind;
 pub mod widgets;
 
-#[cfg(feature = "daw")]
+#[cfg(any(feature = "daw", feature = "creative-editors"))]
 pub mod daw;
 
 // Re-export commonly used types at crate root
+pub use accessibility::{
+    reduced_motion, set_reduced_motion, AccessibilityMeta, AccessibilityRole, FocusRing,
+    LiveRegion, LiveRegionPoliteness, LiveRegionRelevant, ModalFocusTrap, ModalTrapAction,
+    MotionPolicy, MotionPreference, RovingFocusDirection, RovingFocusGroup, RovingFocusItem,
+};
 pub use animation::{
     transition_color, transition_f32, AnimatedColor, AnimatedF32, AnimatedState, AnimatedVec2,
     Spring, Transition, Tween,
 };
+#[cfg(feature = "wgpu")]
+pub use backdrop::{
+    app_owned_offscreen_backdrop_blur_report, app_owned_offscreen_backdrop_blur_shape,
+};
+pub use backdrop::{app_provided_backdrop_blur_report, app_provided_backdrop_blur_shape};
 pub use blur::{
     blur_image, blurred_image_shape, soft_glow, soft_inner_shadow, soft_shadow, BlurQuality,
 };
@@ -94,18 +123,67 @@ pub use draw::{
     DashPattern, GradientDir, GradientPathGeometry, LayeredPainter, RadialGradientDir, RichStroke,
     ShadowOffset, ShapeBuilder, StackAlign, StrokeCap, StrokeJoin, Transform2D,
 };
+pub use editor::{
+    align_rects, apply_inspector_update, distribute_rects, Axis, AxisKind, AxisTick,
+    CanvasInteraction, CanvasInteractionEvent, CanvasInteractionTarget, CanvasItem, CanvasItemHit,
+    CanvasRectMutation, DistributionAxis, EditorAlignment, EditorCanvas, EditorCanvasContext,
+    EditorDropItem, EditorDropKind, EditorDropRequest, EditorInspectorField, EditorInspectorTarget,
+    EditorInspectorUpdate, EditorInteractionSnapshot, EditorViewSnapshot, LaneDef, LaneStack,
+    MarqueeSelection, ResizeEdges, SelectionMode, SelectionModel, SnapGrid, ValueLane,
+};
 pub use figma::design_tokens_from_json;
+pub use forms::{
+    AutocompleteState, CheckboxField, ChoiceOption, DateParts, DeferredValidationRequest,
+    DependencyEffect, DerivedFieldState, FieldDependency, FieldShell, FieldState,
+    FilePickerRequest, FormFieldDef, FormFieldKind, FormFieldValue, FormSchema, InlineEditCancel,
+    InlineEditCommit, InlineEditController, InlineEditSession, InlineEditStart, InlineEditTarget,
+    InputTextContract, MultiSelectState, NumericConstraint, RgbaColorValue, SelectField,
+    SelectOption, SwitchField, TextAreaField, TextDirection, TextField, TextMask,
+    TextSelectionRange, TimeParts, ValidationMessage, ValidationRule, ValidationRuleKind,
+    ValidationSeverity, ValidationSummary,
+};
 #[cfg(feature = "wgpu")]
-pub use gpu::{init_gpu_effects, GpuEffectsResources};
+pub use gpu::{
+    bind_app_owned_offscreen_backdrop_source_for_context, blend_mode_to_shader_id,
+    init_gpu_effects, init_gpu_effects_for_context, wgpu_source_layer_effect_report,
+    GpuCompositeCallback, GpuEffectSource, GpuEffectsResources, GpuSourceLayerEffectCallback,
+};
 pub use icons::chars as icon_constants;
 pub use icons::{Icon, IconButton, IconSize};
 pub use interaction::{
-    denormalize, normalize, DragAxis, DragDelta, FocusScope, LongPressEvent, LongPressGesture,
-    PanZoom, SwipeDirection, SwipeEvent, SwipeGesture, TapEvent, TapGesture,
+    denormalize, normalize, DragAxis, DragDelta, FeedbackMessage, FeedbackProgress, FeedbackQueue,
+    FeedbackSeverity, FeedbackToast, FocusScope, LongPressEvent, LongPressGesture, PanZoom,
+    SwipeDirection, SwipeEvent, SwipeGesture, TapEvent, TapGesture,
 };
 pub use layout::{
     aspect_ratio_fit, auto_layout, hrule, styled_frame, vrule, FlexAlign, FlexContainer,
-    FlexJustify, FlexSize,
+    FlexJustify, FlexSize, GridLayout, GridSpan, Insets, PositionMode, PositionStyle,
+};
+#[cfg(feature = "wgpu")]
+pub use platform::{
+    install_app_owned_offscreen_backdrop_source, load_app_owned_offscreen_backdrop_source,
+    AppOwnedBackdropAlphaMode, AppOwnedBackdropFrameId, AppOwnedBackdropSurfaceId,
+    AppOwnedOffscreenBackdropSource, SharedAppOwnedOffscreenBackdropSource,
+};
+pub use platform::{
+    install_backdrop_snapshot_provider, load_backdrop_snapshot_provider, BackdropCaptureError,
+    BackdropCaptureRequest, BackdropSnapshot, BackdropSnapshotProvider, ClipboardCommand,
+    DisplayScale, DroppedFileDescriptor, PlatformDropBatch, SharedBackdropSnapshotProvider,
+    SystemThemePreference, MAX_BACKDROP_SNAPSHOT_AXIS,
+};
+#[cfg(feature = "native-backdrop")]
+pub use platform::{
+    NativeBackdropInitError, NativeBackdropPlatform, NATIVE_BACKDROP_FEATURE,
+    NATIVE_BACKDROP_MACOS_FEATURE, NATIVE_BACKDROP_WAYLAND_FEATURE,
+    NATIVE_BACKDROP_WINDOWS_FEATURE, NATIVE_BACKDROP_X11_FEATURE,
+};
+pub use render::{
+    EffectFallback, OffscreenRequest, RenderBackendKind, RenderCapabilities, RenderFeature,
+    RenderIssue, RenderIssueKind, RenderQuality, RenderReport,
+};
+pub use responsive::{
+    breakpoint_for_width, container_breakpoint, viewport_breakpoint, viewport_width,
+    BreakpointName, Breakpoints, Responsive,
 };
 pub use state::{InteractionState, StateMachine, StateSlot};
 pub use style::{
@@ -120,22 +198,35 @@ pub use svg::{
 };
 pub use swiftui::{GeometryProxy, Navigator, ScrollList, ViewModifier};
 pub use tailwind::{
-    Edges, FontWeight, Size, Tw, TW_0, TW_1, TW_10, TW_12, TW_16, TW_2, TW_20, TW_24, TW_3, TW_32,
-    TW_4, TW_40, TW_48, TW_5, TW_6, TW_64, TW_8,
+    AccentKind, ColorToken, Edges, FontWeight, ResponsiveTw, Size, SurfaceLevel, Tw,
+    TwThemeVariants, TwVariant, TwVariants, TW_0, TW_1, TW_10, TW_12, TW_16, TW_2, TW_20, TW_24,
+    TW_3, TW_32, TW_4, TW_40, TW_48, TW_5, TW_6, TW_64, TW_8,
 };
 pub use theme::{border_rect, Border, Elevation, SemanticColors, Theme};
 pub use typography::{
-    render_text, render_text_block, TextBlock, TextBlockAlign, TextDecoration, TextOverflow,
-    TextSpan, TextTransform, TypeLabel, TypeScale, TypeSpec,
+    render_shaped_glyph_run, render_text, render_text_block, OpenTypeFeatures, ShapedGlyph,
+    ShapedGlyphRun, TextBlock, TextBlockAlign, TextDecoration, TextOverflow, TextSpan,
+    TextTransform, TypeLabel, TypeScale, TypeSpec,
+};
+pub use vectorize::{
+    vectorize_image_file_to_scene_nodes, vectorize_rgba_to_scene_nodes, RasterVectorizeConfig,
 };
 pub use visual_diff::{
-    diff_heatmap, diff_image_paths, diff_rgba_images, VisualDiffConfig, VisualDiffReport,
+    diff_heatmap, diff_image_paths, diff_image_paths_with_heatmap, diff_rgba_images,
+    VisualDiffConfig, VisualDiffReport,
 };
 pub use widgets::{
-    ChannelStrip, ClipKind, CollapsePanel, ContextMenuBuilder, ContinuousControl, DotState,
-    DragNumber, DragReorder, Fader, FloatingPanel, Knob, KnobSize, KnobStyle, Meter, Orientation,
-    ResizableSplit, Ruler, SplitAxis, StepGrid, TabBar, TimelineClip, ToggleDot, TransportButton,
-    TransportKind, TreeNode, TreeView, VerticalDrag, Waveform,
+    bounded_visible_range, flatten_tree_table_rows, register_app_shell_layout_slot,
+    AppShellLayoutState, AppShellPanelState, BreadcrumbItem, Breadcrumbs, ChannelStrip, ClipKind,
+    CollapsePanel, ContextMenuBuilder, ContinuousControl, DataCell, DataColumn, DataColumnFilter,
+    DataFilterState, DataGridModel, DataGridState, DataRow, DataRowProvider, DataSelectionState,
+    DataSortDirection, DataSortState, DataTable, DataViewStatus, DockPanel, DockPanelId,
+    DockPlacement, DockZone, DotState, DragNumber, DragReorder, Fader, FloatingPanel, Knob,
+    KnobSize, KnobStyle, Meter, Orientation, PropertyGrid, PropertyGridCategory, PropertyGridEntry,
+    PropertyGridGroup, PropertyGridModel, ResizableSplit, Ruler, SidebarItem, SidebarNav,
+    SplitAxis, StatusBar, StatusBarItem, StepGrid, TabBar, TabSetState, TimelineClip, ToggleDot,
+    TransportButton, TransportKind, TreeNode, TreeTable, TreeTableModel, TreeTableNode,
+    TreeTableRow, TreeTableState, TreeView, VerticalDrag, Waveform,
 };
 
 // M3 Material Design 3 foundation modules

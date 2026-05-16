@@ -68,7 +68,8 @@ eframe = "0.34"
 |--------|-------------|
 | `animation` | `Tween`, `Spring`, `Transition` — frame-rate-independent animation with 10+ easing curves |
 | `blur` | Soft shadows, glow, inner shadows, and CPU-side image blur approximations |
-| `codegen` | SVG layout inference and Rust scaffold code generation. Naming convention parser (`row-*`, `col-*`, `btn-*`, etc.), gap inference, layout tree builder, multi-file artboard output |
+| `codegen` | Generic SVG layout inference and Rust scaffold code generation. Layout hints (`row-*`, `col-*`, `btn-*`, etc.) and gap inference are for the generic SVG pipeline, not Illustrator strict code-only export |
+| `compat` | Familiar HTML/Electron, SwiftUI, Tkinter, PyQt/PySide, and Kivy naming/property layers over existing primitives |
 | `debug` | Debug overlays, `debug_label`, `debug_interaction` (enabled by default via `debug` feature) |
 | `devtools` | Live-tweakable `Prop` system with `DevToolsPanel` inspector (panel is no-op outside debug_assertions) |
 | `draw` | `ShapeBuilder`, `LayeredPainter`, gradients (linear + radial), box shadows, icons, scan-lines, vignette, **2D affine transforms, ZStack** |
@@ -90,19 +91,48 @@ eframe = "0.34"
 | `gpu` | *(feature-gated)* — GPU-accelerated effects pipeline using `wgpu` (gated behind `wgpu` feature) |
 | `scene` | Retained-mode scene graph for complex vector rendering and effect compositing |
 | `visual_diff` | PNG/RGBA image-diff utilities for Illustrator-vs-egui parity tests with explicit tolerances |
+| `vectorize` | Export-time raster-to-vector tracing for converting raster inputs into scene paths before codegen |
+
+Framework docs start at [`docs/ui-framework/index.md`](docs/ui-framework/index.md). Release readiness docs live in [`docs/release-checklist.md`](docs/release-checklist.md), [`docs/versioning-policy.md`](docs/versioning-policy.md), and [`docs/migration-guide.md`](docs/migration-guide.md).
 
 ## Illustrator parity contract
 
-The Illustrator plugin is designed to export editable Rust code that uses the same `egui_expressive` primitives code-first designers can write by hand: `scene::SceneNode`, `PaintSource`, appearance layers, `TextBlock`, image slots, masks, blend metadata, and shared placeholder primitives. It does not generate private one-off primitives for Illustrator-only output.
+The Illustrator plugin is designed to export editable Rust code that uses the same `egui_expressive` primitives code-first designers can write by hand: `scene::SceneNode`, `PaintSource`, appearance layers, `TextBlock`, masks, and blend metadata. It does not generate private one-off primitives for Illustrator-only output. By default, it enforces strict code-only export and hard-fails on unsupported opaque primitives (like embedded rasters without extractable pixels, plugin items, and charts). Gradient/pattern fills and supported solid/dashed strokes render as editable vector scene output; gradient or pattern-painted strokes render through bounded representative vector strokes until a future stage adds full stroke-paint tessellation and fixtures. Raster/image content must be traced into vector paths before export; disabling **Strict Code-Only** is only for incomplete diagnostic exports, not for image asset output.
 
 Parity is treated as a measured contract, not a blanket promise for every Illustrator document. Exported sidecars include `parityStatus` and `parityReasons` so unsupported or approximate cases are visible instead of silently claimed as exact. The target workflow is:
 
 1. Export a reference PNG from Illustrator.
 2. Render the generated `egui_expressive` output.
-3. Compare with `egui_expressive::diff_image_paths` / `diff_rgba_images` using a committed tolerance.
+3. Compare validation screenshots with `egui_expressive::diff_image_paths` / `diff_rgba_images` using a committed tolerance. Fixture pairs live under `tests/visual_diff/fixtures/`, and failed diffs can emit heatmaps for CI artifacts. These PNGs are test artifacts only; generated UI remains pure vector/text Rust code.
 4. Promote features from `approximate`/`unsupported` to supported only once they pass visual fixtures.
 
-Known hard cases still require explicit support and image-diff fixtures: Adobe-specific live effects, font shaping differences, color-management differences, embedded rasters without extracted assets, justified/small-caps text, mixed clipping groups containing text/images, and top-level gradient strokes until every export path renders them with fixture coverage.
+Known hard cases still require explicit support and image-diff fixtures: Adobe-specific live effects, full font shaping/alternate glyph substitution beyond bounded OpenType feature preservation, color-management differences, embedded rasters without extracted assets, and mixed clipping groups containing text/images.
+
+## Primitive-first pro-audio surface
+
+`egui_expressive` keeps DAW-style screens compositional: build reusable primitives first, then assemble app-specific surfaces from them. Avoid duplicating composites when a lower-level control or display can be reused.
+
+Current primitive coverage includes:
+
+- Controls: `Slider`/`Fader`, `RangeSlider`, `Knob` with bipolar/wheel/popup hooks, `XYPad`, `DragNumber`/readouts, `StepGrid` plus typed `StepCellGrid`, `ToggleDot`/LED states, `ToolButton`, `ColorSwatch`, and `SearchField`.
+- Layout/surfaces: `FloatingPanel`, `DockOverlay`, `ResizableSplit`, `ToolbarStrip`, `TabBar`, `TreeView`, `ControlGroup`, and `DesignerCanvas`.
+- Menus/overlays: `ContextMenuBuilder`, `TopMenuBar`, `ModalOverlay`, `CommandPalette`, `ToastLayer`, and `ProgressOverlay`.
+- Canvas/audio displays: `GridCanvas`, `NoteRect`, `AutomationCurve`, `LoopRegion`, `FadeHandle`, `WaveformDisplay`, `SpectrumDisplay`, `SpectrogramDisplay`, `Meter`/`MeterMode`, `RoutingCable`, and `MiniBarGraph`.
+- Effects/tokens/infra: conic rings and tick marks, Neutraudio dark/light theme presets, micro-label and mono-readout typography presets, action and shortcut registries, bounded persistence metadata, audio-to-UI bridge, viewport message bridge, and accessibility metadata.
+
+Composite DAW surfaces such as channel strips, piano rolls, automation editors, strip designers, and plugin/preferences panels should be examples or application glue unless a reusable primitive is explicitly missing.
+
+## Cross-framework compatibility names
+
+The `compat` module provides familiar naming schemes for users coming from other UI environments while reusing the same primitive implementations:
+
+- `compat::html`: DOM/Electron names such as `HtmlInputRange`, `HtmlInputSearch`, `HtmlDialog`, `DomProps`, and event constants like `ON_CLICK` / `ON_CHANGE`.
+- `compat::swiftui`: SwiftUI-style aliases and modifiers such as `Button`, `Slider`, `Toggle`, `Sheet`, `TabView`, `State`, `AppStorage`, and `ViewModifiers::padding().cornerRadius().help()`.
+- `compat::qt`: PyQt/PySide names such as `QSlider`, `QDial`, `QPushButton`, `QToolBar`, `QMenuBar`, `QDialog`, `QAction`, `QShortcut`, and `QtWidgetProps::setObjectName().setToolTip()`.
+- `compat::tkinter`: Tk/ttk names such as `TkScale`, `TkButton`, `TkNotebook`, `TkPanedWindow`, `TkToplevel`, `TkOptions`, and constants like `LEFT`, `BOTH`, `X`, `Y`.
+- `compat::kivy`: Kivy names such as `KivySlider`, `KivyButton`, `KivyBoxLayout`, `KivyPopup`, `KivyCanvas`, `KivyProps`, and touch event constants.
+
+These are redirects/thin constructors, not parallel widget implementations. Example: `compat::html::HtmlInputRange`, `compat::swiftui::Slider`, `compat::qt::QSlider`, `compat::tkinter::TkScale`, and `compat::kivy::KivySlider` all map to the existing `Slider` primitive.
 
 ## Feature Flags
 
@@ -176,9 +206,12 @@ cargo run --bin ai-parser -- design.ai --pretty
 
 # Generate per-artboard Rust scaffold code
 cargo run --bin ai-parser -- design.ai --per-artboard
+
+# Trace a linked raster source into parser-compatible vector JSON
+cargo run --bin ai-parser -- --vectorize-image linked.png --id linked_img --x 0 --y 0 --w 320 --h 180 --pretty
 ```
 
-The parser currently extracts an incremental subset of features: artboards, AIPrivateData streams, CTM transforms, Bezier path geometry, corner radius detection, and fill/stroke appearance. Limitations include embedded rasters, unsupported live effects, and complex blend/mask cases.
+The parser currently extracts an incremental subset of features: artboards, AIPrivateData streams, CTM transforms, Bezier path geometry, corner radius detection, hierarchy metadata, and fill/stroke appearance. Limitations include unsupported live effects and complex blend/mask cases. Linked raster sources can be traced into vector paths with the bundled vectorizer; embedded rasters are traced too when Illustrator can export temporary tracing pixels. Linked raster rotation uses source image dimensions plus Illustrator transform scale metadata (or exact orthogonal bbox inversion) and is baked into vector geometry, embedded transformed extraction avoids double-rotation, and only `dropShadow`, `innerShadow`, `outerGlow`, `innerGlow`, `gaussianBlur`, and `feather` are preserved on traced raster groups; Motion Blur, Radial Blur, other non-Gaussian blur variants, unavailable extraction/tracing/transform metadata, or unmapped effects remain strict-unsupported.
 
 ## SVG Parsing
 
@@ -214,7 +247,7 @@ let nodes = infer_layout(&elements, &InferenceOptions::default());
 let code = generate_rust("my_screen", 375.0, 812.0, &nodes, Some(bg_color), None, None);
 ```
 
-Supports naming convention hints (`row-*`, `col-*`, `btn-*`, `card-*`, `panel-*`, `scroll-*`, `badge-*`, etc.), automatic gap inference, and multi-file artboard output.
+For generic SVG layout inference, supports layout-name hints (`row-*`, `col-*`, `btn-*`, `card-*`, `panel-*`, `scroll-*`, `badge-*`, etc.), automatic gap inference, and multi-file artboard output. Illustrator strict code-only export bypasses these hints and emits scene-backed vector code for parity.
 
 ## Examples
 

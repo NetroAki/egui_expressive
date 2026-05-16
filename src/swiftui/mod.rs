@@ -52,7 +52,7 @@ impl Navigator {
         Self { id: Id::new(id) }
     }
 
-    /// Create or load a navigator (alias for [`new`]).
+    /// Create or load a navigator (alias for [`Self::new`]).
     #[inline]
     pub fn load(_ctx: &Context, id: impl std::hash::Hash) -> Self {
         Self::new(id)

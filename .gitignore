@@ -15,7 +15,11 @@ test-results/
 
 # Local export/comparison artifacts
 /artifacts/
-/Zach info.zip
+/.oracle-artifacts/
+/tmp_extract/
+/dist/win_installer_tmp/
+/[Zz]ach info.zip
+/egui_expressive_export 1.log
 
 # Preview exports copied in for local testing; keep tracked placeholders/docs.
 /preview/generated/*.json

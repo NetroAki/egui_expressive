@@ -1,3 +1,4 @@
+use crate::typography::TypeSpec;
 use egui::FontId;
 
 /// M3 text style definition.
@@ -16,9 +17,41 @@ pub enum M3FontWeight {
     Bold,    // 700
 }
 
+impl M3FontWeight {
+    pub fn css_value(self) -> u16 {
+        match self {
+            Self::Regular => 400,
+            Self::Medium => 500,
+            Self::Bold => 700,
+        }
+    }
+}
+
 impl M3TextStyle {
     pub fn to_font_id(&self) -> FontId {
         FontId::proportional(self.font_size)
+    }
+
+    pub fn to_type_spec(&self) -> TypeSpec {
+        let line_height = if self.font_size.is_finite()
+            && self.font_size > 0.0
+            && self.line_height.is_finite()
+            && self.line_height > 0.0
+        {
+            let ratio = self.line_height / self.font_size;
+            if ratio.is_finite() && ratio > 0.0 {
+                ratio
+            } else {
+                TypeSpec::new(self.font_size).line_height
+            }
+        } else {
+            TypeSpec::new(self.font_size).line_height
+        };
+
+        TypeSpec::new(self.font_size)
+            .line_height(line_height)
+            .letter_spacing(self.letter_spacing)
+            .weight(self.weight.css_value())
     }
 }
 
@@ -137,5 +170,81 @@ impl Default for M3TypeScale {
                 weight: M3FontWeight::Medium,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn r100_005a_m3_font_weight_maps_to_css_values() {
+        assert_eq!(M3FontWeight::Regular.css_value(), 400);
+        assert_eq!(M3FontWeight::Medium.css_value(), 500);
+        assert_eq!(M3FontWeight::Bold.css_value(), 700);
+    }
+
+    #[test]
+    fn r100_005a_m3_text_style_converts_to_type_spec() {
+        let scale = M3TypeScale::default();
+
+        let title = scale.title_medium.to_type_spec();
+        assert_eq!(title.size, 16.0);
+        assert_eq!(title.line_height, 1.5);
+        assert_eq!(title.letter_spacing, 0.15);
+        assert_eq!(title.weight, 500);
+
+        let body = scale.body_large.to_type_spec();
+        assert_eq!(body.size, 16.0);
+        assert_eq!(body.line_height, 1.5);
+        assert_eq!(body.letter_spacing, 0.5);
+        assert_eq!(body.weight, 400);
+
+        let label = scale.label_large.to_type_spec();
+        assert_eq!(label.size, 14.0);
+        assert_eq!(label.line_height, 20.0 / 14.0);
+        assert_eq!(label.letter_spacing, 0.1);
+        assert_eq!(label.weight, 500);
+    }
+
+    #[test]
+    fn r100_005a_m3_text_style_invalid_line_height_inputs_use_default_ratio() {
+        let zero_size = M3TextStyle {
+            font_size: 0.0,
+            line_height: 20.0,
+            letter_spacing: 0.0,
+            weight: M3FontWeight::Regular,
+        };
+        assert_eq!(zero_size.to_type_spec().line_height, 1.4);
+
+        let negative_size = M3TextStyle {
+            font_size: -12.0,
+            line_height: 20.0,
+            letter_spacing: 0.0,
+            weight: M3FontWeight::Medium,
+        };
+        assert_eq!(negative_size.to_type_spec().line_height, 1.4);
+
+        let overflowing_ratio = M3TextStyle {
+            font_size: f32::MIN_POSITIVE,
+            line_height: f32::MAX,
+            letter_spacing: 0.0,
+            weight: M3FontWeight::Bold,
+        };
+        assert_eq!(overflowing_ratio.to_type_spec().line_height, 1.4);
+    }
+
+    #[test]
+    fn r100_005a_m3_font_id_remains_weight_agnostic() {
+        let style = M3TextStyle {
+            font_size: 14.0,
+            line_height: 20.0,
+            letter_spacing: 0.1,
+            weight: M3FontWeight::Bold,
+        };
+        let font_id = style.to_font_id();
+
+        assert_eq!(font_id.size, 14.0);
+        assert!(matches!(font_id.family, egui::FontFamily::Proportional));
     }
 }

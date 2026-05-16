@@ -62,6 +62,48 @@ impl SemanticColors {
             scrim: Color32::from_rgb(0, 0, 0),
         }
     }
+
+    /// Dense pro-audio dark colors matching the Neutraudio mockup family.
+    pub fn neutraudio_dark() -> Self {
+        Self {
+            surface: Color32::from_rgb(10, 10, 13),
+            surface_dim: Color32::from_rgb(3, 4, 7),
+            surface_bright: Color32::from_rgb(39, 39, 46),
+            surface_container: Color32::from_rgb(18, 18, 23),
+            on_surface: Color32::from_rgb(235, 237, 242),
+            on_surface_variant: Color32::from_rgb(148, 153, 166),
+            primary: Color32::from_rgb(239, 68, 68),
+            on_primary: Color32::WHITE,
+            secondary: Color32::from_rgb(34, 211, 238),
+            on_secondary: Color32::from_rgb(3, 7, 18),
+            error: Color32::from_rgb(248, 113, 113),
+            on_error: Color32::from_rgb(69, 10, 10),
+            outline: Color32::from_rgb(63, 63, 70),
+            outline_variant: Color32::from_rgb(39, 39, 46),
+            scrim: Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+        }
+    }
+
+    /// Light companion palette for pro-audio controls.
+    pub fn neutraudio_light() -> Self {
+        Self {
+            surface: Color32::from_rgb(245, 247, 251),
+            surface_dim: Color32::from_rgb(226, 232, 240),
+            surface_bright: Color32::WHITE,
+            surface_container: Color32::from_rgb(241, 245, 249),
+            on_surface: Color32::from_rgb(15, 23, 42),
+            on_surface_variant: Color32::from_rgb(71, 85, 105),
+            primary: Color32::from_rgb(220, 38, 38),
+            on_primary: Color32::WHITE,
+            secondary: Color32::from_rgb(8, 145, 178),
+            on_secondary: Color32::WHITE,
+            error: Color32::from_rgb(185, 28, 28),
+            on_error: Color32::WHITE,
+            outline: Color32::from_rgb(148, 163, 184),
+            outline_variant: Color32::from_rgb(203, 213, 225),
+            scrim: Color32::from_rgba_unmultiplied(15, 23, 42, 100),
+        }
+    }
 }
 
 /// Theme containing semantic colors and dark/light mode state.
@@ -84,6 +126,22 @@ impl Theme {
     pub fn light() -> Self {
         Self {
             colors: SemanticColors::light(),
+            is_dark: false,
+        }
+    }
+
+    /// Dense pro-audio dark theme preset.
+    pub fn neutraudio_dark() -> Self {
+        Self {
+            colors: SemanticColors::neutraudio_dark(),
+            is_dark: true,
+        }
+    }
+
+    /// Dense pro-audio light theme preset.
+    pub fn neutraudio_light() -> Self {
+        Self {
+            colors: SemanticColors::neutraudio_light(),
             is_dark: false,
         }
     }
@@ -208,5 +266,20 @@ pub fn border_rect(painter: &Painter, rect: Rect, rounding: f32, stroke: Stroke)
             stroke,
             egui::StrokeKind::Outside,
         );
+    }
+}
+
+#[cfg(test)]
+mod primitive_theme_tests {
+    use super::*;
+
+    #[test]
+    fn neutraudio_themes_have_expected_dark_flag_and_accents() {
+        let dark = Theme::neutraudio_dark();
+        let light = Theme::neutraudio_light();
+        assert!(dark.is_dark);
+        assert!(!light.is_dark);
+        assert_eq!(dark.colors.primary, Color32::from_rgb(239, 68, 68));
+        assert_eq!(light.colors.secondary, Color32::from_rgb(8, 145, 178));
     }
 }
