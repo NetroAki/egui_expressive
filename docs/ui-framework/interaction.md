@@ -1,6 +1,6 @@
 # Interaction Architecture Guide
 
-Stage 4 interaction primitives live under `src/interaction/*`. They are pure state and dispatch helpers first; widgets and Material 3 surfaces stay thin visual adapters.
+Interaction primitives live under `src/interaction/*`. They are pure state and dispatch helpers first; widgets and Material 3 surfaces stay thin visual adapters.
 
 ## Commands and Actions
 
@@ -50,7 +50,7 @@ shortcuts.bind(ScopedShortcutBinding::new(
 
 ## Focus Traversal
 
-`FocusScope` owns egui-backed tab handling. `next_focus_in_order` is the pure traversal contract used by tests and by later Stage 5/6 consumers.
+`FocusScope` owns egui-backed tab handling. `next_focus_in_order` is the pure traversal contract used by tests and by later consumers.
 
 ```rust,no_run
 use egui_expressive::interaction::{next_focus_in_order, FocusDirection};
@@ -62,9 +62,9 @@ let next = next_focus_in_order(&order, None, FocusDirection::Forward);
 
 ## Undo / Redo
 
-`UndoStack<T>` is unbounded and snapshot-based for Stage 4. It supports labels, merge keys, redo invalidation after push, merge-key replacement, and clear/reset. Editor object graphs and command closures are deferred to Stage 6.
+`UndoStack<T>` is unbounded and snapshot-based for the current API. It supports labels, merge keys, redo invalidation after push, merge-key replacement, and clear/reset. Editor object graphs and command closures are deferred to app- or module-specific layers.
 
-Stage 6 editor/canvas surfaces use this same stack for snapshot proofs; see `docs/ui-framework/editor-canvas.md` for `CanvasInteraction`, keyboard nudge, drop descriptors, inspector hooks, and editor-specific undo/persistence guidance.
+Editor/canvas surfaces use this same stack for snapshot proofs; see `docs/ui-framework/editor-canvas.md` for `CanvasInteraction`, keyboard nudge, drop descriptors, inspector hooks, and editor-specific undo/persistence guidance.
 
 ```rust,no_run
 use egui_expressive::interaction::{UndoEntry, UndoStack};
@@ -99,9 +99,9 @@ Use `Toast::from_feedback` and `ToastLayer` when adapting dispatcher toasts into
 
 `ToastLayer::show(ctx)` is the app-level floating overlay path and requests repaint while toasts are visible. `ui.add(ToastLayer::new(...))` renders in the caller's current layout flow and is intended for embedded/demo layouts.
 
-## Stage Deferrals
+## Deferred Scope
 
-- Stage 5 owns schema-driven forms, rich input correctness, masked/date/file picker adapters, and inline data/property editing.
-- Stage 6 owns editor/canvas command graphs, object-history integration, and deeper canvas interaction semantics.
-- Stage 8 owns platform accessibility adapters, live-region guidance, IME/RTL/i18n, clipboard/file dialogs/file drop, and screen-reader claims.
-- Stage 9 owns shortcut/history capacity/performance hardening, full visual-regression expansion, and release support boundaries.
+- Schema-driven forms, rich input correctness, masked/date/file picker adapters, and inline data/property editing are documented separately from the core interaction primitives.
+- Editor/canvas command graphs, object-history integration, and deeper canvas interaction semantics remain app- or module-specific work.
+- Platform accessibility adapters, live-region guidance, IME/RTL/i18n, clipboard/file dialogs/file drop, and screen-reader claims require platform-specific evidence before support claims.
+- Shortcut/history capacity, performance hardening, visual-regression expansion, and release support boundaries should stay explicitly documented as they are validated.

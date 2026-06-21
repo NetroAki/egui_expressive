@@ -156,11 +156,12 @@ pub fn flatten_tree_table_rows(
     rows
 }
 
-/// Read-only virtualized tree table.
+/// Read-only tree table.
 ///
-/// Uses `show_rows` for virtualization. The first model column is the fixed
-/// label column; indent step is `16.0` and expand/leaf glyph defaults are `▾`,
-/// `▸`, and `•`.
+/// The widget flattens the expanded tree for the current frame. Host apps with
+/// very large trees should cache flattened rows or provide a viewport-aware tree
+/// model. The first model column is the fixed label column; indent step is
+/// `16.0` and expand/leaf glyph defaults are `▾`, `▸`, and `•`.
 pub struct TreeTable<'a> {
     model: &'a TreeTableModel,
     state: &'a mut TreeTableState,
@@ -206,10 +207,9 @@ impl<'a> egui::Widget for TreeTable<'a> {
                 }
             })
             .response;
-        let rows_output =
-            egui::ScrollArea::vertical().show_rows(ui, self.row_height, rows.len(), |ui, range| {
-                for index in range {
-                    let row = &rows[index];
+        let rows_response = ui
+            .vertical(|ui| {
+                for row in rows {
                     ui.horizontal(|ui| {
                         for (column_index, column) in &columns {
                             if *column_index == 0 {
@@ -247,12 +247,8 @@ impl<'a> egui::Widget for TreeTable<'a> {
                         }
                     });
                 }
-            });
-        let rows_response = ui.interact(
-            rows_output.inner_rect,
-            ui.id().with("tree_table_rows"),
-            egui::Sense::hover(),
-        );
+            })
+            .response;
         header_response.union(rows_response)
     }
 }

@@ -1,6 +1,9 @@
 //! Debugging overlays and visual helpers.
 
-use egui::{Color32, Context, Id, LayerId, Order, Pos2, Rect, Response, Stroke, StrokeKind};
+use egui::{Color32, Context, Rect, Response};
+
+#[cfg(feature = "debug")]
+use egui::{Id, LayerId, Order, Pos2, Stroke, StrokeKind};
 
 /// Debug overlay for visualizing UI rects and response zones.
 ///

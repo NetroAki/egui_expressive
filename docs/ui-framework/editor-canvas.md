@@ -1,6 +1,6 @@
 # Editor / Canvas Guide
 
-Stage 6 makes editor surfaces generic: the same primitives can drive designer canvases, timelines, piano-roll-like views, layout inspectors, or object editors without DAW-only coupling.
+the current release candidate makes editor surfaces generic: the same primitives can drive designer canvases, timelines, piano-roll-like views, layout inspectors, or object editors without DAW-only coupling.
 
 ## Coordinate Model
 
@@ -29,7 +29,7 @@ Apps own their domain storage and apply `CanvasRectMutation<K>` to notes, clips,
 
 ## Drop Descriptors
 
-`EditorDropRequest` and `EditorDropItem` describe file/object/text drops as plain data. They do not open native dialogs, read files, mutate the filesystem, load resources, or perform async work. Platform-certified drag/drop adapters remain Stage 8+ work.
+`EditorDropRequest` and `EditorDropItem` describe file/object/text drops as plain data. They do not open native dialogs, read files, mutate the filesystem, load resources, or perform async work. Platform-certified drag/drop adapters remain the current release candidate+ work.
 
 ## Inspector Hooks
 
@@ -39,7 +39,7 @@ These descriptors are intentionally not a full inspector UI. Apps decide whether
 
 ## Undo / Shortcuts / Focus
 
-Use Stage 4 primitives rather than creating editor-specific registries:
+Use the current release candidate primitives rather than creating editor-specific registries:
 
 - Store editor snapshots in `UndoStack<T>` or use `UndoEntry::label` / `merge_key` for app-level history.
 - Wire keyboard commands through `ScopedShortcutRegistry` and call `CanvasInteraction::keyboard_nudge` from the resolved action.
@@ -49,15 +49,15 @@ Use Stage 4 primitives rather than creating editor-specific registries:
 
 ## Piano-Roll Decision
 
-`PianoRollView` is the Stage 6 name for the existing view-only piano-roll renderer. `PianoRoll` remains as a compatibility alias. Create/move/resize/select interaction proof lives in generic editor/canvas primitives and the `generic_editor_canvas` example, avoiding a DAW-specific sequencer implementation.
+`PianoRollView` is the current release candidate name for the existing view-only piano-roll renderer. `PianoRoll` remains as a compatibility alias. Create/move/resize/select interaction proof lives in generic editor/canvas primitives and the `generic_editor_canvas` example, avoiding a DAW-specific sequencer implementation.
 
 ## DAW Namespace Decision
 
-The historical `widgets::daw_editors` and optional `daw` feature remain for compatibility, but Stage 6 adds `widgets::editor_tools` as the DAW-neutral entry point and removes DAW-only package keywording. New general-purpose editor work should prefer `src/editor/*` and `widgets::editor_tools`.
+The historical `widgets::daw_editors` and optional `daw` feature remain for compatibility, but the current release candidate adds `widgets::editor_tools` as the DAW-neutral entry point and removes DAW-only package keywording. New general-purpose editor work should prefer `src/editor/*` and `widgets::editor_tools`.
 
 ## Example Proof
 
-`examples/generic_editor_canvas.rs` demonstrates Stage 6 behavior without DAW modules:
+`examples/generic_editor_canvas.rs` demonstrates the current release candidate behavior without DAW modules:
 
 - selection and marquee/lasso ids
 - move, resize, snap, alignment, and distribution
@@ -66,7 +66,7 @@ The historical `widgets::daw_editors` and optional `daw` feature remain for comp
 - inspector hook descriptors
 - `UndoStack` snapshot integration
 
-The optional separate timeline-style example was deferred to keep Stage 6 bounded; timeline-style use cases are represented by the generic example's `Axis::time` canvas and remain available through `LaneStack`/`ValueLane` reuse rather than a new DAW/timeline product surface.
+The optional separate timeline-style example was deferred to keep the current release candidate bounded; timeline-style use cases are represented by the generic example's `Axis::time` canvas and remain available through `LaneStack`/`ValueLane` reuse rather than a new DAW/timeline product surface.
 
 ## Test Traceability
 
@@ -86,6 +86,6 @@ The optional separate timeline-style example was deferred to keep Stage 6 bounde
 
 ## Deferred Scope
 
-- Stage 7 owns visual-fidelity effects and animation polish.
-- Stage 8 owns native file dialogs, platform-certified drag/drop, clipboard, accessibility/i18n, live-region, and system-theme integration.
-- Stage 9 owns full visual regression, benchmarks, release docs, legacy cleanup, inactive scene cleanup, and global file-size hardening.
+- the current release candidate owns visual-fidelity effects and animation polish.
+- the current release candidate owns native file dialogs, platform-certified drag/drop, clipboard, accessibility/i18n, live-region, and system-theme integration.
+- the current release candidate owns full visual regression, benchmarks, release docs, legacy cleanup, inactive scene cleanup, and global file-size hardening.

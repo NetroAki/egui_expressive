@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>egui_expressive Web Showcase</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #0f172a;
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+    }
+    #app {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      outline: none;
+    }
+    #status {
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      z-index: 2;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: rgba(15, 23, 42, 0.86);
+      color: #e2e8f0;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="app" width="1280" height="800"></canvas>
+  <div id="status" data-egui-expressive-web-status="booting">booting</div>
+  <script type="module">
+    import init, { WebHandle } from "./pkg/egui_expressive_web_showcase.js";
+
+    const status = document.getElementById("status");
+    const canvas = document.getElementById("app");
+
+    function setStatus(value) {
+      status.textContent = value;
+      status.dataset.eguiExpressiveWebStatus = value;
+    }
+
+    function resizeCanvas() {
+      const scale = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.floor(window.innerWidth * scale));
+      canvas.height = Math.max(1, Math.floor(window.innerHeight * scale));
+      canvas.style.width = `${window.innerWidth}px`;
+      canvas.style.height = `${window.innerHeight}px`;
+    }
+
+    try {
+      resizeCanvas();
+      window.addEventListener("resize", resizeCanvas);
+      await init();
+      const handle = new WebHandle();
+      window.eguiExpressiveWebHandle = handle;
+      await handle.start(canvas);
+      setStatus("running");
+    } catch (error) {
+      console.error("egui_expressive web showcase failed", error);
+      setStatus("error");
+      throw error;
+    }
+  </script>
+</body>
+</html>

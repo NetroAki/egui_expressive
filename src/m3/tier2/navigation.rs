@@ -167,7 +167,14 @@ impl<'a> M3NavigationRail<'a> {
     pub fn show(self, ui: &mut Ui) -> Response {
         let theme = M3Theme::load(ui.ctx());
         let c = &theme.colors;
-        let height = ui.available_height();
+        let fallback_height = 16.0
+            + if self.header.is_some() { 64.0 } else { 0.0 }
+            + self.items.len().max(1) as f32 * 72.0;
+        let height = if ui.available_height().is_finite() && ui.available_height() > 0.0 {
+            ui.available_height()
+        } else {
+            fallback_height
+        };
         let (rect, response) =
             ui.allocate_exact_size(Vec2::new(self.width, height), Sense::hover());
         let mut y = rect.top() + 8.0;

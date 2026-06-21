@@ -19,7 +19,7 @@ set "OUTPUT_DIR=%PROJECT_ROOT%\dist"
 set "RELEASE_DIR=%OUTPUT_DIR%\release"
 
 set "EXTENSION_ID=com.egui-expressive.illustrator-exporter"
-set "VERSION=1.0.0"
+set "VERSION=0.1.0"
 set "PLATFORM=win32"
 set "ZXP_NAME=egui_expressive_export-%VERSION%-%PLATFORM%.zxp"
 
@@ -135,6 +135,25 @@ if errorlevel 1 (
     goto :error
 )
 
+set "AI_PARSER_REL=bin/win32/ai-parser.exe"
+set "AI_PARSER_STAGED=%STAGE%\bin\win32\ai-parser.exe"
+set "AI_PARSER_SHA256="
+for /f "usebackq tokens=*" %%H in (`certutil -hashfile "%AI_PARSER_STAGED%" SHA256 ^| findstr /r "^[0-9A-Fa-f][0-9A-Fa-f]*$"`) do (
+    set "AI_PARSER_SHA256=%%H"
+)
+if not defined AI_PARSER_SHA256 (
+    echo [ERROR] Failed to compute SHA-256 for staged ai-parser.exe
+    goto :error
+)
+(
+  echo {
+  echo   "binaries": {
+  echo     "%AI_PARSER_REL%": "!AI_PARSER_SHA256!"
+  echo   }
+  echo }
+) > "%STAGE%\ai-parser-integrity.json"
+echo [INFO] Wrote ai-parser integrity manifest
+
 REM NOTE: .debug file excluded from production builds.
 REM For development, create manually with appropriate Port.
 
@@ -224,7 +243,11 @@ echo [INFO] Release artifact synced: %RELEASE_DIR%\%ZXP_NAME%
 set "INSTALLER_ZIP=%OUTPUT_DIR%\egui_expressive_export-%VERSION%-%PLATFORM%-installer.zip"
 del /f /q "%INSTALLER_ZIP%" 2>nul
 del /f /q "%RELEASE_DIR%\egui_expressive_export-%VERSION%-%PLATFORM%-installer.zip" 2>nul
-powershell -NoProfile -Command "$files = @('%OUTPUT_DIR%\%ZXP_NAME%', '%RELEASE_DIR%\README.md', '%PLUGIN_DIR%\install.bat'); Compress-Archive -LiteralPath $files -DestinationPath '%INSTALLER_ZIP%' -Force"
+set "EGUI_EXPRESSIVE_ZXP_PATH=%OUTPUT_DIR%\%ZXP_NAME%"
+set "EGUI_EXPRESSIVE_RELEASE_README=%RELEASE_DIR%\README.md"
+set "EGUI_EXPRESSIVE_INSTALL_BAT=%PLUGIN_DIR%\install.bat"
+set "EGUI_EXPRESSIVE_INSTALLER_ZIP=%INSTALLER_ZIP%"
+powershell -NoProfile -Command "$files = @($env:EGUI_EXPRESSIVE_ZXP_PATH, $env:EGUI_EXPRESSIVE_RELEASE_README, $env:EGUI_EXPRESSIVE_INSTALL_BAT); Compress-Archive -LiteralPath $files -DestinationPath $env:EGUI_EXPRESSIVE_INSTALLER_ZIP -Force"
 if errorlevel 1 (
     echo [ERROR] Failed to create installer bundle
     goto :error

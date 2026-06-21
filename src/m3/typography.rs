@@ -1,4 +1,4 @@
-use crate::typography::TypeSpec;
+use crate::typography::{FontRegistry, FontSelectionReport, TypeSpec};
 use egui::FontId;
 
 /// M3 text style definition.
@@ -52,6 +52,17 @@ impl M3TextStyle {
             .line_height(line_height)
             .letter_spacing(self.letter_spacing)
             .weight(self.weight.css_value())
+    }
+
+    pub fn resolve_font(
+        &self,
+        registry: &FontRegistry,
+        family_name: &str,
+        text: &str,
+    ) -> FontSelectionReport {
+        self.to_type_spec()
+            .font_family(family_name)
+            .resolve_font(registry, text)
     }
 }
 
@@ -176,6 +187,37 @@ impl Default for M3TypeScale {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::RenderQuality;
+    use crate::typography::{
+        FontCoverageRange, FontFaceId, FontFaceRecord, FontFamilyRecord, FontRegistry, FontStretch,
+        FontStyleKind,
+    };
+    use std::sync::Arc;
+
+    fn stage5_m3_registry() -> FontRegistry {
+        let faces = [400, 500, 700]
+            .into_iter()
+            .map(|weight| {
+                FontFaceRecord::new(
+                    "Roboto",
+                    FontFaceId::new(format!("roboto-{weight}")).unwrap(),
+                    weight,
+                    FontStyleKind::Normal,
+                    FontStretch::default(),
+                    0,
+                    "Apache-2.0",
+                    "stage5-m3",
+                    vec![FontCoverageRange::new(' ', '~').unwrap()],
+                    Some(Arc::from([weight as u8])),
+                    None,
+                )
+                .unwrap()
+            })
+            .collect();
+        FontRegistry::new()
+            .with_approved_license("Apache-2.0")
+            .add_family(FontFamilyRecord::new("Roboto", Vec::new(), Vec::new(), faces).unwrap())
+    }
 
     #[test]
     fn r100_005a_m3_font_weight_maps_to_css_values() {
@@ -246,5 +288,31 @@ mod tests {
 
         assert_eq!(font_id.size, 14.0);
         assert!(matches!(font_id.family, egui::FontFamily::Proportional));
+    }
+
+    #[test]
+    fn stage5_m3_resolve_font_uses_registered_m3_weights() {
+        let registry = stage5_m3_registry();
+        let scale = M3TypeScale::default();
+
+        let body = scale.body_large.resolve_font(&registry, "Roboto", "Hello");
+        assert_eq!(body.actual_quality, RenderQuality::Exact);
+        assert_eq!(body.selected_weight, Some(400));
+
+        let title = scale
+            .title_medium
+            .resolve_font(&registry, "Roboto", "Hello");
+        assert_eq!(title.actual_quality, RenderQuality::Exact);
+        assert_eq!(title.selected_weight, Some(500));
+
+        let bold = M3TextStyle {
+            font_size: 14.0,
+            line_height: 20.0,
+            letter_spacing: 0.1,
+            weight: M3FontWeight::Bold,
+        }
+        .resolve_font(&registry, "Roboto", "Hello");
+        assert_eq!(bold.actual_quality, RenderQuality::Exact);
+        assert_eq!(bold.selected_weight, Some(700));
     }
 }

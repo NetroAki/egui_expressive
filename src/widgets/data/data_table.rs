@@ -1,8 +1,12 @@
-use egui::{Color32, RichText, ScrollArea, Ui, Widget};
+use egui::{Color32, RichText, Ui, Widget};
 
 use super::{DataGridModel, DataGridState, DataViewStatus};
 
-/// Read-only, virtualized data grid with sortable and selectable rows.
+/// Read-only data grid with sortable and selectable rows.
+///
+/// The widget materializes the filtered/sorted row index for the current frame.
+/// Host apps with very large datasets should cache model/state projections or
+/// wrap this widget in their own viewport-aware data source.
 ///
 /// Header clicks cycle a sortable column between ascending and descending;
 /// callers clear sorting explicitly by setting `DataGridState::sort` to `None`.
@@ -131,17 +135,14 @@ impl<'a> Widget for DataTable<'a> {
             )
             .response;
 
-        let rows_output = ScrollArea::vertical().show_rows(
-            ui,
-            self.row_height,
-            visible_rows.len(),
-            |ui, range| {
-                for visible_index in range {
-                    let row_index = visible_rows[visible_index];
+        let row_width: f32 = visible_columns.iter().map(|(_, column)| column.width).sum();
+        let rows_response = ui
+            .vertical(|ui| {
+                for row_index in visible_rows {
                     let row = &rows[row_index];
                     let selected = self.state.selection.row_id.as_deref() == Some(row.id.as_str());
                     ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), self.row_height),
+                        egui::vec2(row_width, self.row_height),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             for (column_index, column) in &visible_columns {
@@ -166,13 +167,8 @@ impl<'a> Widget for DataTable<'a> {
                         },
                     );
                 }
-            },
-        );
-        let rows_response = ui.interact(
-            rows_output.inner_rect,
-            ui.id().with("data_table_rows"),
-            egui::Sense::hover(),
-        );
+            })
+            .response;
 
         header_response.union(rows_response)
     }

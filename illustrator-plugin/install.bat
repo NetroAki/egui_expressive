@@ -7,7 +7,7 @@ setlocal EnableExtensions DisableDelayedExpansion
 set "EXT_ID=com.egui-expressive.illustrator-exporter"
 set "EXT_NAME=egui_expressive Exporter"
 set "SCRIPT_DIR=%~dp0"
-set "ZXP_FILE=%SCRIPT_DIR%egui_expressive_export-1.0.0-win32.zxp"
+set "ZXP_FILE=%SCRIPT_DIR%egui_expressive_export-0.1.0-win32.zxp"
 
 echo ============================================
 echo  %EXT_NAME% Installer
@@ -15,9 +15,9 @@ echo ============================================
 echo.
 
 if exist "%ZXP_FILE%" goto zxp_found
-set "ZXP_FILE=%SCRIPT_DIR%..\dist\egui_expressive_export-1.0.0-win32.zxp"
+set "ZXP_FILE=%SCRIPT_DIR%..\dist\egui_expressive_export-0.1.0-win32.zxp"
 if exist "%ZXP_FILE%" goto zxp_found
-echo [ERROR] egui_expressive_export-1.0.0-win32.zxp not found.
+echo [ERROR] egui_expressive_export-0.1.0-win32.zxp not found.
 echo [ERROR] Place the .zxp next to this script, or run installer\build_zxp.bat first.
 pause
 exit /b 1
@@ -74,7 +74,14 @@ exit /b 1
 
 :extracted_ok
 echo [INFO] Extraction complete.
-echo [INFO] Enabling CEP debug mode for self-signed extensions...
+if "%EGUI_EXPRESSIVE_ENABLE_CEP_DEBUG%"=="1" goto enable_debug_modes
+echo [INFO] CEP debug mode was not changed.
+echo [INFO] Set EGUI_EXPRESSIVE_ENABLE_CEP_DEBUG=1 before running this helper only when a self-signed/internal CEP install requires it.
+goto debug_modes_done
+
+:enable_debug_modes
+echo [WARN] Enabling CEP debug mode because EGUI_EXPRESSIVE_ENABLE_CEP_DEBUG=1.
+echo [WARN] Use this only for explicitly approved self-signed/internal installs.
 call :enable_debug 9
 call :enable_debug 10
 call :enable_debug 11
@@ -88,6 +95,7 @@ call :enable_debug 18
 call :enable_debug 19
 call :enable_debug 20
 
+:debug_modes_done
 echo.
 echo ============================================
 echo  Installation complete!

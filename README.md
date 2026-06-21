@@ -1,19 +1,19 @@
 # egui_expressive
 
-**Expressive, beautiful UI for [egui](https://github.com/emilk/egui) 0.34 — without giving up immediate-mode simplicity or performance.** Design tokens, Material Design 3 widgets, animation primitives, blur and glow effects, blend modes, DAW-style controls, design-tool code generation, layout macros, and more.
+**Expressive UI building blocks for [egui](https://github.com/emilk/egui) 0.34 — without giving up immediate-mode simplicity or performance.** Design tokens, evidence-scoped Material Design 3 widgets, animation primitives, blur and glow effects, blend modes, DAW-style controls, design-tool code generation, layout macros, and more.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE-MIT)
 [![egui: 0.34](https://img.shields.io/badge/egui-0.34-orange.svg)](https://github.com/emilk/egui)
 
 ## Why `egui_expressive`?
 
-`egui` is fast, portable, immediate-mode, and deliberately minimal. That is its strength—but building visually rich, production-polished interfaces directly from raw `Painter` calls can become repetitive: layered effects, state-driven styling, gradients, shadows, masks, complex strokes, large canvases, design tokens, and design-tool imports all require boilerplate.
+`egui` is fast, portable, immediate-mode, and deliberately minimal. That is its strength—but building visually rich, production-minded interfaces directly from raw `Painter` calls can become repetitive: layered effects, state-driven styling, gradients, shadows, masks, complex strokes, large canvases, design tokens, and design-tool imports all require boilerplate.
 
 `egui_expressive` is the expressive design layer on top of egui. The goal is not to replace egui’s renderer, layout model, or interaction system. The goal is to make egui capable of highly designed interfaces while preserving the benefits that make egui valuable:
 
 - **Immediate-mode ergonomics** — APIs compose with `egui::Ui`, `egui::Painter`, `egui::Shape`, and `egui::Response`.
 - **Performance-first rendering** — use CPU/epaint meshes for cheap vector primitives, viewport culling for huge canvases, and GPU/WGPU-backed callbacks only when an effect genuinely needs shader or render-target support.
-- **Beautiful by default, escape hatches always available** — higher-level builders terminate into egui-native concepts, and you can drop down to raw egui at any point.
+- **Polished defaults, escape hatches always available** — higher-level builders terminate into egui-native concepts, and you can drop down to raw egui at any point.
 - **Code output over screenshots** — design-tool exports aim to generate editable Rust primitives and effect code. Current exports target a measured supported subset and emit parity warnings/status for unsupported or approximate Illustrator features.
 
 In short: **egui is the floor, not the ceiling.** This crate exists so applications can stay immediate-mode and lightweight while still looking expressive, polished, and aiming for design-tool fidelity.
@@ -62,6 +62,8 @@ egui = "0.34"
 eframe = "0.34"
 ```
 
+A crates.io version should only be used after a published release is available.
+
 ## Modules
 
 | Module | Description |
@@ -77,7 +79,7 @@ eframe = "0.34"
 | `icons` | Icon font rendering with `Icon`, `IconButton`, `IconSize` types and built-in icon constants |
 | `interaction` | `DragDelta`, `DragAxis`, `PanZoom` — pointer and gesture helpers |
 | `layout` | `vstack!`/`hstack!`/`zstack!` macros, `auto_layout`, `styled_frame`, dividers |
-| `m3` | Full Material Design 3 component set — buttons, cards, navigation, dialogs, FABs, and more |
+| `m3` | Evidence-scoped Material Design 3 component family — buttons, cards, navigation, dialogs, FABs, and more |
 | `state` | `StateSlot<T>`, `StateMachine<S>`, `InteractionState` |
 | `style` | `DesignTokens`, `SurfacePalette`, `AccentColors`, `TextStyles`, `VisualState<T>`, theming utilities |
 | `surface` | `LargeCanvas` and `ViewportCuller` for virtual canvases larger than 50k px |
@@ -94,6 +96,44 @@ eframe = "0.34"
 | `vectorize` | Export-time raster-to-vector tracing for converting raster inputs into scene paths before codegen |
 
 Framework docs start at [`docs/ui-framework/index.md`](docs/ui-framework/index.md). Release readiness docs live in [`docs/release-checklist.md`](docs/release-checklist.md), [`docs/versioning-policy.md`](docs/versioning-policy.md), and [`docs/migration-guide.md`](docs/migration-guide.md).
+
+Release status: `egui_expressive` is a pre-1.0 crate. The current tree is a
+release candidate for the core egui-native API surface, examples, and
+Linux-validated runtime path, but it has not been pushed or published as part of
+this review. Public API categories, platform support, and render-fidelity claims
+remain evidence-scoped rather than blanket production guarantees; expect
+breaking changes before `1.0` and check the release checklist before treating any
+platform or renderer path as broadly supported.
+
+## Cross-platform support status
+
+`egui_expressive` is a cross-platform egui design layer, but production support
+claims are artifact-gated. The shared smoke surface is
+[`examples/cross_platform_showcase.rs`](examples/cross_platform_showcase.rs), and
+support evidence is tracked through `PlatformSupportArtifact` plus committed
+smoke docs under [`docs/platform-smoke/`](docs/platform-smoke/).
+
+Current status for the shared showcase surface:
+
+| Platform | Status | Evidence |
+| --- | --- | --- |
+| Linux | validated | Local virtual-desktop smoke builds and runs the shared showcase on both X11/Xvfb/Openbox and Wayland/Sway headless wlroots, captures normal-DPI and high-DPI non-black screenshots, X11 focus/resize, Wayland focused-toplevel/floating-resize evidence, bounded renderer init/teardown/relaunch, log scans, and smoke timing evidence. |
+| Windows | planned | Compile/contract checks exist; runtime support requires a Windows runtime artifact before any support claim. |
+| macOS | planned | Compile/contract checks exist; runtime support requires a macOS runtime artifact before any support claim. |
+| iOS | planned | Runtime support requires simulator or device evidence before any support claim. |
+| Android | validated-bounded | Shared-showcase APK built for Android emulator, installed/launched on API 35 x86_64 AVD, captured non-black portrait/landscape/resume screenshots, rotation/resume lifecycle, size/density, and log scans. |
+| Web | validated-bounded | Web harness built for `wasm32-unknown-unknown`; Chromium loopback smoke recorded running DOM status, non-black screenshots at 1280x800 and 640x480, resize, and renderer/log evidence. |
+
+Linux is the primary runtime-validated path for the current release candidate.
+Web and Android have bounded runtime evidence for their showcase harnesses.
+Windows, macOS, and iOS remain planned until their own runtime artifacts are
+supplied. Illustrator plugin packaging/runtime work is maintained as an
+integration path but is not a support guarantee for the core crate.
+
+CI compile/contract jobs do not replace host, simulator, emulator, or device
+runtime evidence. Web compile artifacts do not replace browser visible-render,
+log, resize/DPI, lifecycle, and renderer proof. No secrets, signing keys, provisioning profiles, keystores,
+store publishing, or broad native screen capture are required by the core crate.
 
 ## Illustrator parity contract
 
@@ -140,9 +180,15 @@ These are redirects/thin constructors, not parallel widget implementations. Exam
 |---------|---------|-------------|
 | `debug` | [yes] | Enables DebugOverlay (methods become no-ops when off), debug_label, debug_interaction (removed from exports when off) |
 | `daw` | [no] | Enables the daw convenience re-export module (widgets are always available in the widgets module) |
+| `creative-editors` | [no] | Enables the same creative-editor compatibility namespace as `daw` without audio-specific naming intent |
 | `clip-mask` | [no] | Enables `clipped_shape_cpu` for CPU-side polygon mask overlay approximation (background-dependent; requires `tiny-skia`) |
 | `wgpu` | [no] | Enables the `gpu` module and `wgpu` dependency for hardware-accelerated effects |
 | `gpu-effects` | [no] | Enables advanced GPU effects (currently an alias for `wgpu`) |
+| `native-backdrop` | [no] | Enables native backdrop adapter planning/diagnostic types; adapters still feed app-provided snapshot contracts |
+| `native-backdrop-x11` | [no] | Linux/X11 native backdrop platform flag |
+| `native-backdrop-macos` | [no] | macOS native backdrop platform flag |
+| `native-backdrop-windows` | [no] | Windows native backdrop platform flag |
+| `native-backdrop-wayland` | [no] | Wayland native backdrop platform flag |
 
 ## Quick Example
 
@@ -155,19 +201,21 @@ struct MyApp {
 }
 
 impl eframe::App for MyApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        vstack!(ui, gap: 12.0, {
-            ui.add(
-                Knob::new(&mut self.gain, 0.0..=1.0)
-                    .style(KnobStyle::Default)
-                    .label("GAIN"),
-            );
-            ui.add(
-                DragNumber::new(&mut self.bpm, 60.0..=300.0)
-                    .label("BPM")
-                    .default_value(120.0)
-                    .decimals(1),
-            );
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            vstack!(ui, gap: 12.0, {
+                ui.add(
+                    Knob::new(&mut self.gain, 0.0..=1.0)
+                        .style(KnobStyle::Default)
+                        .label("GAIN"),
+                );
+                ui.add(
+                    DragNumber::new(&mut self.bpm, 60.0..=300.0)
+                        .label("BPM")
+                        .default_value(120.0)
+                        .decimals(1),
+                );
+            });
         });
     }
 }
@@ -255,13 +303,17 @@ For generic SVG layout inference, supports layout-name hints (`row-*`, `col-*`, 
 cargo run --example daw_strip       # DAW channel strip: Knob + Fader + Meter + StepGrid
 cargo run --example step_sequencer  # BPM-driven step sequencer
 cargo run --example timeline        # Large timeline canvas with viewport culling
+cargo run --example primitive_gallery # Primitive interaction/render/blend gallery
+cargo run --example effects_evaluator # Representative feature/effect diagnostic dashboard
+cargo run --all-features --example effects_evaluator # Include gated compile surfaces
 ```
 
 ## Documentation
 
-[docs] **[Wiki](../../wiki)** — full guides for every module:
+Start with the tracked framework docs in [`docs/ui-framework/index.md`](docs/ui-framework/index.md).
 
-[Getting Started](../../wiki/Getting-Started) · [Animation](../../wiki/Animation) · [Blur Effects](../../wiki/Blur-Effects) · [Drawing & Shapes](../../wiki/Drawing-and-Shapes) · [Interaction](../../wiki/Interaction) · [Layout Macros](../../wiki/Layout-Macros) · [Material Design 3](../../wiki/Material-Design-3) · [State Management](../../wiki/State-Management) · [Style & Theming](../../wiki/Style-and-Theming) · [SwiftUI Patterns](../../wiki/SwiftUI-Patterns) · [Large Surfaces](../../wiki/Large-Surfaces) · [Widgets](../../wiki/Widgets) · [Debug & DevTools](../../wiki/Debug-and-DevTools) · [Figma Integration](../../wiki/Figma-Integration) · [Cookbook](../../wiki/Cookbook)
+Additional guides can live in the GitHub Wiki after the repository owner publishes
+or updates those pages.
 
 ## License
 

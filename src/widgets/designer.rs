@@ -26,10 +26,19 @@ impl RoutingCable {
 }
 impl<'a> egui::Widget for DesignerCanvas<'a> {
     fn ui(self, ui: &mut Ui) -> Response {
-        let resp = ui.allocate_response(
-            Vec2::new(ui.available_width(), ui.available_height()),
-            Sense::click_and_drag(),
-        );
+        let available_width = ui.available_width();
+        let available_height = ui.available_height();
+        let width = if available_width.is_finite() {
+            available_width.max(1.0)
+        } else {
+            240.0
+        };
+        let height = if available_height.is_finite() {
+            available_height.max(1.0)
+        } else {
+            120.0
+        };
+        let resp = ui.allocate_response(Vec2::new(width, height), Sense::click_and_drag());
         for part in self.parts.iter() {
             ui.painter()
                 .circle_filled(part.pos, 6.0, egui::Color32::from_rgb(180, 180, 220));

@@ -7,6 +7,8 @@
 use std::hash::{Hash, Hasher};
 
 #[cfg(feature = "wgpu")]
+use crate::platform::load_backdrop_capture_source_contract;
+#[cfg(feature = "wgpu")]
 use crate::platform::{
     load_app_owned_offscreen_backdrop_source, AppOwnedBackdropAlphaMode, AppOwnedBackdropFrameId,
     AppOwnedBackdropSurfaceId, AppOwnedOffscreenBackdropSource,
@@ -453,13 +455,13 @@ fn app_provided_backdrop_blur_preflight(
         ));
     }
 
-    let request = BackdropCaptureRequest::new(rect, ctx.pixels_per_point()).map_err(|error| {
+    let _request = BackdropCaptureRequest::new(rect, ctx.pixels_per_point()).map_err(|error| {
         backdrop_capture_request_error_report(backdrop_backend(), radius, error)
     })?;
 
     #[cfg(not(feature = "wgpu"))]
     {
-        let _ = request;
+        let _ = _request;
         return Err(report_with_issue(
             RenderBackendKind::EguiPainter,
             RenderIssueKind::MissingBackend,
@@ -470,6 +472,22 @@ fn app_provided_backdrop_blur_preflight(
 
     #[cfg(feature = "wgpu")]
     {
+        let source_contract = load_backdrop_capture_source_contract(ctx).ok_or_else(|| {
+            backdrop_capture_request_error_report(
+                backdrop_backend(),
+                radius,
+                BackdropCaptureError::MissingSourceContract,
+            )
+        })?;
+        let request = BackdropCaptureRequest::with_source_contract(
+            rect,
+            ctx.pixels_per_point(),
+            Some(source_contract),
+        )
+        .map_err(|error| {
+            backdrop_capture_request_error_report(backdrop_backend(), radius, error)
+        })?;
+
         if load_backdrop_snapshot_provider(ctx).is_none() {
             return Err(report_with_issue(
                 RenderBackendKind::EguiWgpuCallback,
@@ -493,10 +511,10 @@ fn app_provided_backdrop_blur_preflight(
             height: request.requested_height,
             requested_quality: RenderQuality::Exact,
         };
-        let report = crate::gpu::wgpu_source_layer_effect_report(
+        let report = crate::gpu::wgpu_app_provided_backdrop_snapshot_report(
             &capabilities,
             offscreen_request,
-            crate::gpu::GpuEffectSource::AppProvidedBackdropSnapshot,
+            source_contract,
         );
         if report.is_exact() {
             Ok((request, report))
@@ -562,18 +580,43 @@ fn backdrop_capture_error_report(
     backend: RenderBackendKind,
     error: BackdropCaptureError,
 ) -> RenderReport {
-    let message = match error {
+    let message: String = match error {
         BackdropCaptureError::SnapshotSizeMismatch { .. } => {
             "provider returned a snapshot with unexpected dimensions; use bounded fallback".into()
         }
         BackdropCaptureError::InvalidPixelLength { .. } => {
             "provider returned invalid RGBA data length; use bounded fallback".into()
         }
-        BackdropCaptureError::CaptureFailed(message) => {
-            format!("provider failed to capture snapshot: {message}; use bounded fallback")
+        BackdropCaptureError::CaptureFailed(_) => {
+            "provider failed to capture snapshot; use bounded fallback".into()
         }
         BackdropCaptureError::ProviderUnavailable => {
             "no app-provided snapshot provider is installed; use bounded overlay fallback".into()
+        }
+        BackdropCaptureError::MissingSourceContract => {
+            "app-provided backdrop exactness requires source identity, consent, frame freshness, DPI, and occlusion metadata; use bounded fallback".into()
+        }
+        BackdropCaptureError::PermissionRequired => {
+            "app-provided backdrop source requires permission before exact capture; use bounded fallback".into()
+        }
+        BackdropCaptureError::PermissionDenied => {
+            "app-provided backdrop source permission was denied; use bounded fallback".into()
+        }
+        BackdropCaptureError::StaleFrame => {
+            "app-provided backdrop source frame is stale; use bounded fallback".into()
+        }
+        BackdropCaptureError::OccludedSource => {
+            "app-provided backdrop source is occluded; use bounded fallback".into()
+        }
+        BackdropCaptureError::SourceScaleMismatch => {
+            "app-provided backdrop source scale does not match the egui context; use bounded fallback".into()
+        }
+        BackdropCaptureError::SourceBoundsMismatch { .. } => {
+            "app-provided backdrop source bounds do not cover the requested rect; use bounded fallback".into()
+        }
+        BackdropCaptureError::SourceIdMismatch { .. }
+        | BackdropCaptureError::ProviderIdMismatch { .. } => {
+            "app-provided backdrop source identity does not match the expected provider/source; use bounded fallback".into()
         }
         BackdropCaptureError::InvalidRect | BackdropCaptureError::InvalidScale => {
             return backdrop_capture_request_error_report(backend, 0.0, error)
@@ -633,9 +676,9 @@ fn app_owned_backdrop_blur_callback_id(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::{
-        install_backdrop_snapshot_provider, BackdropSnapshot, BackdropSnapshotProvider,
-    };
+    #[cfg(feature = "wgpu")]
+    use crate::platform::install_backdrop_snapshot_provider;
+    use crate::platform::{BackdropSnapshot, BackdropSnapshotProvider};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -670,7 +713,7 @@ mod tests {
                     vec![64; request.expected_len()?],
                 ),
                 ProviderMode::CaptureFailed => Err(BackdropCaptureError::CaptureFailed(
-                    "test capture failed".into(),
+                    "test capture failed /home/user/window token password".into(),
                 )),
                 ProviderMode::WrongSize => BackdropSnapshot::new(1, 1, vec![0; 4]),
                 ProviderMode::InvalidLength => Err(BackdropCaptureError::InvalidPixelLength {
@@ -688,14 +731,36 @@ mod tests {
 
     fn install_provider(ctx: &egui::Context, mode: ProviderMode) -> Arc<AtomicUsize> {
         let calls = Arc::new(AtomicUsize::new(0));
-        install_backdrop_snapshot_provider(
+        let provider: crate::platform::SharedBackdropSnapshotProvider = Arc::new(TestProvider {
+            calls: calls.clone(),
+            mode,
+        });
+        crate::platform::install_backdrop_snapshot_provider_with_source_contract(
             ctx,
-            Arc::new(TestProvider {
-                calls: calls.clone(),
-                mode,
-            }),
+            provider,
+            exact_capture_source_contract(ctx),
         );
         calls
+    }
+
+    fn exact_capture_source_contract(
+        ctx: &egui::Context,
+    ) -> crate::platform::BackdropCaptureSourceContract {
+        crate::platform::BackdropCaptureSourceContract {
+            source_id: crate::platform::BackdropCaptureSourceId(1),
+            provider_id: crate::platform::BackdropCaptureProviderId(2),
+            surface_token: crate::platform::BackdropCaptureSurfaceToken(3),
+            frame_token: crate::platform::BackdropCaptureFrameToken(4),
+            consent: crate::platform::BackdropCaptureConsent::AppOwnedSurface,
+            frame_freshness: crate::platform::BackdropFrameFreshness::CurrentFrame,
+            occlusion: crate::platform::BackdropOcclusionState::Unoccluded,
+            pixels_per_point: ctx.pixels_per_point(),
+            physical_size: [
+                crate::platform::MAX_BACKDROP_SNAPSHOT_AXIS,
+                crate::platform::MAX_BACKDROP_SNAPSHOT_AXIS,
+            ],
+            pixel_format: crate::platform::BackdropCapturePixelFormat::Rgba8SrgbStraightAlpha,
+        }
     }
 
     fn rect() -> egui::Rect {
@@ -1016,6 +1081,10 @@ mod tests {
                         mode: ProviderMode::Valid,
                     }),
                 );
+                crate::platform::install_backdrop_capture_source_contract(
+                    ui.ctx(),
+                    exact_capture_source_contract(ui.ctx()),
+                );
                 let (shape, report) = app_provided_backdrop_blur_shape(ui, rect(), 4.0);
                 assert!(report.is_exact(), "{report:?}");
                 assert!(matches!(shape, Some(egui::Shape::Callback(_))));
@@ -1045,6 +1114,9 @@ mod tests {
                     assert!(shape.is_none());
                     assert_eq!(report.actual_quality, RenderQuality::Approximate);
                     assert_eq!(report.issues[0].kind, RenderIssueKind::ApproximateFallback);
+                    assert!(!report.issues[0].message.contains("/home/"));
+                    assert!(!report.issues[0].message.contains("token"));
+                    assert!(!report.issues[0].message.contains("password"));
                 });
             });
         }

@@ -2,7 +2,7 @@
 
 use crate::tailwind::builder::Tw;
 use crate::tailwind::types::FontWeight;
-use crate::typography::TypeSpec;
+use crate::typography::{FontRegistry, FontSelectionReport, TypeSpec};
 
 impl Tw {
     pub fn text_xs(mut self) -> Self {
@@ -164,12 +164,48 @@ impl Tw {
         spec = spec.weight(self.font_weight.css_value());
         spec
     }
+
+    pub fn resolve_font(&self, registry: &FontRegistry, text: &str) -> FontSelectionReport {
+        self.to_type_spec().resolve_font(registry, text)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::RenderQuality;
+    use crate::typography::{
+        FontCoverageRange, FontFaceId, FontFaceRecord, FontFamilyRecord, FontRegistry,
+    };
     use egui::Color32;
+    use std::sync::Arc;
+
+    fn stage5_tailwind_registry() -> FontRegistry {
+        let faces = [100, 400, 700, 900]
+            .into_iter()
+            .map(|weight| {
+                FontFaceRecord::new(
+                    "Inter",
+                    FontFaceId::new(format!("inter-{weight}")).unwrap(),
+                    weight,
+                    crate::typography::FontStyleKind::Normal,
+                    crate::typography::FontStretch::default(),
+                    0,
+                    "OFL-1.1",
+                    "stage5-tailwind",
+                    vec![FontCoverageRange::new(' ', '~').unwrap()],
+                    Some(Arc::from([weight as u8])),
+                    None,
+                )
+                .unwrap()
+            })
+            .collect();
+        FontRegistry::new()
+            .with_approved_license("OFL-1.1")
+            .add_family(
+                FontFamilyRecord::new("Inter", vec!["sans".into()], Vec::new(), faces).unwrap(),
+            )
+    }
 
     #[test]
     fn tw_to_type_spec_preserves_exact_ascii_typography_subset() {
@@ -234,5 +270,25 @@ mod tests {
         assert!(contract.contains("Tw::to_type_spec"));
         assert!(contract.contains("`RichText` weight rendering"));
         assert!(contract.contains("remains bounded weak/normal/strong"));
+    }
+
+    #[test]
+    fn stage5_tw_resolve_font_uses_registered_numeric_weights() {
+        let registry = stage5_tailwind_registry();
+
+        for (css, selected) in [(100, 100), (350, 400), (700, 700), (900, 900)] {
+            let report = Tw::new()
+                .font_sans()
+                .font_weight(css)
+                .resolve_font(&registry, "Hello");
+            assert_eq!(report.selected_weight, Some(selected));
+        }
+
+        let exact = Tw::new()
+            .font_sans()
+            .font_bold()
+            .resolve_font(&registry, "Hello");
+        assert_eq!(exact.actual_quality, RenderQuality::Exact);
+        assert_eq!(exact.selected_face_id.unwrap().as_str(), "inter-700");
     }
 }

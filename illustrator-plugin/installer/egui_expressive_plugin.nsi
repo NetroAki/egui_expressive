@@ -2,7 +2,7 @@
 ; Requires NSIS (https://nsis.sourceforge.io/)
 
 !define PRODUCT_NAME "egui_expressive Illustrator Plugin"
-!define PRODUCT_VERSION "1.0.0"
+!define PRODUCT_VERSION "0.1.0"
 !define PLUGIN_FOLDER_NAME "egui_expressive_export"
 
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
@@ -20,6 +20,7 @@ Section "Plugin Files"
     File "..\host.jsx"
     File "..\plugin.js"
     File "..\index.html"
+    File /nonfatal "..\ai-parser-integrity.json"
     SetOutPath "$INSTDIR\bin"
     File /r "..\bin\*.*"
 
@@ -38,6 +39,7 @@ Section "Uninstall"
     Delete "$INSTDIR\host.jsx"
     Delete "$INSTDIR\plugin.js"
     Delete "$INSTDIR\index.html"
+    Delete "$INSTDIR\ai-parser-integrity.json"
     RMDir /r "$INSTDIR\bin"
     Delete "$INSTDIR\uninstall.exe"
     RMDir "$INSTDIR"

@@ -47,6 +47,8 @@ the named region; they do not make a broad full-page parity claim.
 When a case fails, the harness writes a red-channel heatmap to
 `test-results/visual-diff/<case>-heatmap.png`.
 
+The 2026-06-07 Stage 5 refresh reran this corpus/current-code boundary with `cargo test --lib current_render -- --nocapture`, `cargo test --lib current_render`, `cargo test --test visual_diff_harness`, `cargo test --lib draw`, and a manifest/current-render asset review script. The refresh found 47 manifest rows, 10 current-render baselines, and no missing referenced expected/actual files. It did not add external assets, refresh Illustrator/PDF exports, widen tolerances, or upgrade regression-only rows into current-code proof.
+
 ## Current-code proof subset
 
 `tests/visual_diff_harness.rs` remains the committed-pair regression corpus. It
@@ -57,7 +59,8 @@ current-code proof subset that reconstructs these exact cases through the active
 draw/raster/composite helpers and diffs the generated pixels against
 `current-render/` baselines at zero tolerance. The R100-009B blend-boundary row
 uses the helper path plus a bounded blue-mask green-channel quantization
-correction that is asserted before application:
+correction that is asserted before application; the R100-009C M3 top-app-bar
+row uses opaque source constants and no post-raster correction:
 
 - `phase5-supported-gradient`
 - `phase6-supported-gradient-angle`
@@ -68,12 +71,14 @@ correction that is asserted before application:
 - `phase7-supported-polygon-clip-gradient`
 - `phase7-supported-multiply-stack`
 - `compound-clip-hole`
+- `m3-top-app-bar-states`
 
 This narrows the replay-only gap for base gradients, angled gradients, rounded
 rect/stroke drawing, a nested vector clip row that now passes green content
 through `BlendLayer::clip_polygon`, the R100-009B `compositing-blend-boundary`
 row, the `phase7-supported-compound-hole-fill` row, gradient+clip, multiply
-compositing, and compound-hole masking. It does not upgrade
+compositing, compound-hole masking, and the fixed `m3-top-app-bar-states`
+endpoint. It does not upgrade
 bounded/plumbing/full-page rows or the rest of the manifest to current-render
 proof.
 
@@ -139,13 +144,12 @@ Tailwind token integration.
 `egui/gradient-mesh-quad.png`) exercises four-corner mesh-style color variation:
 red, green, blue, and yellow at the four corners. The egui side has a
 validation-only vector source at `egui/gradient-mesh-quad.svg`. This fixture is
-required in the manifest and gates strict-code export of gradient mesh patches.
+pipeline/plumbing evidence only: it keeps the manifest row and strict-export
+classification visible, but it does not prove exact gradient-mesh rendering.
 
 The current 2×2 PNG is a committed reference placeholder that validates the
-fixture pipeline end-to-end. Replace it with a real Illustrator-exported
-gradient mesh reference when Illustrator is available in the CI environment —
-generate from a .ai file containing a single four-corner mesh patch, export as
-PNG at the same dimensions, and update the egui-side render to match.
+fixture pipeline end-to-end. Keep R100-007 open until a real Illustrator-exported
+gradient mesh reference and matching egui-side render pass zero-tolerance proof.
 
 Visual fixture PNGs are validation artifacts only. Exported Illustrator raster
 items must be converted into vector geometry before code generation; never add

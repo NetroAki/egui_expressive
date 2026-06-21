@@ -507,8 +507,11 @@ mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use crate::platform::{
-        install_backdrop_snapshot_provider, BackdropCaptureError, BackdropCaptureRequest,
-        BackdropSnapshot, BackdropSnapshotProvider,
+        install_backdrop_snapshot_provider_with_source_contract, BackdropCaptureConsent,
+        BackdropCaptureError, BackdropCaptureFrameToken, BackdropCapturePixelFormat,
+        BackdropCaptureProviderId, BackdropCaptureRequest, BackdropCaptureSourceContract,
+        BackdropCaptureSourceId, BackdropCaptureSurfaceToken, BackdropFrameFreshness,
+        BackdropOcclusionState, BackdropSnapshot, BackdropSnapshotProvider,
     };
     use crate::tailwind::types::{Display, TwBackdropSource};
     use crate::theme::Elevation;
@@ -553,11 +556,23 @@ mod tests {
     #[cfg(feature = "wgpu")]
     fn install_test_backdrop_provider(ctx: &egui::Context) -> Arc<AtomicUsize> {
         let calls = Arc::new(AtomicUsize::new(0));
-        install_backdrop_snapshot_provider(
+        install_backdrop_snapshot_provider_with_source_contract(
             ctx,
             Arc::new(TestBackdropProvider {
                 calls: calls.clone(),
             }),
+            BackdropCaptureSourceContract {
+                source_id: BackdropCaptureSourceId(1),
+                provider_id: BackdropCaptureProviderId(2),
+                surface_token: BackdropCaptureSurfaceToken(3),
+                frame_token: BackdropCaptureFrameToken(4),
+                consent: BackdropCaptureConsent::AppOwnedSurface,
+                frame_freshness: BackdropFrameFreshness::CurrentFrame,
+                occlusion: BackdropOcclusionState::Unoccluded,
+                pixels_per_point: ctx.pixels_per_point(),
+                physical_size: [crate::platform::MAX_BACKDROP_SNAPSHOT_AXIS; 2],
+                pixel_format: BackdropCapturePixelFormat::Rgba8SrgbStraightAlpha,
+            },
         );
         calls
     }

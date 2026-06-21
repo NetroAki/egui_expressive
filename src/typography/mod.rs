@@ -11,8 +11,10 @@ pub mod shaping;
 pub mod text;
 
 pub use core::{
-    shaped_glyph_run_advance_width, OpenTypeFeatures, ShapedGlyph, ShapedGlyphRun, TextDecoration,
-    TextOverflow, TextTransform, TypeScale, TypeSpec,
+    shaped_glyph_run_advance_width, FontCoverageRange, FontFaceId, FontFaceRecord,
+    FontFamilyRecord, FontRegistry, FontSelectionIssue, FontSelectionIssueKind,
+    FontSelectionReport, FontStretch, FontStyleKind, OpenTypeFeatures, ShapedGlyph, ShapedGlyphRun,
+    TextDecoration, TextOverflow, TextTransform, TypeScale, TypeSpec,
 };
 pub use render::{render_shaped_glyph_run, render_text_with_font_bytes};
 pub use shaping::shape_text_with_font_bytes;

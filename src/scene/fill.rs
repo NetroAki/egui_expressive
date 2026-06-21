@@ -97,23 +97,21 @@ pub(crate) fn paint_fill(
                 ));
             }
         }
-        (PaintSource::LinearGradient(gradient), Geometry::Path { points, closed }) => {
-            if *closed {
-                let points = offset_points(points, origin);
-                if let Some(shape) = crate::draw::gradient_path_mesh_with_transform(
-                    &points,
-                    &gradient_stops(gradient, opacity, ui, blend_mode),
-                    gradient.angle_deg,
-                    false,
-                    crate::draw::GradientPathGeometry {
-                        transform: gradient
-                            .transform
-                            .map(|matrix| offset_transform(matrix, origin)),
-                        ..Default::default()
-                    },
-                ) {
-                    shapes.push(shape);
-                }
+        (PaintSource::LinearGradient(gradient), Geometry::Path { points, closed }) if *closed => {
+            let points = offset_points(points, origin);
+            if let Some(shape) = crate::draw::gradient_path_mesh_with_transform(
+                &points,
+                &gradient_stops(gradient, opacity, ui, blend_mode),
+                gradient.angle_deg,
+                false,
+                crate::draw::GradientPathGeometry {
+                    transform: gradient
+                        .transform
+                        .map(|matrix| offset_transform(matrix, origin)),
+                    ..Default::default()
+                },
+            ) {
+                shapes.push(shape);
             }
         }
         (PaintSource::LinearGradient(gradient), Geometry::Ellipse { rect }) => {
@@ -178,25 +176,23 @@ pub(crate) fn paint_fill(
                 shapes.push(crate::draw::radial_gradient_rect_stops(rect, &stops, 48));
             }
         }
-        (PaintSource::RadialGradient(gradient), Geometry::Path { points, closed }) => {
-            if *closed {
-                let points = offset_points(points, origin);
-                if let Some(shape) = crate::draw::gradient_path_mesh_with_transform(
-                    &points,
-                    &gradient_stops(gradient, opacity, ui, blend_mode),
-                    gradient.angle_deg,
-                    true,
-                    crate::draw::GradientPathGeometry {
-                        center: gradient.center.map(offset_gradient_point),
-                        focal_point: gradient.focal_point.map(offset_gradient_point),
-                        radius: gradient.radius,
-                        transform: gradient
-                            .transform
-                            .map(|matrix| offset_transform(matrix, origin)),
-                    },
-                ) {
-                    shapes.push(shape);
-                }
+        (PaintSource::RadialGradient(gradient), Geometry::Path { points, closed }) if *closed => {
+            let points = offset_points(points, origin);
+            if let Some(shape) = crate::draw::gradient_path_mesh_with_transform(
+                &points,
+                &gradient_stops(gradient, opacity, ui, blend_mode),
+                gradient.angle_deg,
+                true,
+                crate::draw::GradientPathGeometry {
+                    center: gradient.center.map(offset_gradient_point),
+                    focal_point: gradient.focal_point.map(offset_gradient_point),
+                    radius: gradient.radius,
+                    transform: gradient
+                        .transform
+                        .map(|matrix| offset_transform(matrix, origin)),
+                },
+            ) {
+                shapes.push(shape);
             }
         }
         (PaintSource::RadialGradient(gradient), Geometry::Ellipse { rect }) => {

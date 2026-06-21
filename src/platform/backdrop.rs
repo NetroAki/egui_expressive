@@ -10,12 +10,110 @@
 use std::sync::Arc;
 
 const BACKDROP_SNAPSHOT_PROVIDER_ID: &str = "egui_expressive.backdrop_snapshot_provider";
+const BACKDROP_CAPTURE_SOURCE_CONTRACT_ID: &str =
+    "egui_expressive.backdrop_capture_source_contract";
 #[cfg(feature = "wgpu")]
 const APP_OWNED_OFFSCREEN_BACKDROP_SOURCE_ID: &str =
     "egui_expressive.app_owned_offscreen_backdrop_source";
 pub const MAX_BACKDROP_SNAPSHOT_AXIS: u32 = 4_096;
 
 pub type SharedBackdropSnapshotProvider = Arc<dyn BackdropSnapshotProvider + Send + Sync + 'static>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BackdropCaptureSourceId(pub u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BackdropCaptureProviderId(pub u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BackdropCaptureSurfaceToken(pub u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BackdropCaptureFrameToken(pub u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackdropCaptureConsent {
+    AppOwnedSurface,
+    ExplicitUserConsent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackdropFrameFreshness {
+    CurrentFrame,
+    StaleFrame,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackdropOcclusionState {
+    Unoccluded,
+    PartiallyOccluded,
+    FullyOccluded,
+    NotChecked,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackdropCapturePixelFormat {
+    Rgba8SrgbStraightAlpha,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BackdropCaptureSourceContract {
+    pub source_id: BackdropCaptureSourceId,
+    pub provider_id: BackdropCaptureProviderId,
+    pub surface_token: BackdropCaptureSurfaceToken,
+    pub frame_token: BackdropCaptureFrameToken,
+    pub consent: BackdropCaptureConsent,
+    pub frame_freshness: BackdropFrameFreshness,
+    pub occlusion: BackdropOcclusionState,
+    pub pixels_per_point: f32,
+    pub physical_size: [u32; 2],
+    pub pixel_format: BackdropCapturePixelFormat,
+}
+
+impl BackdropCaptureSourceContract {
+    pub fn validate_for_exact_capture(self) -> Result<(), BackdropCaptureError> {
+        if !self.pixels_per_point.is_finite() || self.pixels_per_point <= 0.0 {
+            return Err(BackdropCaptureError::InvalidScale);
+        }
+        if self.physical_size[0] == 0
+            || self.physical_size[1] == 0
+            || self.physical_size[0] > MAX_BACKDROP_SNAPSHOT_AXIS
+            || self.physical_size[1] > MAX_BACKDROP_SNAPSHOT_AXIS
+        {
+            return Err(BackdropCaptureError::SizeBudgetExceeded {
+                width: self.physical_size[0],
+                height: self.physical_size[1],
+            });
+        }
+        if self.frame_freshness != BackdropFrameFreshness::CurrentFrame {
+            return Err(BackdropCaptureError::StaleFrame);
+        }
+        if self.occlusion != BackdropOcclusionState::Unoccluded {
+            return Err(BackdropCaptureError::OccludedSource);
+        }
+        Ok(())
+    }
+
+    pub fn validate_source_identity(
+        self,
+        expected_source_id: BackdropCaptureSourceId,
+        expected_provider_id: BackdropCaptureProviderId,
+    ) -> Result<(), BackdropCaptureError> {
+        if self.source_id != expected_source_id {
+            return Err(BackdropCaptureError::SourceIdMismatch {
+                expected: expected_source_id,
+                actual: self.source_id,
+            });
+        }
+        if self.provider_id != expected_provider_id {
+            return Err(BackdropCaptureError::ProviderIdMismatch {
+                expected: expected_provider_id,
+                actual: self.provider_id,
+            });
+        }
+        Ok(())
+    }
+}
 
 #[cfg(feature = "wgpu")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -53,10 +151,38 @@ pub struct BackdropCaptureRequest {
     pub pixels_per_point: f32,
     pub requested_width: u32,
     pub requested_height: u32,
+    pub source_contract: Option<BackdropCaptureSourceContract>,
 }
 
 impl BackdropCaptureRequest {
     pub fn new(rect: egui::Rect, pixels_per_point: f32) -> Result<Self, BackdropCaptureError> {
+        Self::with_source_contract(rect, pixels_per_point, None)
+    }
+
+    pub fn with_source_contract(
+        rect: egui::Rect,
+        pixels_per_point: f32,
+        source_contract: Option<BackdropCaptureSourceContract>,
+    ) -> Result<Self, BackdropCaptureError> {
+        Self::with_validated_source_contract(rect, pixels_per_point, source_contract)
+    }
+
+    pub fn with_expected_source_contract(
+        rect: egui::Rect,
+        pixels_per_point: f32,
+        source_contract: BackdropCaptureSourceContract,
+        expected_source_id: BackdropCaptureSourceId,
+        expected_provider_id: BackdropCaptureProviderId,
+    ) -> Result<Self, BackdropCaptureError> {
+        source_contract.validate_source_identity(expected_source_id, expected_provider_id)?;
+        Self::with_validated_source_contract(rect, pixels_per_point, Some(source_contract))
+    }
+
+    fn with_validated_source_contract(
+        rect: egui::Rect,
+        pixels_per_point: f32,
+        source_contract: Option<BackdropCaptureSourceContract>,
+    ) -> Result<Self, BackdropCaptureError> {
         if !rect.min.x.is_finite()
             || !rect.min.y.is_finite()
             || !rect.max.x.is_finite()
@@ -72,12 +198,27 @@ impl BackdropCaptureRequest {
 
         let requested_width = physical_axis(rect.width(), pixels_per_point)?;
         let requested_height = physical_axis(rect.height(), pixels_per_point)?;
+        if let Some(contract) = source_contract {
+            contract.validate_for_exact_capture()?;
+            if contract.pixels_per_point.to_bits() != pixels_per_point.to_bits() {
+                return Err(BackdropCaptureError::SourceScaleMismatch);
+            }
+            if requested_width > contract.physical_size[0]
+                || requested_height > contract.physical_size[1]
+            {
+                return Err(BackdropCaptureError::SourceBoundsMismatch {
+                    requested: [requested_width, requested_height],
+                    source: contract.physical_size,
+                });
+            }
+        }
 
         Ok(Self {
             rect,
             pixels_per_point,
             requested_width,
             requested_height,
+            source_contract,
         })
     }
 
@@ -155,6 +296,24 @@ pub enum BackdropCaptureError {
         actual: usize,
     },
     ProviderUnavailable,
+    MissingSourceContract,
+    PermissionRequired,
+    PermissionDenied,
+    StaleFrame,
+    OccludedSource,
+    SourceScaleMismatch,
+    SourceBoundsMismatch {
+        requested: [u32; 2],
+        source: [u32; 2],
+    },
+    SourceIdMismatch {
+        expected: BackdropCaptureSourceId,
+        actual: BackdropCaptureSourceId,
+    },
+    ProviderIdMismatch {
+        expected: BackdropCaptureProviderId,
+        actual: BackdropCaptureProviderId,
+    },
     CaptureFailed(String),
 }
 
@@ -165,6 +324,33 @@ pub fn install_backdrop_snapshot_provider(
     ctx.data_mut(|data| {
         data.insert_temp(egui::Id::new(BACKDROP_SNAPSHOT_PROVIDER_ID), provider);
     });
+}
+
+pub fn install_backdrop_capture_source_contract(
+    ctx: &egui::Context,
+    source_contract: BackdropCaptureSourceContract,
+) {
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            egui::Id::new(BACKDROP_CAPTURE_SOURCE_CONTRACT_ID),
+            source_contract,
+        );
+    });
+}
+
+pub fn install_backdrop_snapshot_provider_with_source_contract(
+    ctx: &egui::Context,
+    provider: SharedBackdropSnapshotProvider,
+    source_contract: BackdropCaptureSourceContract,
+) {
+    install_backdrop_snapshot_provider(ctx, provider);
+    install_backdrop_capture_source_contract(ctx, source_contract);
+}
+
+pub fn load_backdrop_capture_source_contract(
+    ctx: &egui::Context,
+) -> Option<BackdropCaptureSourceContract> {
+    ctx.data(|data| data.get_temp(egui::Id::new(BACKDROP_CAPTURE_SOURCE_CONTRACT_ID)))
 }
 
 pub fn load_backdrop_snapshot_provider(
@@ -227,6 +413,21 @@ mod tests {
 
     struct SolidProvider;
 
+    fn exact_source_contract() -> BackdropCaptureSourceContract {
+        BackdropCaptureSourceContract {
+            source_id: BackdropCaptureSourceId(1),
+            provider_id: BackdropCaptureProviderId(2),
+            surface_token: BackdropCaptureSurfaceToken(3),
+            frame_token: BackdropCaptureFrameToken(4),
+            consent: BackdropCaptureConsent::AppOwnedSurface,
+            frame_freshness: BackdropFrameFreshness::CurrentFrame,
+            occlusion: BackdropOcclusionState::Unoccluded,
+            pixels_per_point: 2.0,
+            physical_size: [128, 128],
+            pixel_format: BackdropCapturePixelFormat::Rgba8SrgbStraightAlpha,
+        }
+    }
+
     impl BackdropSnapshotProvider for SolidProvider {
         fn capture_backdrop_snapshot(
             &self,
@@ -247,6 +448,79 @@ mod tests {
         assert_eq!(request.requested_width, 21);
         assert_eq!(request.requested_height, 9);
         assert_eq!(request.expected_len().unwrap(), 21 * 9 * 4);
+        assert!(request.source_contract.is_none());
+    }
+
+    #[test]
+    fn capture_request_records_source_contract() {
+        let rect = egui::Rect::from_min_size(egui::pos2(4.0, 8.0), egui::vec2(10.0, 4.0));
+        let contract = exact_source_contract();
+        let request =
+            BackdropCaptureRequest::with_source_contract(rect, 2.0, Some(contract)).unwrap();
+
+        assert_eq!(request.source_contract, Some(contract));
+        assert_eq!(request.requested_width, 20);
+        assert_eq!(request.requested_height, 8);
+    }
+
+    #[test]
+    fn source_contract_rejects_stale_or_occluded_frames() {
+        let mut contract = exact_source_contract();
+        contract.frame_freshness = BackdropFrameFreshness::StaleFrame;
+        assert_eq!(
+            contract.validate_for_exact_capture().unwrap_err(),
+            BackdropCaptureError::StaleFrame
+        );
+
+        contract = exact_source_contract();
+        contract.occlusion = BackdropOcclusionState::FullyOccluded;
+        assert_eq!(
+            contract.validate_for_exact_capture().unwrap_err(),
+            BackdropCaptureError::OccludedSource
+        );
+
+        contract = exact_source_contract();
+        contract.occlusion = BackdropOcclusionState::NotChecked;
+        assert_eq!(
+            contract.validate_for_exact_capture().unwrap_err(),
+            BackdropCaptureError::OccludedSource
+        );
+    }
+
+    #[test]
+    fn capture_request_rejects_source_or_provider_mismatch() {
+        let rect = egui::Rect::from_min_size(egui::pos2(4.0, 8.0), egui::vec2(10.0, 4.0));
+        let contract = exact_source_contract();
+
+        assert_eq!(
+            BackdropCaptureRequest::with_expected_source_contract(
+                rect,
+                2.0,
+                contract,
+                BackdropCaptureSourceId(9),
+                BackdropCaptureProviderId(2),
+            )
+            .unwrap_err(),
+            BackdropCaptureError::SourceIdMismatch {
+                expected: BackdropCaptureSourceId(9),
+                actual: BackdropCaptureSourceId(1),
+            }
+        );
+
+        assert_eq!(
+            BackdropCaptureRequest::with_expected_source_contract(
+                rect,
+                2.0,
+                contract,
+                BackdropCaptureSourceId(1),
+                BackdropCaptureProviderId(9),
+            )
+            .unwrap_err(),
+            BackdropCaptureError::ProviderIdMismatch {
+                expected: BackdropCaptureProviderId(9),
+                actual: BackdropCaptureProviderId(2),
+            }
+        );
     }
 
     #[test]

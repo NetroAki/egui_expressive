@@ -1,5 +1,9 @@
 use super::*;
 
+fn shape(id: &str, x: f32, y: f32, w: f32, h: f32) -> LayoutElement {
+    LayoutElement::new(id.to_string(), ElementType::Shape, x, y, w, h)
+}
+
 #[test]
 fn test_parse_naming_row() {
     assert!(matches!(parse_naming("row-login"), NamingHint::Row(_)));
@@ -306,6 +310,23 @@ fn test_infer_vertical_gap() {
 
     let gap = infer_vertical_gap(&elements);
     assert!((gap - 8.0).abs() < 0.1);
+}
+
+#[test]
+fn test_layout_inference_ignores_non_finite_coordinates_without_panicking() {
+    let elements = vec![
+        shape("finite-a", 0.0, 0.0, 10.0, 10.0),
+        shape("nan-x", f32::NAN, 5.0, 10.0, 10.0),
+        shape("finite-b", 20.0, f32::INFINITY, 10.0, 10.0),
+        shape("finite-c", 40.0, 25.0, 10.0, 10.0),
+    ];
+
+    assert!(infer_horizontal_gap(&elements).is_finite());
+    assert!(infer_vertical_gap(&elements).is_finite());
+    assert_eq!(median(&[1.0, f32::NAN, 3.0]), 2.0);
+
+    let rows = cluster_into_rows(&elements, 0.5);
+    assert!(!rows.is_empty());
 }
 
 #[test]

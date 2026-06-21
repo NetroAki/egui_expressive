@@ -1,27 +1,32 @@
 # Data Widgets
 
-Stage 3 adds read-only, data-heavy widgets for dashboards, admin views, and inspectors. Stage 5 adds pure edit descriptors/adapters that can be layered over those read-only views without turning the widgets into spreadsheet editors.
+Data widgets provide read-only, data-heavy surfaces for dashboards, admin views,
+and inspectors. Editing is modeled through separate form/edit descriptors so the
+rendered table and property widgets stay predictable and display-focused.
 
 ## Modules
 
-- `src/widgets/data/mod.rs` — docs + re-exports.
+- `src/widgets/data/mod.rs` — docs and re-exports.
 - `src/widgets/data/state.rs` — sort/filter/selection/view-status state.
 - `src/widgets/data/model.rs` — data-grid rows, columns, cells, and row providers.
-- `src/widgets/data/data_table.rs` — `DataTable` read-only virtualized table widget.
+- `src/widgets/data/data_table.rs` — `DataTable` read-only table widget.
 - `src/widgets/data/tree_table.rs` — tree-table model, flattening, and read-only widget.
 - `src/widgets/data/property_grid.rs` — read-only property/inspector grid.
-- `src/widgets/data/editing.rs` — additive data-cell/property edit specs that consume Forms v2 inline-edit commits.
-- `src/widgets/data/virtual_window.rs` — pure visible-range helper.
+- `src/widgets/data/editing.rs` — additive data-cell/property edit specs that consume form inline-edit commits.
+- `src/widgets/data/virtual_window.rs` — pure visible-range helper for app-owned windowed callers.
 
 ## Scope
 
 - Rendered data-table/tree-table/property-grid widgets remain read-only display surfaces.
-- Inline editing is modeled through additive Forms v2 descriptors/adapters, not built into `DataTable` rendering.
+- Inline editing is modeled through additive descriptors/adapters, not built into `DataTable` rendering.
 - Single-column sorting only.
 - Per-column filters supported.
 - Row/column selection with fallback behavior; column selection is single-select.
 - Column visibility supported.
 - Tree-table expansion supported.
+- Built-in widget windowing is not claimed; the current widgets materialize
+  filtered/sorted/flattened rows for the current frame. Very large datasets
+  should use app-owned caching, pagination, or the `bounded_visible_range` helper.
 
 ## Recipes
 
@@ -43,7 +48,6 @@ clear sorting explicitly with `state.sort = None`.
 
 ```rust
 state.sort = None; // default: header clicks drive sort
-// or set an initial sort once:
 state.sort = Some(DataSortState::new(Some("name".into()), DataSortDirection::Asc));
 ```
 
@@ -110,41 +114,24 @@ state.view_status = if is_loading {
 };
 ```
 
-## App shell
-
-`examples/data_explorer_dashboard.rs` shows Stage 3 widgets inside the Stage 2 app-shell chrome: sidebar, breadcrumbs, tabs, split panes, and status bar.
-
-## Non-goals
-
-- Built-in spreadsheet-style cell/property editing inside `DataTable`/`PropertyGrid`.
-- Multi-column sort.
-- Column reordering.
-- Column pinning.
-- Resize handles.
-
-Stage 9 release boundary: advanced data-grid column interactions are explicitly unsupported rather than partially implemented. Apps that need multi-column sort, reordering, pinning, or resize handles should layer app-owned state and widgets around the read-only model, or wait for a later dedicated data-grid hardening stage. This resolves DEBT-020 for release-readiness purposes without adding spreadsheet scope to the core widget.
-
 ## Example
 
-- `examples/data_explorer_dashboard.rs` combines Stage 2 app-shell chrome with the new data widgets.
+- `examples/data_explorer_dashboard.rs` combines app-shell chrome with the data widgets.
 
 ## Notes
 
-- Large row sets use `egui::ScrollArea::show_rows` in the production widgets; `bounded_visible_range` is the stable public helper / deterministic proof used by custom callers and tests. See the 10k-row smoke test in `src/widgets/data/virtual_window.rs`.
+- `DataGridModel::filtered_sorted_row_indices` intentionally materializes a filtered/sorted index vector per call.
 - Sort comparisons and filter `contains` checks are case-folded with Rust `str::to_lowercase`; non-ASCII casing follows standard library behavior.
 - `TreeTable` exposes `row_height` / `header_height` builders for parity with `DataTable`.
 - `TreeTable` uses a 16.0 indent step and `▾` / `▸` / `•` glyph defaults.
 - `PropertyGrid` scrolls vertically by default for long inspectors.
 - `flatten_tree_table_rows` is a stable public helper that matches `TreeTableModel::flattened_rows`.
-- The large-data proof is intentionally split between the public helper and `show_rows` delegation; widget-level row-count instrumentation remains out of Stage 3 scope.
-- `DataGridModel::filtered_sorted_row_indices` intentionally materializes a filtered/sorted index vector per call. Stage 9 release smoke tests cover 4k-row deterministic behavior and document the support boundary: use viewport culling for rendering, avoid calling filtered/sorted materialization more than once per frame for very large tables, and add app-owned caching if the dataset/filter/sort state is stable across frames. This resolves DEBT-021 for the current release boundary without adding cache invalidation complexity to the serde-friendly model.
 - Public data structs intentionally keep serde-friendly public fields; field semantics are documented at the type/method/recipe level rather than with one-line field rustdoc on every model field.
-- Inline editing is now represented by Forms v2 descriptors/adapters in `src/forms/editing.rs` and `src/widgets/data/editing.rs`; rendered Stage 3 widgets remain read-only by design.
+- Inline editing is represented by descriptors/adapters in `src/forms/editing.rs` and `src/widgets/data/editing.rs`; rendered widgets remain read-only by design.
 - The example demonstrates loading/empty/error state switching without introducing edit flows.
 
-## Debt pointers
+## Boundaries
 
-- DEBT-006 — Stage 3 data widgets: `docs/exec-plans/tech-debt-tracker.md`
-- DEBT-014 — inline data/property editing adapters owned by Stage 5: `docs/exec-plans/tech-debt-tracker.md`
-- DEBT-020 — advanced data-grid column interactions resolved as unsupported release scope: `docs/exec-plans/tech-debt-tracker.md`
-- DEBT-021 — filtered/sorted index materialization support boundary resolved through release smoke and docs: `docs/exec-plans/tech-debt-tracker.md`
+- Built-in spreadsheet-style cell/property editing is out of scope for the rendered widgets.
+- Multi-column sort, column reordering, column pinning, and resize handles are not built in.
+- Very large data sets should cache filtered/sorted rows, page data, or supply an app-owned windowed surface rather than relying on these widgets to window rows internally.

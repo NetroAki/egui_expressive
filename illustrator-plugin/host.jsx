@@ -13,7 +13,13 @@ function sanitizeHostDiagnosticText(value) {
     return String(value || "")
         .replace(/[A-Za-z]:[\\\/][^\n\r;)]*egui_expressive_raster_trace[\\\/][^\s;),]+/g, "[temporary raster extraction input]")
         .replace(/(?:\/|\\\\)[^\n\r;)]*egui_expressive_raster_trace[\\\/][^\s;),]+/g, "[temporary raster extraction input]")
-        .replace(/egui_expressive_raster_trace[\\\/][^\s;),]+/g, "egui_expressive_raster_trace/[temporary input]");
+        .replace(/egui_expressive_raster_trace[\\\/][^\s;),]+/g, "egui_expressive_raster_trace/[temporary input]")
+        .replace(/[A-Za-z]:[\\\/][^\n\r\"']+/g, "[local path]")
+        .replace(/\/(?:Users|home|tmp|var|private|Volumes)\/[^\n\r\"']+/g, "[local path]");
+}
+
+function sanitizeHostErrorText(value) {
+    return sanitizeHostDiagnosticText(value);
 }
 
 function noteHostDiagnostic(context, error) {
@@ -423,6 +429,18 @@ function sanitizeOutputFilename(filename) {
     return base;
 }
 
+function sanitizeRelativeAssetPath(assetPath) {
+    var raw = String(assetPath || "");
+    if (!raw || raw.indexOf("\\") >= 0) return null;
+    if (raw.charAt(0) === "/" || /^[A-Za-z]:/.test(raw)) return null;
+    if (raw.indexOf("../") >= 0 || raw.indexOf("/..") >= 0 || raw === "..") return null;
+    if (raw.indexOf("assets/") !== 0) return null;
+    var name = raw.substring("assets/".length);
+    if (!name || name.indexOf("/") >= 0 || name === "." || name === "..") return null;
+    if (!/^[A-Za-z0-9._-]+$/.test(name)) return null;
+    return "assets/" + name;
+}
+
 function getArtboardsJSON() {
     try {
         var appExists = false;
@@ -503,31 +521,37 @@ function saveFilesToFolderJSON(payloadJSON) {
         var createdAssetsFolder = false;
         for (var assetPath in assets) {
             if (Object.prototype.hasOwnProperty.call(assets, assetPath)) {
+                var safeAssetPath = sanitizeRelativeAssetPath(assetPath);
+                if (!safeAssetPath) {
+                    errors.push("Invalid asset path: " + sanitizeHostErrorText(assetPath));
+                    continue;
+                }
+                var assetName = safeAssetPath.substring("assets/".length);
                 var sourceFile = new File(assets[assetPath]);
                 if (sourceFile.exists) {
                     if (!createdAssetsFolder) {
                         assetsFolder.create();
                         createdAssetsFolder = true;
                     }
-                    var destFile = new File(folder.fsName + "/" + assetPath);
+                    var destFile = new File(assetsFolder.fsName + "/" + assetName);
                     if (sourceFile.copy(destFile)) {
-                        saved.push(assetPath);
+                        saved.push(safeAssetPath);
                     } else {
-                        errors.push("Failed to copy " + assetPath);
+                        errors.push("Failed to copy " + safeAssetPath);
                     }
                 } else {
-                    errors.push("Source asset missing: " + assets[assetPath]);
+                    errors.push(sanitizeHostErrorText("Source asset missing: " + assets[assetPath]));
                 }
             }
         }
 
         if (errors.length > 0) {
-            return JSON.stringify({ error: errors.join(", "), saved: saved });
+            return JSON.stringify({ error: sanitizeHostErrorText(errors.join(", ")), saved: saved });
         }
         return JSON.stringify({ success: true, folder: folder.fsName, saved: saved });
     } catch (e) {
         noteHostDiagnostic("saveFilesToFolderJSON exception", e);
-        return JSON.stringify({ error: String(e) });
+        return JSON.stringify({ error: sanitizeHostErrorText(String(e)) });
     }
 }
 
@@ -554,7 +578,7 @@ function writeGeneratedFileChunkJSON(payloadJSON) {
         if (!folderPath) { return safeJsonStringify({ error: "Missing destination folder" }); }
 
         var folder = new Folder(folderPath);
-        if (!folder.exists) { return safeJsonStringify({ error: "Destination folder does not exist: " + folderPath }); }
+        if (!folder.exists) { return safeJsonStringify({ error: sanitizeHostErrorText("Destination folder does not exist: " + folderPath) }); }
 
         var file = new File(folder.fsName + "/" + filename);
         file.encoding = "UTF-8";
@@ -565,7 +589,7 @@ function writeGeneratedFileChunkJSON(payloadJSON) {
         return safeJsonStringify({ success: true, filename: filename, bytes: content.length });
     } catch (e) {
         noteHostDiagnostic("writeGeneratedFileChunkJSON exception", e);
-        return safeJsonStringify({ error: String(e) });
+        return safeJsonStringify({ error: sanitizeHostErrorText(String(e)) });
     }
 }
 
@@ -580,7 +604,7 @@ function copyGeneratedAssetJSON(payloadJSON) {
         if (!sourcePath) { return safeJsonStringify({ error: "Missing source asset for " + assetPath }); }
 
         var folder = new Folder(folderPath);
-        if (!folder.exists) { return safeJsonStringify({ error: "Destination folder does not exist: " + folderPath }); }
+        if (!folder.exists) { return safeJsonStringify({ error: sanitizeHostErrorText("Destination folder does not exist: " + folderPath) }); }
         var assetsFolder = new Folder(folder.fsName + "/assets");
         if (!assetsFolder.exists) {
             assetsFolder.create();
@@ -588,13 +612,13 @@ function copyGeneratedAssetJSON(payloadJSON) {
 
         var assetName = sanitizeOutputFilename(assetPath.substring("assets/".length));
         var sourceFile = new File(sourcePath);
-        if (!sourceFile.exists) { return safeJsonStringify({ error: "Source asset missing: " + sourcePath }); }
+        if (!sourceFile.exists) { return safeJsonStringify({ error: sanitizeHostErrorText("Source asset missing: " + sourcePath) }); }
         var destFile = new File(assetsFolder.fsName + "/" + assetName);
         if (!sourceFile.copy(destFile)) { return safeJsonStringify({ error: "Failed to copy " + assetPath }); }
         return safeJsonStringify({ success: true, filename: "assets/" + assetName });
     } catch (e) {
         noteHostDiagnostic("copyGeneratedAssetJSON exception", e);
-        return safeJsonStringify({ error: String(e) });
+        return safeJsonStringify({ error: sanitizeHostErrorText(String(e)) });
     }
 }
 

@@ -4,6 +4,7 @@ Cargo.lock
 SPEC.md
 /dist/*.p12
 /dist/*.zxp
+/dist/*-installer.zip
 /dist/cert.p12
 /dist/release
 /dist/test_fresh.zxp
@@ -15,11 +16,9 @@ test-results/
 
 # Local export/comparison artifacts
 /artifacts/
-/.oracle-artifacts/
 /tmp_extract/
 /dist/win_installer_tmp/
-/[Zz]ach info.zip
-/egui_expressive_export 1.log
+/*.log
 
 # Preview exports copied in for local testing; keep tracked placeholders/docs.
 /preview/generated/*.json

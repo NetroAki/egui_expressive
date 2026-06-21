@@ -147,7 +147,7 @@
      CI-only flakes.
 
 6. **Strict-support backlog**
-   - Task index: `docs/plans/illustrator-full-parity-tasks.md` (covers B-1, B-3, B-4, B-5, B-6, B-12, B-13..B-20 with status + acceptance criteria).
+   - Task index: `the public release checklist` (covers B-1, B-3, B-4, B-5, B-6, B-12, B-13..B-20 with status + acceptance criteria).
    - Full font shaping/alternate glyph substitution via HarfBuzz/rustybuzz
      (current OpenType feature-flag preservation is bounded metrics + code-level
      fidelity; true glyph substitution needs a full shaper).

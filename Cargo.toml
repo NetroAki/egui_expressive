@@ -5,8 +5,24 @@ edition = "2021"
 description = "Expressive design system and authoring layer for beautiful egui UI without giving up immediate mode"
 license = "MIT"
 readme = "README.md"
+repository = "https://github.com/NetroAki/egui_expressive"
+homepage = "https://github.com/NetroAki/egui_expressive"
+documentation = "https://docs.rs/egui_expressive"
 keywords = ["egui", "gui", "ui", "widget", "canvas"]
 categories = ["gui"]
+exclude = [
+    "artifacts/**",
+    "target/**",
+    "dist/**",
+    "**/*.log",
+    "*.ai",
+    "*.png",
+    "*.zip",
+    "*.zxp",
+    "*.p12",
+    "illustrator-plugin/.debug",
+    "illustrator-plugin/installer/.rnd",
+]
 
 [features]
 default = ["debug"]
@@ -107,3 +123,7 @@ path = "examples/command_center_shell.rs"
 [[example]]
 name = "accessibility_platform_gallery"
 path = "examples/accessibility_platform_gallery.rs"
+
+[[example]]
+name = "effects_evaluator"
+path = "examples/effects_evaluator.rs"

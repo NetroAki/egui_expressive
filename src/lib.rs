@@ -145,8 +145,10 @@ pub use forms::{
 #[cfg(feature = "wgpu")]
 pub use gpu::{
     bind_app_owned_offscreen_backdrop_source_for_context, blend_mode_to_shader_id,
-    init_gpu_effects, init_gpu_effects_for_context, wgpu_source_layer_effect_report,
-    GpuCompositeCallback, GpuEffectSource, GpuEffectsResources, GpuSourceLayerEffectCallback,
+    host_framebuffer_backdrop_report, init_gpu_effects, init_gpu_effects_for_context,
+    wgpu_app_provided_backdrop_snapshot_report, wgpu_lifecycle_report,
+    wgpu_source_layer_effect_report, GpuCompositeCallback, GpuEffectSource, GpuEffectsResources,
+    GpuSourceLayerEffectCallback, WgpuLifecycleFailure,
 };
 pub use icons::chars as icon_constants;
 pub use icons::{Icon, IconButton, IconSize};
@@ -166,14 +168,26 @@ pub use platform::{
     AppOwnedOffscreenBackdropSource, SharedAppOwnedOffscreenBackdropSource,
 };
 pub use platform::{
-    install_backdrop_snapshot_provider, load_backdrop_snapshot_provider, BackdropCaptureError,
-    BackdropCaptureRequest, BackdropSnapshot, BackdropSnapshotProvider, ClipboardCommand,
-    DisplayScale, DroppedFileDescriptor, PlatformDropBatch, SharedBackdropSnapshotProvider,
-    SystemThemePreference, MAX_BACKDROP_SNAPSHOT_AXIS,
+    install_backdrop_capture_source_contract, install_backdrop_snapshot_provider,
+    install_backdrop_snapshot_provider_with_source_contract, load_backdrop_capture_source_contract,
+    load_backdrop_snapshot_provider, BackdropCaptureConsent, BackdropCaptureError,
+    BackdropCaptureFrameToken, BackdropCapturePixelFormat, BackdropCaptureProviderId,
+    BackdropCaptureRequest, BackdropCaptureSourceContract, BackdropCaptureSourceId,
+    BackdropCaptureSurfaceToken, BackdropFrameFreshness, BackdropOcclusionState, BackdropSnapshot,
+    BackdropSnapshotProvider, ClipboardCommand, DisplayScale, DroppedFileDescriptor,
+    PlatformDropBatch, SharedBackdropSnapshotProvider, SystemThemePreference,
+    MAX_BACKDROP_SNAPSHOT_AXIS,
+};
+pub use platform::{
+    planned_platform_support_matrix, required_lifecycle_check_names, PlatformFamily,
+    PlatformLifecycleCheck, PlatformPerformanceSample, PlatformSmokeResult,
+    PlatformSupportArtifact, PlatformSupportStatus,
 };
 #[cfg(feature = "native-backdrop")]
 pub use platform::{
-    NativeBackdropInitError, NativeBackdropPlatform, NATIVE_BACKDROP_FEATURE,
+    NativeBackdropContractDiagnostic, NativeBackdropInitError, NativeBackdropPermissionState,
+    NativeBackdropPlatform, NativeBackdropSmokeArtifact, NativeBackdropSourceScope,
+    NativeBackdropSupportFamily, NativeBackdropSupportState, NATIVE_BACKDROP_FEATURE,
     NATIVE_BACKDROP_MACOS_FEATURE, NATIVE_BACKDROP_WAYLAND_FEATURE,
     NATIVE_BACKDROP_WINDOWS_FEATURE, NATIVE_BACKDROP_X11_FEATURE,
 };
@@ -204,9 +218,11 @@ pub use tailwind::{
 };
 pub use theme::{border_rect, Border, Elevation, SemanticColors, Theme};
 pub use typography::{
-    render_shaped_glyph_run, render_text, render_text_block, OpenTypeFeatures, ShapedGlyph,
-    ShapedGlyphRun, TextBlock, TextBlockAlign, TextDecoration, TextOverflow, TextSpan,
-    TextTransform, TypeLabel, TypeScale, TypeSpec,
+    render_shaped_glyph_run, render_text, render_text_block, FontCoverageRange, FontFaceId,
+    FontFaceRecord, FontFamilyRecord, FontRegistry, FontSelectionIssue, FontSelectionIssueKind,
+    FontSelectionReport, FontStretch, FontStyleKind, OpenTypeFeatures, ShapedGlyph, ShapedGlyphRun,
+    TextBlock, TextBlockAlign, TextDecoration, TextOverflow, TextSpan, TextTransform, TypeLabel,
+    TypeScale, TypeSpec,
 };
 pub use vectorize::{
     vectorize_image_file_to_scene_nodes, vectorize_rgba_to_scene_nodes, RasterVectorizeConfig,

@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use crate::platform::{
     load_app_owned_offscreen_backdrop_source, AppOwnedBackdropAlphaMode, AppOwnedBackdropFrameId,
-    AppOwnedBackdropSurfaceId, SharedAppOwnedOffscreenBackdropSource,
+    AppOwnedBackdropSurfaceId, BackdropCaptureSourceContract,
+    SharedAppOwnedOffscreenBackdropSource,
 };
 use crate::render::{
     OffscreenRequest, RenderBackendKind, RenderCapabilities, RenderFeature, RenderIssue,
@@ -278,6 +279,65 @@ pub enum GpuEffectSource {
     HostFramebufferBackdrop,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WgpuLifecycleFailure {
+    MissingRuntime,
+    MissingContextBinding,
+    UnsupportedAdapter,
+    UnsupportedDevice,
+    DeviceLost,
+    PipelineCreationFailed,
+    ResourceAllocationFailed,
+    BudgetExceeded,
+}
+
+impl WgpuLifecycleFailure {
+    pub fn issue_kind(self) -> RenderIssueKind {
+        match self {
+            Self::MissingRuntime => RenderIssueKind::MissingWgpuRuntime,
+            Self::MissingContextBinding => RenderIssueKind::MissingContextBinding,
+            Self::UnsupportedAdapter => RenderIssueKind::UnsupportedWgpuAdapter,
+            Self::UnsupportedDevice => RenderIssueKind::UnsupportedWgpuDevice,
+            Self::DeviceLost => RenderIssueKind::WgpuDeviceLost,
+            Self::PipelineCreationFailed => RenderIssueKind::PipelineCreationFailed,
+            Self::ResourceAllocationFailed => RenderIssueKind::ResourceAllocationFailed,
+            Self::BudgetExceeded => RenderIssueKind::WgpuBudgetExceeded,
+        }
+    }
+
+    pub fn default_message(self) -> &'static str {
+        match self {
+            Self::MissingRuntime => "WGPU runtime or renderer resources are not available",
+            Self::MissingContextBinding => {
+                "WGPU production fidelity requires a renderer-bound egui context"
+            }
+            Self::UnsupportedAdapter => "the selected WGPU adapter cannot satisfy this request",
+            Self::UnsupportedDevice => "the selected WGPU device cannot satisfy this request",
+            Self::DeviceLost => "the WGPU device was lost before the request could be rendered",
+            Self::PipelineCreationFailed => "WGPU pipeline creation failed for this request",
+            Self::ResourceAllocationFailed => "WGPU resource allocation failed for this request",
+            Self::BudgetExceeded => "the WGPU request exceeds the approved resource budget",
+        }
+    }
+}
+
+pub fn wgpu_lifecycle_report(
+    feature: RenderFeature,
+    backend: RenderBackendKind,
+    failure: WgpuLifecycleFailure,
+    message: &'static str,
+) -> RenderReport {
+    let mut report = RenderReport::new(backend, RenderQuality::Exact);
+    report.add_issue(RenderIssue::new(
+        feature,
+        failure.issue_kind(),
+        RenderQuality::Exact,
+        RenderQuality::Unsupported,
+        message,
+    ));
+    report
+}
+
 pub fn wgpu_source_layer_effect_report(
     capabilities: &RenderCapabilities,
     request: OffscreenRequest,
@@ -307,15 +367,21 @@ pub fn wgpu_source_layer_effect_report(
         return report;
     }
 
-    let source_layer_backend = match (request.feature, source) {
-        (RenderFeature::BackdropBlur, GpuEffectSource::AppProvidedBackdropSnapshot) => {
-            capabilities.backend == RenderBackendKind::EguiWgpuCallback
-        }
-        _ => matches!(
-            capabilities.backend,
-            RenderBackendKind::EguiWgpuCallback | RenderBackendKind::WgpuOffscreen
-        ),
-    };
+    if source == GpuEffectSource::AppProvidedBackdropSnapshot {
+        report.add_issue(RenderIssue::new(
+            request.feature,
+            RenderIssueKind::UnsupportedFeature,
+            request.requested_quality,
+            RenderQuality::Unsupported,
+            "app-provided snapshot exactness requires a validated BackdropCaptureSourceContract; use wgpu_app_provided_backdrop_snapshot_report",
+        ));
+        return report;
+    }
+
+    let source_layer_backend = matches!(
+        capabilities.backend,
+        RenderBackendKind::EguiWgpuCallback | RenderBackendKind::WgpuOffscreen
+    );
     if !source_layer_backend {
         report.add_issue(RenderIssue::new(
             request.feature,
@@ -357,9 +423,6 @@ pub fn wgpu_source_layer_effect_report(
         (RenderFeature::Blur | RenderFeature::Shadow, GpuEffectSource::LibraryOwnedSourceLayer) => {
             capabilities.exact_large_blur
         }
-        (RenderFeature::BackdropBlur, GpuEffectSource::AppProvidedBackdropSnapshot) => {
-            capabilities.exact_large_blur
-        }
         _ => false,
     };
     if !supported {
@@ -373,6 +436,119 @@ pub fn wgpu_source_layer_effect_report(
     }
 
     report
+}
+
+pub fn wgpu_app_provided_backdrop_snapshot_report(
+    capabilities: &RenderCapabilities,
+    request: OffscreenRequest,
+    source_contract: BackdropCaptureSourceContract,
+) -> RenderReport {
+    let mut report = RenderReport::new(capabilities.backend, request.requested_quality);
+
+    if let Err(error) = source_contract.validate_for_exact_capture() {
+        let (kind, actual_quality) = match error {
+            crate::platform::BackdropCaptureError::SizeBudgetExceeded { .. } => (
+                RenderIssueKind::SizeBudgetExceeded,
+                RenderQuality::Unsupported,
+            ),
+            _ => (
+                RenderIssueKind::ApproximateFallback,
+                RenderQuality::Approximate,
+            ),
+        };
+        report.add_issue(RenderIssue::new(
+            request.feature,
+            kind,
+            request.requested_quality,
+            actual_quality,
+            stage3_source_contract_error_message(error),
+        ));
+        return report;
+    }
+
+    if request.feature != RenderFeature::BackdropBlur
+        || capabilities.backend != RenderBackendKind::EguiWgpuCallback
+    {
+        report.add_issue(RenderIssue::new(
+            request.feature,
+            RenderIssueKind::MissingBackend,
+            request.requested_quality,
+            RenderQuality::Unsupported,
+            "app-provided backdrop snapshots require the egui-wgpu callback backend",
+        ));
+        return report;
+    }
+
+    if request.width == 0
+        || request.height == 0
+        || request.width > MAX_SOURCE_LAYER_EFFECT_AXIS
+        || request.height > MAX_SOURCE_LAYER_EFFECT_AXIS
+        || request.width > source_contract.physical_size[0]
+        || request.height > source_contract.physical_size[1]
+    {
+        report.add_issue(RenderIssue::new(
+            request.feature,
+            RenderIssueKind::SizeBudgetExceeded,
+            request.requested_quality,
+            RenderQuality::Unsupported,
+            "app-provided backdrop source bounds do not cover the requested source-layer effect",
+        ));
+        return report;
+    }
+
+    if !request.fits(capabilities) {
+        report.add_issue(RenderIssue::new(
+            request.feature,
+            RenderIssueKind::SizeBudgetExceeded,
+            request.requested_quality,
+            RenderQuality::Unsupported,
+            "app-provided backdrop source-layer effect exceeds the WGPU offscreen pixel budget",
+        ));
+        return report;
+    }
+
+    if !capabilities.exact_large_blur {
+        report.add_issue(RenderIssue::new(
+            request.feature,
+            RenderIssueKind::UnsupportedFeature,
+            request.requested_quality,
+            RenderQuality::Unsupported,
+            "app-provided backdrop exactness requires source-layer blur capability",
+        ));
+    }
+
+    report
+}
+
+fn stage3_source_contract_error_message(
+    error: crate::platform::BackdropCaptureError,
+) -> &'static str {
+    match error {
+        crate::platform::BackdropCaptureError::StaleFrame => {
+            "app-provided backdrop source frame is stale; use bounded fallback"
+        }
+        crate::platform::BackdropCaptureError::OccludedSource => {
+            "app-provided backdrop source is not explicitly unoccluded; use bounded fallback"
+        }
+        crate::platform::BackdropCaptureError::InvalidScale => {
+            "app-provided backdrop source scale is invalid; use bounded fallback"
+        }
+        crate::platform::BackdropCaptureError::SizeBudgetExceeded { .. } => {
+            "app-provided backdrop source exceeds the approved source-layer budget"
+        }
+        _ => "app-provided backdrop source contract is invalid; use bounded fallback",
+    }
+}
+
+pub fn host_framebuffer_backdrop_report(
+    capabilities: &RenderCapabilities,
+    request: OffscreenRequest,
+) -> RenderReport {
+    wgpu_source_layer_effect_report(
+        capabilities,
+        request,
+        GpuEffectSource::HostFramebufferBackdrop,
+    )
 }
 
 pub(crate) fn bound_app_owned_offscreen_backdrop_effect_report(
@@ -437,26 +613,29 @@ pub fn bind_app_owned_offscreen_backdrop_source_for_context(
     surface_id: AppOwnedBackdropSurfaceId,
     frame_id: AppOwnedBackdropFrameId,
 ) -> RenderReport {
-    let failure = |ctx: &egui::Context, message: &'static str| {
+    let failure = |ctx: &egui::Context, kind: RenderIssueKind, message: &'static str| {
         clear_bound_app_owned_offscreen_backdrop_source(ctx);
-        app_owned_binding_fallback_report(message)
+        app_owned_binding_fallback_report(kind, message)
     };
 
     let Some(source) = load_app_owned_offscreen_backdrop_source(ctx) else {
         return failure(
             ctx,
+            RenderIssueKind::MissingContextBinding,
             "no app-owned offscreen backdrop source is installed; renderer-bound binding skipped",
         );
     };
     if source.surface_id != surface_id {
         return failure(
             ctx,
+            RenderIssueKind::MissingContextBinding,
             "app-owned backdrop source surface token does not match the binding request",
         );
     }
     if source.frame_id != frame_id {
         return failure(
             ctx,
+            RenderIssueKind::MissingContextBinding,
             "app-owned backdrop source frame token does not match the binding request",
         );
     }
@@ -466,24 +645,28 @@ pub fn bind_app_owned_offscreen_backdrop_source_for_context(
     {
         return failure(
             ctx,
+            RenderIssueKind::MissingContextBinding,
             "app-owned backdrop source scale does not match the egui context",
         );
     }
     if source.format != OFFSCREEN_TEXTURE_FORMAT {
         return failure(
             ctx,
+            RenderIssueKind::UnsupportedWgpuDevice,
             "app-owned backdrop source format is outside the B3 contract",
         );
     }
     if source.sample_count != 1 {
         return failure(
             ctx,
+            RenderIssueKind::UnsupportedWgpuDevice,
             "app-owned backdrop source must be single-sampled for B3",
         );
     }
     if source.alpha_mode != AppOwnedBackdropAlphaMode::Straight {
         return failure(
             ctx,
+            RenderIssueKind::UnsupportedFeature,
             "app-owned backdrop source alpha mode is outside the B3 contract",
         );
     }
@@ -494,12 +677,14 @@ pub fn bind_app_owned_offscreen_backdrop_source_for_context(
     {
         return failure(
             ctx,
+            RenderIssueKind::WgpuBudgetExceeded,
             "app-owned backdrop source extent is outside the B3 contract",
         );
     }
     if !gpu_effects_initialized_for_context(ctx) {
         return failure(
             ctx,
+            RenderIssueKind::MissingContextBinding,
             "exact app-owned offscreen backdrop blur requires init_gpu_effects_for_context(...) on this context",
         );
     }
@@ -508,6 +693,7 @@ pub fn bind_app_owned_offscreen_backdrop_source_for_context(
         let Some(resources) = renderer.callback_resources.get_mut::<GpuEffectsResources>() else {
             return failure(
                 ctx,
+                RenderIssueKind::MissingWgpuRuntime,
                 "GPU effect resources are not installed for renderer-bound app-owned backdrop binding",
             );
         };
@@ -524,6 +710,7 @@ pub fn bind_app_owned_offscreen_backdrop_source_for_context(
             Err(_) => {
                 return failure(
                     ctx,
+                    RenderIssueKind::ResourceAllocationFailed,
                     "renderer-bound app-owned backdrop source binding failed validation",
                 );
             }
@@ -588,11 +775,14 @@ fn clear_bound_app_owned_offscreen_backdrop_source(ctx: &egui::Context) {
     });
 }
 
-fn app_owned_binding_fallback_report(message: impl Into<String>) -> RenderReport {
+fn app_owned_binding_fallback_report(
+    kind: RenderIssueKind,
+    message: impl Into<String>,
+) -> RenderReport {
     let mut report = RenderReport::new(RenderBackendKind::EguiWgpuCallback, RenderQuality::Exact);
     report.add_issue(RenderIssue::new(
         RenderFeature::BackdropBlur,
-        RenderIssueKind::ApproximateFallback,
+        kind,
         RenderQuality::Exact,
         RenderQuality::Approximate,
         message,
@@ -2021,6 +2211,73 @@ mod tests {
     }
 
     #[test]
+    fn wgpu_lifecycle_report_maps_all_stage2_failures() {
+        let cases = [
+            (
+                WgpuLifecycleFailure::MissingRuntime,
+                RenderIssueKind::MissingWgpuRuntime,
+            ),
+            (
+                WgpuLifecycleFailure::MissingContextBinding,
+                RenderIssueKind::MissingContextBinding,
+            ),
+            (
+                WgpuLifecycleFailure::UnsupportedAdapter,
+                RenderIssueKind::UnsupportedWgpuAdapter,
+            ),
+            (
+                WgpuLifecycleFailure::UnsupportedDevice,
+                RenderIssueKind::UnsupportedWgpuDevice,
+            ),
+            (
+                WgpuLifecycleFailure::DeviceLost,
+                RenderIssueKind::WgpuDeviceLost,
+            ),
+            (
+                WgpuLifecycleFailure::PipelineCreationFailed,
+                RenderIssueKind::PipelineCreationFailed,
+            ),
+            (
+                WgpuLifecycleFailure::ResourceAllocationFailed,
+                RenderIssueKind::ResourceAllocationFailed,
+            ),
+            (
+                WgpuLifecycleFailure::BudgetExceeded,
+                RenderIssueKind::WgpuBudgetExceeded,
+            ),
+        ];
+
+        for (failure, expected_kind) in cases {
+            let report = wgpu_lifecycle_report(
+                RenderFeature::BackdropBlur,
+                RenderBackendKind::EguiWgpuCallback,
+                failure,
+                failure.default_message(),
+            );
+
+            assert_eq!(report.actual_quality, RenderQuality::Unsupported);
+            assert_eq!(report.issues[0].kind, expected_kind);
+            assert!(report.issues[0].kind.is_wgpu_lifecycle());
+            assert!(!report.issues[0].message.is_empty());
+        }
+    }
+
+    #[test]
+    fn app_owned_binding_fallback_reports_context_binding_failure() {
+        let report = app_owned_binding_fallback_report(
+            RenderIssueKind::MissingContextBinding,
+            "exact app-owned offscreen backdrop blur requires init_gpu_effects_for_context(...) on this context",
+        );
+
+        assert_eq!(report.actual_quality, RenderQuality::Approximate);
+        assert_eq!(
+            report.issues[0].kind,
+            RenderIssueKind::MissingContextBinding
+        );
+        assert!(report.issues[0].kind.is_wgpu_lifecycle());
+    }
+
+    #[test]
     fn source_layer_blur_report_is_exact_for_approved_wgpu_offscreen() {
         let capabilities = RenderCapabilities::wgpu_offscreen(4_096, true);
         let request = OffscreenRequest {
@@ -2107,12 +2364,34 @@ mod tests {
             requested_quality: RenderQuality::Exact,
         };
 
+        let report = wgpu_app_provided_backdrop_snapshot_report(
+            &capabilities,
+            request,
+            exact_backdrop_source_contract(),
+        );
+        assert!(report.is_exact());
+    }
+
+    #[test]
+    fn generic_app_provided_backdrop_snapshot_report_remains_non_exact_without_contract() {
+        let capabilities = RenderCapabilities::egui_wgpu_callback(4_096);
+        let request = OffscreenRequest {
+            feature: RenderFeature::BackdropBlur,
+            width: 64,
+            height: 64,
+            requested_quality: RenderQuality::Exact,
+        };
+
         let report = wgpu_source_layer_effect_report(
             &capabilities,
             request,
             GpuEffectSource::AppProvidedBackdropSnapshot,
         );
-        assert!(report.is_exact());
+        assert_eq!(report.actual_quality, RenderQuality::Unsupported);
+        assert_eq!(report.issues[0].kind, RenderIssueKind::UnsupportedFeature);
+        assert!(report.issues[0]
+            .message
+            .contains("BackdropCaptureSourceContract"));
     }
 
     #[test]
@@ -2125,10 +2404,10 @@ mod tests {
             requested_quality: RenderQuality::Exact,
         };
 
-        let report = wgpu_source_layer_effect_report(
+        let report = wgpu_app_provided_backdrop_snapshot_report(
             &capabilities,
             request,
-            GpuEffectSource::AppProvidedBackdropSnapshot,
+            exact_backdrop_source_contract(),
         );
         assert_eq!(report.actual_quality, RenderQuality::Unsupported);
         assert_eq!(report.issues[0].kind, RenderIssueKind::MissingBackend);
@@ -2145,13 +2424,28 @@ mod tests {
             requested_quality: RenderQuality::Exact,
         };
 
-        let report = wgpu_source_layer_effect_report(
+        let report = wgpu_app_provided_backdrop_snapshot_report(
             &capabilities,
             request,
-            GpuEffectSource::AppProvidedBackdropSnapshot,
+            exact_backdrop_source_contract(),
         );
         assert_eq!(report.actual_quality, RenderQuality::Unsupported);
         assert_eq!(report.issues[0].kind, RenderIssueKind::MissingBackend);
+    }
+
+    fn exact_backdrop_source_contract() -> crate::platform::BackdropCaptureSourceContract {
+        crate::platform::BackdropCaptureSourceContract {
+            source_id: crate::platform::BackdropCaptureSourceId(1),
+            provider_id: crate::platform::BackdropCaptureProviderId(2),
+            surface_token: crate::platform::BackdropCaptureSurfaceToken(3),
+            frame_token: crate::platform::BackdropCaptureFrameToken(4),
+            consent: crate::platform::BackdropCaptureConsent::AppOwnedSurface,
+            frame_freshness: crate::platform::BackdropFrameFreshness::CurrentFrame,
+            occlusion: crate::platform::BackdropOcclusionState::Unoccluded,
+            pixels_per_point: 1.0,
+            physical_size: [128, 128],
+            pixel_format: crate::platform::BackdropCapturePixelFormat::Rgba8SrgbStraightAlpha,
+        }
     }
 
     #[test]
@@ -2328,11 +2622,7 @@ mod tests {
             requested_quality: RenderQuality::Exact,
         };
 
-        let report = wgpu_source_layer_effect_report(
-            &capabilities,
-            request,
-            GpuEffectSource::HostFramebufferBackdrop,
-        );
+        let report = host_framebuffer_backdrop_report(&capabilities, request);
         assert_eq!(report.actual_quality, RenderQuality::Unsupported);
         assert_eq!(report.issues[0].kind, RenderIssueKind::UnsupportedFeature);
         assert!(report.issues[0].message.contains("host framebuffer"));
@@ -2370,7 +2660,7 @@ mod tests {
         let report = wgpu_source_layer_effect_report(
             &capabilities,
             request,
-            GpuEffectSource::AppProvidedBackdropSnapshot,
+            GpuEffectSource::LibraryOwnedSourceLayer,
         );
         assert_eq!(report.actual_quality, RenderQuality::Unsupported);
         assert_eq!(report.issues[0].kind, RenderIssueKind::SizeBudgetExceeded);
@@ -2386,10 +2676,12 @@ mod tests {
             height: 1,
             requested_quality: RenderQuality::Exact,
         };
-        let snapshot_report = wgpu_source_layer_effect_report(
+        let mut source_contract = exact_backdrop_source_contract();
+        source_contract.physical_size = [8_192, 8_192];
+        let snapshot_report = wgpu_app_provided_backdrop_snapshot_report(
             &capabilities,
             snapshot_request,
-            GpuEffectSource::AppProvidedBackdropSnapshot,
+            source_contract,
         );
         assert_eq!(snapshot_report.actual_quality, RenderQuality::Unsupported);
         assert_eq!(

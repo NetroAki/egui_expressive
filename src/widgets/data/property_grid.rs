@@ -123,7 +123,7 @@ impl<'a> PropertyGrid<'a> {
 
 impl<'a> egui::Widget for PropertyGrid<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let output = egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.vertical(|ui| {
             for category in self.model.categories() {
                 egui::CollapsingHeader::new(&category.name)
                     .default_open(true)
@@ -142,12 +142,8 @@ impl<'a> egui::Widget for PropertyGrid<'a> {
                         }
                     });
             }
-        });
-        ui.interact(
-            output.inner_rect,
-            ui.id().with("property_grid"),
-            egui::Sense::hover(),
-        )
+        })
+        .response
     }
 }
 

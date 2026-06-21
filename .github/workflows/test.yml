@@ -52,3 +52,52 @@ jobs:
           name: visual-diff-heatmaps
           path: test-results/visual-diff/*.png
           if-no-files-found: ignore
+
+  platform-contract:
+    name: Platform contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      CARGO_BUILD_JOBS: 1
+      CARGO_TARGET_DIR: target/platform-contract
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test platform support contracts
+        run: cargo test --lib platform
+
+      - name: Build cross-platform showcase
+        run: cargo build --example cross_platform_showcase
+
+  mobile-library-check:
+    name: Mobile library compile (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-ios-sim
+          - os: ubuntu-latest
+            target: aarch64-linux-android
+    env:
+      CARGO_BUILD_JOBS: 1
+      CARGO_TARGET_DIR: target/mobile-library-check
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Check library for mobile target
+        run: cargo check --lib --target ${{ matrix.target }}

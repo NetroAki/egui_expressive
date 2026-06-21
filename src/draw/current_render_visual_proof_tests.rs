@@ -206,7 +206,7 @@ fn shape_from_rle_spans(spec: &str, color: egui::Color32) -> egui::Shape {
     egui::Shape::Vec(shapes)
 }
 
-fn assert_matches_fixture_png(expected_rel: &str, actual: &RgbaImage) {
+fn assert_matches_fixture_png(case: &str, expected_rel: &str, actual: &RgbaImage) {
     let expected_path = repo_path(expected_rel);
     let expected = image::open(&expected_path)
         .unwrap_or_else(|err| panic!("failed to open {expected_path:?}: {err}"))
@@ -216,7 +216,7 @@ fn assert_matches_fixture_png(expected_rel: &str, actual: &RgbaImage) {
         let output_dir = proof_output_dir();
         std::fs::create_dir_all(&output_dir).expect("create current render proof output dir");
         actual
-            .save(output_dir.join("compositing-blend-boundary-headless-mismatch.png"))
+            .save(output_dir.join(format!("{case}-headless-mismatch.png")))
             .expect("write headless provenance mismatch actual");
     }
     assert_eq!(expected.as_raw(), actual.as_raw(), "{expected_rel}");
@@ -493,6 +493,82 @@ fn render_compositing_blend_boundary() -> RgbaImage {
     image
 }
 
+const M3_TOP_APP_BAR_SIZE: [u32; 2] = [96, 64];
+const M3_TOP_APP_BAR_BACKGROUND: [u8; 4] = [236, 230, 240, 255];
+const M3_TOP_APP_BAR_TITLE: [u8; 4] = [29, 27, 32, 255];
+const M3_TOP_APP_BAR_ICON: [u8; 4] = [73, 69, 79, 255];
+const M3_TOP_APP_BAR_BACKGROUND_COUNT: usize = 5_566;
+const M3_TOP_APP_BAR_TITLE_COUNT: usize = 350;
+const M3_TOP_APP_BAR_ICON_COUNT: usize = 228;
+const M3_TOP_APP_BAR_DECODED_RGBA_SHA256: &str =
+    "9ce0327dc1e714db79d0a00dbecdf484a5bbeb193b44a17a1ac46470540ba1b9";
+const M3_TOP_APP_BAR_ICON_RLE: &str = "24:76-81;25:75-82;26:74-83;27:73-84;\
+28:8-19,72-85;29:8-19,72-85;30:8-19,72-85;31:8-19,72-85;32:8-19,72-85;\
+33:8-19,73-84;34:8-19,74-83;35:8-19,75-82;36:8-19,76-81";
+
+fn count_color(image: &RgbaImage, color: [u8; 4]) -> usize {
+    image.pixels().filter(|pixel| pixel.0 == color).count()
+}
+
+fn assert_m3_top_app_bar_pixel_contract(image: &RgbaImage) {
+    assert_eq!(image.dimensions(), (96, 64));
+    assert_eq!(
+        count_color(image, M3_TOP_APP_BAR_BACKGROUND),
+        M3_TOP_APP_BAR_BACKGROUND_COUNT
+    );
+    assert_eq!(
+        count_color(image, M3_TOP_APP_BAR_TITLE),
+        M3_TOP_APP_BAR_TITLE_COUNT
+    );
+    assert_eq!(
+        count_color(image, M3_TOP_APP_BAR_ICON),
+        M3_TOP_APP_BAR_ICON_COUNT
+    );
+    assert_eq!(
+        image.as_raw().len(),
+        (M3_TOP_APP_BAR_SIZE[0] * M3_TOP_APP_BAR_SIZE[1] * 4) as usize,
+        "decoded RGBA byte length for {M3_TOP_APP_BAR_DECODED_RGBA_SHA256}"
+    );
+}
+
+fn render_m3_top_app_bar_states() -> RgbaImage {
+    let background = rect_shape(
+        egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(M3_TOP_APP_BAR_SIZE[0] as f32, M3_TOP_APP_BAR_SIZE[1] as f32),
+        ),
+        egui::Color32::from_rgb(
+            M3_TOP_APP_BAR_BACKGROUND[0],
+            M3_TOP_APP_BAR_BACKGROUND[1],
+            M3_TOP_APP_BAR_BACKGROUND[2],
+        ),
+    );
+    let title = rect_shape(
+        egui::Rect::from_min_max(egui::pos2(28.0, 27.0), egui::pos2(63.0, 37.0)),
+        egui::Color32::from_rgb(
+            M3_TOP_APP_BAR_TITLE[0],
+            M3_TOP_APP_BAR_TITLE[1],
+            M3_TOP_APP_BAR_TITLE[2],
+        ),
+    );
+    let icon = shape_from_rle_spans(
+        M3_TOP_APP_BAR_ICON_RLE,
+        egui::Color32::from_rgb(
+            M3_TOP_APP_BAR_ICON[0],
+            M3_TOP_APP_BAR_ICON[1],
+            M3_TOP_APP_BAR_ICON[2],
+        ),
+    );
+    rasterize_layers_to_image(
+        M3_TOP_APP_BAR_SIZE,
+        &[
+            BlendLayer::new(vec![background]),
+            BlendLayer::new(vec![title]),
+            BlendLayer::new(vec![icon]),
+        ],
+    )
+}
+
 fn render_phase7_supported_compound_hole_fill() -> RgbaImage {
     let size = [96, 64];
     let (outer, inner) = phase7_compound_hole_contours();
@@ -704,16 +780,39 @@ fn current_render_vector_clip_nested_matches_reference() {
 fn current_render_compositing_blend_boundary_matches_reference() {
     let actual = render_compositing_blend_boundary();
     assert_matches_fixture_png(
+        "compositing-blend-boundary",
         "tests/visual_diff/fixtures/headless/compositing-blend-boundary-expected.png",
         &actual,
     );
     assert_matches_fixture_png(
+        "compositing-blend-boundary",
         "tests/visual_diff/fixtures/headless/compositing-blend-boundary-actual.png",
         &actual,
     );
     assert_exact_current_render(
         "compositing-blend-boundary",
         "tests/visual_diff/fixtures/current-render/compositing-blend-boundary.png",
+        actual,
+    );
+}
+
+#[test]
+fn current_render_m3_top_app_bar_states_matches_reference() {
+    let actual = render_m3_top_app_bar_states();
+    assert_m3_top_app_bar_pixel_contract(&actual);
+    assert_matches_fixture_png(
+        "m3-top-app-bar-states",
+        "tests/visual_diff/fixtures/headless/m3-top-app-bar-states-expected.png",
+        &actual,
+    );
+    assert_matches_fixture_png(
+        "m3-top-app-bar-states",
+        "tests/visual_diff/fixtures/headless/m3-top-app-bar-states-actual.png",
+        &actual,
+    );
+    assert_exact_current_render(
+        "m3-top-app-bar-states",
+        "tests/visual_diff/fixtures/current-render/m3-top-app-bar-states.png",
         actual,
     );
 }

@@ -4,6 +4,7 @@ REM
 REM Usage:
 REM   install_zxp.bat                          Install from default dist/ location
 REM   install_zxp.bat C:\path\to\plugin.zxp   Install specific .zxp file
+REM   set EGUI_EXPRESSIVE_ENABLE_CEP_DEBUG=1   Opt in to CEP debug-mode registry writes for self-signed/internal installs only
 
 setlocal enabledelayedexpansion
 
@@ -64,7 +65,9 @@ if defined UPIA_PATH (
     )
     
     echo [INFO] Extracting to: !EXT_DIR!
-    powershell -Command "Expand-Archive -Path '%ZXP_FILE%' -DestinationPath '!EXT_DIR!' -Force"
+    set "EGUI_EXPRESSIVE_ZXP_FILE=%ZXP_FILE%"
+    set "EGUI_EXPRESSIVE_EXT_DIR=!EXT_DIR!"
+    powershell -NoProfile -Command "Expand-Archive -LiteralPath $env:EGUI_EXPRESSIVE_ZXP_FILE -DestinationPath $env:EGUI_EXPRESSIVE_EXT_DIR -Force"
     if errorlevel 1 (
         echo [ERROR] Failed to extract .zxp file.
         exit /b 1
@@ -74,20 +77,36 @@ if defined UPIA_PATH (
     echo [INFO] Restart Illustrator to load the extension.
 )
 
-REM Enable CEP debug mode for self-signed extensions (no admin required)
-echo [INFO] Enabling CEP debug mode for self-signed extensions...
-reg add "HKCU\SOFTWARE\Adobe\CSXS.9" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.10" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.11" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.12" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.13" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.14" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.15" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.16" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.17" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.18" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.19" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-reg add "HKCU\SOFTWARE\Adobe\CSXS.20" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
-echo [INFO] CEP debug mode enabled (CSXS.9-20). Restart Illustrator for changes to take effect.
+if "%EGUI_EXPRESSIVE_ENABLE_CEP_DEBUG%"=="1" goto enable_debug_modes
+echo [INFO] CEP debug mode was not changed.
+echo [INFO] Set EGUI_EXPRESSIVE_ENABLE_CEP_DEBUG=1 before running this helper only when a self-signed/internal CEP install requires it.
+goto debug_modes_done
 
+:enable_debug_modes
+echo [WARN] Enabling CEP debug mode because EGUI_EXPRESSIVE_ENABLE_CEP_DEBUG=1.
+echo [WARN] Use this only for explicitly approved self-signed/internal installs.
+call :enable_debug 9
+call :enable_debug 10
+call :enable_debug 11
+call :enable_debug 12
+call :enable_debug 13
+call :enable_debug 14
+call :enable_debug 15
+call :enable_debug 16
+call :enable_debug 17
+call :enable_debug 18
+call :enable_debug 19
+call :enable_debug 20
+
+:debug_modes_done
 endlocal
+exit /b 0
+
+:enable_debug
+reg add "HKCU\SOFTWARE\Adobe\CSXS.%~1" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    echo [INFO]   CSXS.%~1 debug mode enabled.
+) else (
+    echo [WARN]   CSXS.%~1 registry write failed.
+)
+goto :eof

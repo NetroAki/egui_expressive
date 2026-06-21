@@ -79,6 +79,24 @@ pub(crate) struct SceneBlurEffectContract {
     pub(crate) gpu_resources_ready: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum SceneEffectSourceKind {
+    SolidRect,
+    ShapedSource,
+    Group,
+    MeshPatch,
+    OpenPath,
+    UnsupportedShape,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SceneEffectReportContract {
+    pub(crate) source: SceneEffectSourceKind,
+    pub(crate) normal_blend: bool,
+    pub(crate) gpu_resources_ready: bool,
+}
+
 impl SceneBlurEffectContract {
     #[allow(dead_code)]
     pub(crate) fn exact_solid_rect_source() -> Self {
@@ -99,6 +117,193 @@ impl SceneBlurEffectContract {
             gpu_resources_ready: true,
         }
     }
+}
+
+impl SceneEffectReportContract {
+    #[allow(dead_code)]
+    pub(crate) fn exact_solid_rect_source() -> Self {
+        Self {
+            source: SceneEffectSourceKind::SolidRect,
+            normal_blend: true,
+            gpu_resources_ready: true,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn exact_shaped_source() -> Self {
+        Self {
+            source: SceneEffectSourceKind::ShapedSource,
+            normal_blend: true,
+            gpu_resources_ready: true,
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn scene_effect_report(
+    effect_type: EffectType,
+    requested_radius: f32,
+    requested_spread: f32,
+    capabilities: &crate::render::RenderCapabilities,
+    request: crate::render::OffscreenRequest,
+    contract: SceneEffectReportContract,
+) -> crate::render::RenderReport {
+    use crate::render::{
+        RenderBackendKind, RenderFeature, RenderIssue, RenderIssueKind, RenderQuality, RenderReport,
+    };
+
+    let mut report = RenderReport::new(capabilities.backend, request.requested_quality);
+
+    if !contract.normal_blend {
+        report.add_issue(RenderIssue::new(
+            RenderFeature::SceneEffect,
+            RenderIssueKind::UnsupportedBlendMode,
+            request.requested_quality,
+            RenderQuality::Approximate,
+            "exact Stage 4 scene effects require normal blend; non-normal blend remains an explicit bounded fallback",
+        ));
+        return report;
+    }
+
+    if !contract.gpu_resources_ready {
+        report.add_issue(RenderIssue::new(
+            RenderFeature::SceneEffect,
+            RenderIssueKind::MissingWgpuRuntime,
+            request.requested_quality,
+            RenderQuality::Approximate,
+            "exact Stage 4 scene effects require initialized WGPU effect resources",
+        ));
+        return report;
+    }
+
+    if request.width == 0 || request.height == 0 || request.width > 4_096 || request.height > 4_096
+    {
+        report.add_issue(RenderIssue::new(
+            RenderFeature::SceneEffect,
+            RenderIssueKind::SizeBudgetExceeded,
+            request.requested_quality,
+            RenderQuality::Unsupported,
+            "Stage 4 scene effect exceeds the per-axis 4096 pixel source-layer budget",
+        ));
+        return report;
+    }
+
+    if !request.fits(capabilities) {
+        report.add_issue(RenderIssue::new(
+            RenderFeature::SceneEffect,
+            RenderIssueKind::SizeBudgetExceeded,
+            request.requested_quality,
+            RenderQuality::Unsupported,
+            "Stage 4 scene effect exceeds the offscreen pixel budget",
+        ));
+        return report;
+    }
+
+    match contract.source {
+        SceneEffectSourceKind::SolidRect | SceneEffectSourceKind::ShapedSource => {}
+        SceneEffectSourceKind::Group
+        | SceneEffectSourceKind::MeshPatch
+        | SceneEffectSourceKind::OpenPath
+        | SceneEffectSourceKind::UnsupportedShape => {
+            report.add_issue(RenderIssue::new(
+                RenderFeature::SceneEffect,
+                RenderIssueKind::UnsupportedSceneSource,
+                request.requested_quality,
+                RenderQuality::Approximate,
+                "Stage 4 does not silently promote group, mesh, open-path, or unsupported scene sources to exact WGPU effects",
+            ));
+            return report;
+        }
+    }
+
+    match effect_type {
+        EffectType::GaussianBlur | EffectType::Feather => {}
+        EffectType::DropShadow | EffectType::OuterGlow => {
+            if requested_radius < 1.0 {
+                report.add_issue(RenderIssue::new(
+                    RenderFeature::SceneEffect,
+                    RenderIssueKind::ApproximateFallback,
+                    request.requested_quality,
+                    RenderQuality::Approximate,
+                    "exact Stage 4 shadow/glow requires radius >= 1.0",
+                ));
+                return report;
+            }
+            if requested_spread != 0.0 && contract.source != SceneEffectSourceKind::SolidRect {
+                report.add_issue(RenderIssue::new(
+                    RenderFeature::SceneEffect,
+                    RenderIssueKind::UnsupportedSceneSource,
+                    request.requested_quality,
+                    RenderQuality::Approximate,
+                    "exact shaped DropShadow/OuterGlow does not support nonzero spread in Stage 4",
+                ));
+                return report;
+            }
+        }
+        EffectType::InnerShadow
+        | EffectType::InnerGlow
+        | EffectType::Bevel
+        | EffectType::Noise
+        | EffectType::LiveEffect
+        | EffectType::Unknown(_) => {
+            report.add_issue(RenderIssue::new(
+                RenderFeature::SceneEffect,
+                RenderIssueKind::UnsupportedSceneEffect,
+                request.requested_quality,
+                RenderQuality::Approximate,
+                "Stage 4 records this scene effect as an explicit non-exact fallback until a dedicated WGPU contract exists",
+            ));
+            return report;
+        }
+    }
+
+    if !matches!(
+        capabilities.backend,
+        RenderBackendKind::EguiWgpuCallback | RenderBackendKind::WgpuOffscreen
+    ) || !capabilities.exact_large_blur
+    {
+        report.add_issue(RenderIssue::new(
+            RenderFeature::SceneEffect,
+            RenderIssueKind::ApproximateFallback,
+            request.requested_quality,
+            RenderQuality::Approximate,
+            "non-WGPU Stage 4 scene effect uses documented egui approximation",
+        ));
+    }
+
+    report
+}
+
+#[allow(dead_code)]
+pub(crate) fn scene_mesh_gradient_report(
+    capabilities: &crate::render::RenderCapabilities,
+    request: crate::render::OffscreenRequest,
+    subdivisions: usize,
+) -> crate::render::RenderReport {
+    use crate::render::{RenderFeature, RenderIssue, RenderIssueKind, RenderQuality, RenderReport};
+
+    let mut report = RenderReport::new(capabilities.backend, request.requested_quality);
+    if subdivisions == 0 || subdivisions > 64 {
+        report.add_issue(RenderIssue::new(
+            RenderFeature::GradientMesh,
+            RenderIssueKind::GradientMeshUnsupported,
+            request.requested_quality,
+            RenderQuality::Unsupported,
+            "Stage 4 gradient mesh subdivisions must stay within the documented 1..=64 range",
+        ));
+        return report;
+    }
+    if request.width == 0 || request.height == 0 || !request.fits(capabilities) {
+        report.add_issue(RenderIssue::new(
+            RenderFeature::GradientMesh,
+            RenderIssueKind::SizeBudgetExceeded,
+            request.requested_quality,
+            RenderQuality::Unsupported,
+            "Stage 4 gradient mesh exceeds the offscreen render budget",
+        ));
+        return report;
+    }
+    report
 }
 
 #[allow(dead_code)]

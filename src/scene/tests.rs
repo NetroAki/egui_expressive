@@ -228,6 +228,149 @@ fn wgpu_scene_shaped_shadow_report_is_exact_for_approved_contract_only() {
     );
 }
 
+#[test]
+fn stage4_scene_effect_report_classifies_exact_and_non_exact_sources() {
+    let capabilities = crate::render::RenderCapabilities::egui_wgpu_callback(4_096 * 4_096);
+    let request = crate::render::OffscreenRequest {
+        feature: crate::render::RenderFeature::SceneEffect,
+        width: 128,
+        height: 96,
+        requested_quality: crate::render::RenderQuality::Exact,
+    };
+
+    let exact = scene_effect_report(
+        EffectType::GaussianBlur,
+        8.0,
+        0.0,
+        &capabilities,
+        request,
+        SceneEffectReportContract::exact_shaped_source(),
+    );
+    assert!(exact.is_exact());
+
+    for source in [
+        SceneEffectSourceKind::Group,
+        SceneEffectSourceKind::MeshPatch,
+        SceneEffectSourceKind::OpenPath,
+        SceneEffectSourceKind::UnsupportedShape,
+    ] {
+        let report = scene_effect_report(
+            EffectType::GaussianBlur,
+            8.0,
+            0.0,
+            &capabilities,
+            request,
+            SceneEffectReportContract {
+                source,
+                normal_blend: true,
+                gpu_resources_ready: true,
+            },
+        );
+        assert_eq!(
+            report.issues[0].kind,
+            crate::render::RenderIssueKind::UnsupportedSceneSource
+        );
+        assert!(!report.is_exact());
+    }
+}
+
+#[test]
+fn stage4_scene_effect_report_classifies_blend_budget_and_effect_gaps() {
+    let capabilities = crate::render::RenderCapabilities::egui_wgpu_callback(4_096 * 4_096);
+    let request = crate::render::OffscreenRequest {
+        feature: crate::render::RenderFeature::SceneEffect,
+        width: 64,
+        height: 64,
+        requested_quality: crate::render::RenderQuality::Exact,
+    };
+
+    let non_normal = scene_effect_report(
+        EffectType::GaussianBlur,
+        8.0,
+        0.0,
+        &capabilities,
+        request,
+        SceneEffectReportContract {
+            source: SceneEffectSourceKind::SolidRect,
+            normal_blend: false,
+            gpu_resources_ready: true,
+        },
+    );
+    assert_eq!(
+        non_normal.issues[0].kind,
+        crate::render::RenderIssueKind::UnsupportedBlendMode
+    );
+
+    let oversized = scene_effect_report(
+        EffectType::GaussianBlur,
+        8.0,
+        0.0,
+        &capabilities,
+        crate::render::OffscreenRequest {
+            width: 4_097,
+            ..request
+        },
+        SceneEffectReportContract::exact_solid_rect_source(),
+    );
+    assert_eq!(
+        oversized.issues[0].kind,
+        crate::render::RenderIssueKind::SizeBudgetExceeded
+    );
+
+    for effect_type in [
+        EffectType::InnerShadow,
+        EffectType::InnerGlow,
+        EffectType::Bevel,
+        EffectType::Noise,
+        EffectType::LiveEffect,
+        EffectType::Unknown("vendor-effect".to_owned()),
+    ] {
+        let report = scene_effect_report(
+            effect_type,
+            8.0,
+            0.0,
+            &capabilities,
+            request,
+            SceneEffectReportContract::exact_solid_rect_source(),
+        );
+        assert_eq!(
+            report.issues[0].kind,
+            crate::render::RenderIssueKind::UnsupportedSceneEffect
+        );
+        assert!(!report.is_exact());
+    }
+}
+
+#[test]
+fn stage4_gradient_mesh_report_is_exact_within_contract() {
+    let capabilities = crate::render::RenderCapabilities::egui_wgpu_callback(4_096 * 4_096);
+    let request = crate::render::OffscreenRequest {
+        feature: crate::render::RenderFeature::GradientMesh,
+        width: 256,
+        height: 256,
+        requested_quality: crate::render::RenderQuality::Exact,
+    };
+
+    let exact = scene_mesh_gradient_report(&capabilities, request, 16);
+    assert!(exact.is_exact());
+
+    let invalid_subdivisions = scene_mesh_gradient_report(&capabilities, request, 0);
+    assert_eq!(
+        invalid_subdivisions.issues[0].kind,
+        crate::render::RenderIssueKind::GradientMeshUnsupported
+    );
+
+    let oversized = scene_mesh_gradient_report(
+        &crate::render::RenderCapabilities::egui_wgpu_callback(128 * 128),
+        request,
+        16,
+    );
+    assert_eq!(
+        oversized.issues[0].kind,
+        crate::render::RenderIssueKind::SizeBudgetExceeded
+    );
+}
+
 #[cfg(feature = "wgpu")]
 #[test]
 fn phase9a_scene_blur_uses_source_layer_callback_when_eligible() {

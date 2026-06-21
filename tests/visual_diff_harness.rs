@@ -3,6 +3,7 @@ use image::{Rgba, RgbaImage};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 const REAL_FIXTURE_MANIFEST: &str = "tests/visual_diff/fixtures/manifest.tsv";
 
@@ -30,6 +31,19 @@ fn save_fixture(dir: &Path, name: &str, pixels: &[Rgba<u8>]) -> PathBuf {
 
 fn repo_path(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
+}
+
+static REAL_FIXTURE_MANIFEST_TEXT: OnceLock<String> = OnceLock::new();
+
+fn real_fixture_manifest() -> &'static str {
+    REAL_FIXTURE_MANIFEST_TEXT.get_or_init(|| {
+        fs::read_to_string(repo_path(REAL_FIXTURE_MANIFEST))
+            .expect("visual fixture manifest exists")
+    })
+}
+
+fn real_fixture_manifest_lines() -> Vec<&'static str> {
+    real_fixture_manifest().lines().collect()
 }
 
 fn parse_bool(value: &str) -> bool {
@@ -232,8 +246,7 @@ fn visual_parity_corpus_smoke_test() {
 fn real_visual_fixture_manifest_is_wired() {
     let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
     let fixture_root = manifest_path.parent().expect("fixture manifest parent");
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
     let output_dir = repo_path("test-results/visual-diff");
     fs::create_dir_all(&output_dir).expect("visual diff output dir");
 
@@ -328,9 +341,7 @@ fn real_visual_fixture_manifest_is_wired() {
 
 #[test]
 fn visual_fixture_manifest_covers_stage7_and_release_targets() {
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let cases = manifest
+    let cases = real_fixture_manifest()
         .lines()
         .filter_map(|raw_line| {
             let line = raw_line.trim();
@@ -400,9 +411,7 @@ fn visual_fixture_manifest_covers_stage7_and_release_targets() {
 
 #[test]
 fn visual_fixture_manifest_tolerances_are_governed() {
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
 
     for (line_idx, raw_line) in manifest_lines.iter().enumerate() {
         let line = raw_line.trim();
@@ -429,9 +438,7 @@ fn visual_fixture_manifest_tolerances_are_governed() {
 
 #[test]
 fn required_visual_fixture_manifest_cases_have_metadata() {
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
 
     for (line_idx, raw_line) in manifest_lines.iter().enumerate() {
         let line = raw_line.trim();
@@ -457,9 +464,7 @@ fn required_visual_fixture_manifest_cases_have_metadata() {
 
 #[test]
 fn required_visual_fixture_manifest_cases_have_score_class() {
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
 
     for (line_idx, raw_line) in manifest_lines.iter().enumerate() {
         let line = raw_line.trim();
@@ -483,9 +488,7 @@ fn required_visual_fixture_manifest_cases_have_score_class() {
 
 #[test]
 fn exact_visual_fixture_rows_use_strict_zero_tolerance() {
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
 
     for (line_idx, raw_line) in manifest_lines.iter().enumerate() {
         let line = raw_line.trim();
@@ -523,9 +526,7 @@ fn exact_visual_fixture_rows_use_strict_zero_tolerance() {
 
 #[test]
 fn broad_tolerance_visual_fixture_rows_are_not_exact() {
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
 
     for (line_idx, raw_line) in manifest_lines.iter().enumerate() {
         let line = raw_line.trim();
@@ -565,9 +566,7 @@ fn placeholder_gradient_mesh_quad_stays_non_exact() {
         .to_rgba8();
     assert_eq!([image.width(), image.height()], [2, 2]);
 
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
     let (line_idx, _) = manifest_lines
         .iter()
         .enumerate()
@@ -738,9 +737,7 @@ fn phase8_fixtures_and_crop_slices_are_committed() {
         }
     }
 
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
     for (case, expected_crop) in [
         (
             "ui-assets-page1-el3-fill",
@@ -791,9 +788,7 @@ fn phase9a_effect_blur_fixtures_are_committed() {
         }
     }
 
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
     for case in ["scene-supported-gaussian-blur", "scene-supported-feather"] {
         let (line_idx, _) = manifest_lines
             .iter()
@@ -821,9 +816,7 @@ fn phase9b_effect_shadow_fixtures_are_committed() {
         }
     }
 
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
     for case in ["scene-supported-drop-shadow", "scene-supported-outer-glow"] {
         let (line_idx, _) = manifest_lines
             .iter()
@@ -884,9 +877,7 @@ fn r100_001a_backdrop_snapshot_fixtures_are_committed() {
         "{case} expected and actual exact fixtures must match"
     );
 
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
     let (line_idx, row) = manifest_lines
         .iter()
         .enumerate()
@@ -973,9 +964,7 @@ fn r100_002_tailwind_exact_effect_fixtures_are_committed() {
         "{backdrop_case} expected and actual exact fixtures must match"
     );
 
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
     for case in [drop_case, backdrop_case] {
         let (line_idx, row) = manifest_lines
             .iter()
@@ -994,9 +983,7 @@ fn r100_002_tailwind_exact_effect_fixtures_are_committed() {
 
 #[test]
 fn r100_003a_shaped_scene_effect_fixtures_are_committed() {
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
 
     for case in [
         "scene-supported-rounded-rect-blur",
@@ -1040,9 +1027,7 @@ fn r100_003a_shaped_scene_effect_fixtures_are_committed() {
 
 #[test]
 fn r100_001a_tailwind_backdrop_fixture_stays_bounded() {
-    let manifest_path = repo_path(REAL_FIXTURE_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).expect("visual fixture manifest exists");
-    let manifest_lines = manifest.lines().collect::<Vec<_>>();
+    let manifest_lines = real_fixture_manifest_lines();
     let case = "tailwind-backdrop-layered";
     let (line_idx, _) = manifest_lines
         .iter()

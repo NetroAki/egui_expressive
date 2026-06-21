@@ -5,11 +5,16 @@
 # Prerequisites:
 #   - ZXPSignCmd (download from https://github.com/Adobe-CEP/CEP-Resources)
 #     Place it somewhere in $PATH or set ZXPSIGNCMD env var.
-#   - Or: npm install -g zxp-sign-cmd  (Node.js wrapper)
+#   - Or: install a zxp-sign-cmd-compatible wrapper that exposes an executable
+#     on PATH or set ZXPSIGNCMD to the executable path.
 #
 # Usage:
 #   ./build_zxp.sh                    # Build with self-signed cert
 #   ./build_zxp.sh /path/to/cert.p12  # Build with existing cert
+#
+# Unsigned packages are fail-closed by default. Set
+# EGUI_EXPRESSIVE_ALLOW_UNSIGNED_ZXP=1 only for explicitly approved internal
+# smoke diagnostics when ZXPSignCmd is unavailable.
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -27,7 +32,7 @@ case "$(uname -s)" in
 esac
 
 EXTENSION_ID="com.egui-expressive.illustrator-exporter"
-VERSION="1.0.0"
+VERSION="0.1.0"
 ZXP_NAME="egui_expressive_export-${VERSION}-${PLATFORM}.zxp"
 
 prune_stale_packages() {
@@ -161,9 +166,11 @@ find_signer() {
         done
     fi
 
-    # Check for npm wrapper
-    if command -v npx &>/dev/null; then
-        echo "npx zxp-sign-cmd"
+    # A plain npx install is not a trustworthy signer probe: some npm packages
+    # resolve without exposing an executable, which would make signing fail after
+    # staging. Require a concrete command or explicit ZXPSIGNCMD instead.
+    if command -v zxp-sign-cmd &>/dev/null; then
+        echo "zxp-sign-cmd"
         return
     fi
 
@@ -201,6 +208,23 @@ prepare_staging() {
     echo "$stage"
 }
 
+compute_sha256() {
+    local file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{print $1}'
+        return
+    fi
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print $1}'
+        return
+    fi
+    if command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 -r "$file" | awk '{print $1}'
+        return
+    fi
+    error "No SHA-256 tool found; cannot create ai-parser integrity manifest."
+}
+
 stage_ai_parser() {
     local stage="$1"
     local platform="$PLATFORM"
@@ -218,7 +242,20 @@ stage_ai_parser() {
     mkdir -p "$stage/bin/$platform"
     cp "$built" "$stage/bin/$platform/$binary"
     chmod +x "$stage/bin/$platform/$binary" 2>/dev/null || true
-    info "Bundled ai-parser: bin/$platform/$binary" >&2
+
+    local relative="bin/$platform/$binary"
+    local hash
+    hash="$(compute_sha256 "$stage/$relative")"
+    cat > "$stage/ai-parser-integrity.json" <<EOF
+{
+  "binaries": {
+    "$relative": "$hash"
+  }
+}
+EOF
+
+    info "Bundled ai-parser: $relative" >&2
+    info "Wrote ai-parser integrity manifest" >&2
 }
 
 # ─── Run signer command (handles wine: prefix) ───────────────────────────────
@@ -242,8 +279,6 @@ run_signer() {
         set -e
         printf '%s\n' "$output" | grep -v "^0.*fixme:" | grep -v "^$" || true
         return "$status"
-    elif [[ "$signer" == "npx zxp-sign-cmd" ]]; then
-        npx zxp-sign-cmd "$@"
     else
         "$signer" "$@"
     fi
@@ -344,9 +379,14 @@ main() {
     signer=$(find_signer)
 
     if [ "$signer" = "UNSIGNED" ]; then
-        warn "ZXPSignCmd not found — creating unsigned package."
+        if [ "${EGUI_EXPRESSIVE_ALLOW_UNSIGNED_ZXP:-}" != "1" ]; then
+            rm -rf "$OUTPUT_DIR/staging"
+            error "ZXPSignCmd not found. Refusing to create an unsigned ZXP; install ZXPSignCmd or set EGUI_EXPRESSIVE_ALLOW_UNSIGNED_ZXP=1 only for explicitly approved internal smoke diagnostics."
+        fi
+        warn "ZXPSignCmd not found — creating unsigned package because EGUI_EXPRESSIVE_ALLOW_UNSIGNED_ZXP=1."
+        warn "Unsigned packages are internal-smoke artifacts only and are not production release evidence."
         echo "  Download from: https://github.com/Adobe-CEP/CEP-Resources/tree/master/ZXPSignCMD"
-        echo "  Or install: npm install -g zxp-sign-cmd"
+        echo "  Or install a zxp-sign-cmd-compatible executable and ensure it is on PATH"
         echo ""
         package_unsigned "$stage"
     else

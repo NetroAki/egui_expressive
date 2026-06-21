@@ -6,12 +6,12 @@ pub fn infer_horizontal_gap(elements: &[LayoutElement]) -> f32 {
     }
 
     let mut sorted = elements.to_vec();
-    sorted.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap());
+    sorted.sort_by(|a, b| a.x.total_cmp(&b.x));
 
     let mut gaps: Vec<f32> = Vec::new();
     for i in 1..sorted.len() {
         let gap = sorted[i].x - (sorted[i - 1].x + sorted[i - 1].w);
-        if gap > 0.0 {
+        if gap.is_finite() && gap > 0.0 {
             gaps.push(gap);
         }
     }
@@ -30,12 +30,12 @@ pub fn infer_vertical_gap(elements: &[LayoutElement]) -> f32 {
     }
 
     let mut sorted = elements.to_vec();
-    sorted.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap());
+    sorted.sort_by(|a, b| a.y.total_cmp(&b.y));
 
     let mut gaps: Vec<f32> = Vec::new();
     for i in 1..sorted.len() {
         let gap = sorted[i].y - (sorted[i - 1].y + sorted[i - 1].h);
-        if gap > 0.0 {
+        if gap.is_finite() && gap > 0.0 {
             gaps.push(gap);
         }
     }
@@ -51,8 +51,15 @@ pub(crate) fn median(values: &[f32]) -> f32 {
     if values.is_empty() {
         return 0.0;
     }
-    let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mut sorted: Vec<f32> = values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect();
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    sorted.sort_by(|a, b| a.total_cmp(b));
     let mid = sorted.len() / 2;
     if sorted.len().is_multiple_of(2) {
         (sorted[mid - 1] + sorted[mid]) / 2.0
@@ -73,11 +80,7 @@ pub fn cluster_into_rows(
 
     let mut sorted = elements.to_vec();
     // Sort by Y position first, then by X for stable ordering
-    sorted.sort_by(|a, b| {
-        a.y.partial_cmp(&b.y)
-            .unwrap()
-            .then(a.x.partial_cmp(&b.x).unwrap())
-    });
+    sorted.sort_by(|a, b| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x)));
 
     let mut rows: Vec<Vec<LayoutElement>> = Vec::new();
     let mut current_row: Vec<LayoutElement> = vec![sorted[0].clone()];

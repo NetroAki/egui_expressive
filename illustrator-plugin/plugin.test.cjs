@@ -77,12 +77,48 @@ function testPortableAssetPath() {
 }
 
 function testBundledParserCandidates() {
-  const candidates = plugin.getAiParserCandidates('/extension/root', 'linux');
-  assert.strictEqual(candidates[0], path.join('/extension/root', 'bin', 'linux', 'ai-parser'));
+  const pluginRoot = path.resolve('/extension/root');
+  const candidates = plugin.getAiParserCandidates(pluginRoot, 'linux');
+  assert.strictEqual(candidates.length, 3);
+  assert.strictEqual(candidates[0], path.join(pluginRoot, 'bin', 'linux', 'ai-parser'));
+  assert.strictEqual(candidates[1], path.join(pluginRoot, 'bin', 'ai-parser'));
+  assert.strictEqual(candidates[2], path.join(pluginRoot, 'ai-parser'));
   assert(!candidates.some(candidate => candidate.includes(path.join('target', 'release'))));
-  assert.strictEqual(plugin.getAiParserCandidates('/extension/root', 'sunos').length, 0);
+  assert(candidates.every(candidate => {
+    const relative = path.relative(pluginRoot, candidate);
+    return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+  }), 'Bundled ai-parser candidates must stay inside the extension bundle');
+  assert.strictEqual(plugin.getAiParserCandidates(pluginRoot, 'sunos').length, 0);
   assert(plugin.AI_PARSER_MAX_BUFFER_BYTES >= 64 * 1024 * 1024);
   assert(pluginSourceForVm.includes('maxBuffer: AI_PARSER_MAX_BUFFER_BYTES'));
+}
+
+function testBundledParserIntegrityManifest() {
+  const os = require('os');
+  const crypto = require('crypto');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'egui-ai-parser-integrity-'));
+  const binary = path.join(root, 'bin', 'linux', 'ai-parser');
+  fs.mkdirSync(path.dirname(binary), { recursive: true });
+  fs.writeFileSync(binary, 'fake parser binary');
+  const hash = crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex');
+  fs.writeFileSync(plugin.aiParserIntegrityManifestPath(root), JSON.stringify({
+    binaries: { 'bin/linux/ai-parser': hash }
+  }));
+  assert.strictEqual(plugin.verifyAiParserBinaryIntegrity(root, binary), true);
+
+  fs.writeFileSync(plugin.aiParserIntegrityManifestPath(root), JSON.stringify({
+    binaries: { 'bin/linux/ai-parser': '0'.repeat(64) }
+  }));
+  assert.strictEqual(plugin.verifyAiParserBinaryIntegrity(root, binary), false);
+
+  fs.unlinkSync(plugin.aiParserIntegrityManifestPath(root));
+  assert.strictEqual(plugin.verifyAiParserBinaryIntegrity(root, binary), false);
+
+  assert.strictEqual(
+    plugin.verifyAiParserBinaryIntegrity(root, path.resolve(root, '..', 'ai-parser')),
+    false,
+    'ai-parser integrity gate must reject candidates outside the extension bundle'
+  );
 }
 
 function testMergeParserDataByBounds() {
@@ -420,6 +456,59 @@ function testTextUnitsOpacityAndParityStatus() {
     assert.strictEqual(plugin.parityStatusForElement({ id: 'stylistic', type: 'text', openTypeFeatures: { stylisticAlternates: true } }, { codeOnlyStrict: false }), 'approximate', 'Non-strict glyph substitution features should remain visibly approximate');
     assert.strictEqual(plugin.parityStatusForElement({ id: 'appearance_expanded', type: 'shape', appearanceExpanded: true, appearanceProbe: { fillCount: 3, strokeCount: 0 }, effects: [], notes: [] }), 'exact', 'Expanded appearances should not remain blocked by the old count mismatch');
   }
+}
+
+function testTextFontWeightAndFamilyParityIsNonExactWithoutGlyphContract() {
+  const weightedText = {
+    id: 'weighted_text',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 120,
+    h: 24,
+    text: 'Heavy',
+    fill: { r: 0, g: 0, b: 0 },
+    textStyle: { size: 16, weight: 700 },
+    effects: [],
+    notes: []
+  };
+  assert.strictEqual(
+    plugin.parityStatusForElement(weightedText, { codeOnlyStrict: true }),
+    'unsupported',
+    'Non-default text weight must not claim exact codegen without outlined glyphs or approved font registry proof'
+  );
+  assert.strictEqual(
+    plugin.parityStatusForElement(weightedText, { codeOnlyStrict: false }),
+    'approximate',
+    'Non-strict weighted text remains a bounded approximation, not exact'
+  );
+
+  const familyText = { ...weightedText, id: 'family_text', textStyle: { size: 16, family: 'Test Serif' } };
+  assert.strictEqual(
+    plugin.parityStatusForElement(familyText, { codeOnlyStrict: true }),
+    'unsupported',
+    'Explicit text family must not claim exact codegen without outlined glyphs or approved font registry proof'
+  );
+
+  const exported = plugin.exportFromRawData([{ artboard: { name: 'Artboard 1', width: 200, height: 100 }, elements: [weightedText] }], { naming: false, codeOnlyStrict: false, sidecar: true });
+  const code = exported.files['artboard_1.rs'];
+  assert(!code.includes('.font_family("Bold")'), 'Weighted text must not synthesize a fake Bold family');
+  const sidecar = JSON.parse(exported.files['artboard_1.json']);
+  assert.strictEqual(sidecar.elements[0].parityStatus, 'approximate');
+  assert(sidecar.elements[0].parityReasons.some(reason => reason.includes('font weight/family codegen')), 'Sidecar should explain font parity demotion');
+
+  const outlinedWeightedText = {
+    ...weightedText,
+    id: 'outlined_weighted_text',
+    outlinedGlyphs: [
+      { glyphId: 1, cluster: 0, advanceX: 8, advanceY: 0, offsetX: 0, offsetY: 0, contours: [{ points: [[0, 0], [4, 0], [4, 8], [0, 8]], closed: true }] }
+    ]
+  };
+  assert.strictEqual(
+    plugin.parityStatusForElement(outlinedWeightedText, { codeOnlyStrict: true }),
+    'exact',
+    'Contour-backed glyph contracts remain exact even when original text style carried a non-default weight'
+  );
 }
 
 function testTextShapingContractExportPath() {
@@ -1222,7 +1311,7 @@ function testHostAllCapsDoesNotForceOutlinedShapingContract() {
   assert.strictEqual(textElement.shapedGlyphs, null);
   assert.strictEqual(textElement.outlinedGlyphs, null);
   assert.deepStrictEqual(app.commands, [], 'plain all-caps should not trigger createOutlines extraction');
-  assert.strictEqual(plugin.parityStatusForElement(textElement, { codeOnlyStrict: true }), 'exact');
+  assert.strictEqual(plugin.parityStatusForElement(textElement, { codeOnlyStrict: true }), 'unsupported', 'Plain all-caps avoids outlining, but explicit font-family codegen is not exact without a glyph/font contract');
 }
 
 function testHostCanonicalTypographyFieldsExtraction() {
@@ -1617,6 +1706,14 @@ function testHostJsx() {
   const sanitizedDiags = hostSandbox.consumeHostDiagnostics();
   assert(sanitizedDiags.some(d => d.note.includes('[temporary raster extraction input]')));
   assert(!sanitizedDiags.some(d => d.note.includes('/tmp/egui_expressive_raster_trace') || d.note.includes('raster_1.png')));
+  assert.strictEqual(
+    hostSandbox.sanitizeHostDiagnosticText('Source asset missing: C:\\Users\\Alice\\Secret Project\\photo.png'),
+    'Source asset missing: [local path]'
+  );
+  assert.strictEqual(
+    hostSandbox.sanitizeHostDiagnosticText('Destination folder does not exist: /Users/alice/Secret Project/export'),
+    'Destination folder does not exist: [local path]'
+  );
   assert(!writes.some(w => w.fsName === '/tmp/Documents/egui_expressive_export.log'), 'Diagnostics should stay in memory without host log file writes');
 
   assert.strictEqual(hostSandbox.resetHostLogJSON, undefined);
@@ -1633,6 +1730,16 @@ function testHostJsx() {
   assert(saveResult.saved.includes('test.rs'));
   assert(saveResult.saved.includes('assets/123_img.png'));
 
+  for (const badAssetPath of ['assets/../escape.png', 'assets/nested/escape.png', '../escape.png', '/tmp/escape.png', 'C:\\tmp\\escape.png', 'assets\\escape.png']) {
+    const blocked = JSON.parse(hostSandbox.saveFilesToFolderJSON(JSON.stringify({
+      files: {},
+      assets: { [badAssetPath]: '/tmp/img.png' }
+    })));
+    assert(blocked.error.includes('Invalid asset path'), `expected invalid asset path for ${badAssetPath}`);
+    assert(!blocked.success, `invalid asset path should not succeed for ${badAssetPath}`);
+    assert(!Array.isArray(blocked.saved) || !blocked.saved.includes(badAssetPath), `invalid asset path should not be saved for ${badAssetPath}`);
+  }
+
   const folderResult = JSON.parse(hostSandbox.selectSaveFolderJSON());
   assert.strictEqual(folderResult.success, true);
   assert.strictEqual(folderResult.folder, '/tmp/export');
@@ -1648,6 +1755,19 @@ function testHostJsx() {
     folder: '/tmp/export', assetPath: 'assets/123_img.png', sourcePath: '/tmp/img.png'
   })));
   assert.strictEqual(assetCopy.success, true);
+
+  const OriginalFile = hostSandbox.File;
+  hostSandbox.File = function(pathValue) {
+    OriginalFile.call(this, pathValue);
+    if (String(pathValue).includes('Missing Secret')) this.exists = false;
+  };
+  const missingAsset = JSON.parse(hostSandbox.copyGeneratedAssetJSON(JSON.stringify({
+    folder: '/tmp/export', assetPath: 'assets/missing.png', sourcePath: '/Users/alice/Missing Secret/photo.png'
+  })));
+  assert(missingAsset.error.includes('[local path]'));
+  assert(!missingAsset.error.includes('/Users/alice'));
+  assert(!missingAsset.error.includes('Missing Secret'));
+  hostSandbox.File = OriginalFile;
 
   // Test extractArtboardDataJSON with no app
   const extractResult = JSON.parse(hostSandbox.extractArtboardDataJSON(JSON.stringify([0])));
@@ -1733,6 +1853,34 @@ function testHostSaveFailureHandling() {
   const saveResult = JSON.parse(hostSandbox.saveFilesToFolderJSON(JSON.stringify(payload)));
   assert.strictEqual(saveResult.error.includes('Failed to open'), true);
   assert.strictEqual(saveResult.error.includes('Failed to copy'), true);
+
+  const OriginalFile = hostSandbox.File;
+  hostSandbox.File = function(pathValue) {
+    OriginalFile.call(this, pathValue);
+    if (String(pathValue).includes('Missing Secret')) this.exists = false;
+  };
+  const missingSource = JSON.parse(hostSandbox.saveFilesToFolderJSON(JSON.stringify({
+    files: {},
+    assets: { 'assets/missing.png': '/Users/alice/Missing Secret/photo.png' }
+  })));
+  assert(missingSource.error.includes('[local path]'));
+  assert(!missingSource.error.includes('/Users/alice'));
+  assert(!missingSource.error.includes('Missing Secret'));
+
+  hostSandbox.File = function(pathValue) {
+    if (String(pathValue).endsWith('panic.rs')) {
+      throw new Error('Failed at C:\\Users\\Alice\\Secret Project\\panic.rs');
+    }
+    OriginalFile.call(this, pathValue);
+  };
+  const exceptionResult = JSON.parse(hostSandbox.saveFilesToFolderJSON(JSON.stringify({
+    files: { 'panic.rs': 'fn main() {}' },
+    assets: {}
+  })));
+  assert(exceptionResult.error.includes('[local path]'));
+  assert(!exceptionResult.error.includes('C:\\Users'));
+  assert(!exceptionResult.error.includes('Secret Project'));
+  hostSandbox.File = OriginalFile;
 }
 
 function testApplyBlendExpr() {
@@ -1776,6 +1924,27 @@ function testGenerateSidecar() {
   }], colorMap));
   assert.strictEqual(missingOptionalArrays.elements[0].notes, undefined, 'Missing notes array should not crash or emit notes');
   assert.strictEqual(missingOptionalArrays.elements[0].effects, undefined, 'Missing effects array should not crash or emit effects');
+}
+
+function testStrictExportAlwaysEmitsParitySidecar() {
+  const exported = plugin.exportFromRawData([{
+    artboard: { name: "Artboard 1", width: 100, height: 100 },
+    elements: [{
+      id: "rect_1", type: "shape", x: 4, y: 5, w: 20, h: 12, depth: 0,
+      fill: { r: 10, g: 20, b: 30 }, stroke: null, effects: [], notes: []
+    }]
+  }], { naming: false, sidecar: false, includeSidecar: false, codeOnlyStrict: true });
+  assert(exported.files["artboard_1.rs"], "strict export should still emit Rust");
+  assert(exported.files["artboard_1.json"], "strict code-only export must always emit a parity sidecar");
+  const sidecar = JSON.parse(exported.files["artboard_1.json"]);
+  assert.strictEqual(sidecar.artboard.parityStatus, "exact");
+  assert.strictEqual(sidecar.elements[0].parityStatus, "exact");
+
+  const nonStrict = plugin.exportFromRawData([{
+    artboard: { name: "Artboard 1", width: 100, height: 100 },
+    elements: [{ id: "rect_1", type: "shape", x: 0, y: 0, w: 10, h: 10, depth: 0, effects: [], notes: [] }]
+  }], { naming: false, sidecar: false, includeSidecar: false, codeOnlyStrict: false });
+  assert(!nonStrict.files["artboard_1.json"], "non-strict diagnostic exports may still omit sidecars when explicitly disabled");
 }
 
 function testBlendModeUsesSceneBuilder() {
@@ -3269,6 +3438,7 @@ async function runTests() {
   testPortableAssetPath();
   testApplyBlendExpr();
   testGenerateSidecar();
+  testStrictExportAlwaysEmitsParitySidecar();
   testBlendModeUsesSceneBuilder();
   testImageOpacityEmission();
   await testEmbeddedRasterVectorizationUsesExtractedPixels();
@@ -3279,6 +3449,7 @@ async function runTests() {
   testAiParserFillRulePropagation();
   testRichCircleAndStrokeOpacityEmission();
   testBundledParserCandidates();
+  testBundledParserIntegrityManifest();
   testMergeParserDataByBounds();
   testMergeParserDataAddsUnmatchedCodeDrawnVectors();
   testMergeParserDataPreservesHierarchyAndAppearance();
@@ -3293,6 +3464,7 @@ async function runTests() {
   testHostAllCapsDoesNotForceOutlinedShapingContract();
   testHostCanonicalTypographyFieldsExtraction();
   testTextShapingContractExportPath();
+  testTextFontWeightAndFamilyParityIsNonExactWithoutGlyphContract();
   testOutlinedGlyphsContractExportPath();
   testTextShapingStrictRejectsFontBytesWithoutOutlines();
   testTextShapingStrictRejectsStyledRunsWithContours();

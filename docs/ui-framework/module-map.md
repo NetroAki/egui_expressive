@@ -20,10 +20,10 @@ Use this map to find the right file without spelunking through the crate.
 - `src/codegen/multi_file.rs` — multi-artboard file generation.
 - `src/codegen/naming.rs` — naming hints and label extraction.
 - `src/codegen/node_emit.rs` — active per-node Rust emission dispatch.
-- `src/codegen/effect_emit.rs` — R100-004A direct-shape effect emission helper; emits bounded or unsupported fidelity diagnostics for active `node_emit.rs` generated output, without exact WGPU callback claims.
+- `src/codegen/effect_emit.rs` — fidelity item direct-shape effect emission helper; emits bounded or unsupported fidelity diagnostics for active `node_emit.rs` generated output, without exact WGPU callback claims.
 - `src/codegen/node_emit_layout.rs` — row/column node emission helpers.
 - `src/codegen/render.rs` — generated Rust rendering helpers and node emission body assembly.
-- `src/codegen/render_shape.rs` — inactive legacy shape-specific emission evidence; R100-004A keeps it read-only and routes active direct effect emission through `node_emit.rs` plus `effect_emit.rs`.
+- `src/codegen/render_shape.rs` — inactive legacy shape-specific emission evidence; fidelity item keeps it read-only and routes active direct effect emission through `node_emit.rs` plus `effect_emit.rs`.
 - `src/codegen/render_utils.rs` — render/codegen utility functions.
 - `src/codegen/scaffold.rs` — artboard scaffold/public export API.
 - `src/codegen/scene_codegen.rs` — rich scene / shaped glyph emission.
@@ -55,7 +55,7 @@ Use this map to find the right file without spelunking through the crate.
 - `src/bin/ai_parser/output.rs` — parser output serialization.
 - `src/bin/ai_parser/entry.rs` — parser CLI dispatch.
 - `src/bin/ai_parser/tests.rs` — parser tests.
-- Stage 9 removed the orphan `src/bin/ai_parser_parts/*` split remnants after reference audit; active parser code is under `src/bin/ai_parser/` only.
+- the current release candidate removed the orphan `src/bin/ai_parser_parts/*` split remnants after reference audit; active parser code is under `src/bin/ai_parser/` only.
 - `src/bin/figma_export.rs` — Figma export CLI entrypoint.
 
 ## Import / Interop
@@ -80,14 +80,14 @@ Use this map to find the right file without spelunking through the crate.
 ## Styling
 
 - `src/typography/mod.rs` — typography docs and public re-exports.
-- `src/typography/core.rs` — text enums, shaper data, `TypeSpec`, and `TypeScale`; R100-005A owns bounded `TypeSpec::to_rich_text` weak / normal / strong weight emphasis while `to_font_id()` remains weight-agnostic.
+- `src/typography/core.rs` — text enums, shaper data, `TypeSpec`, and `TypeScale`; fidelity item owns bounded `TypeSpec::to_rich_text` weak / normal / strong weight emphasis while `to_font_id()` remains weight-agnostic.
 - `src/typography/shaping.rs` — rustybuzz shaping helpers.
 - `src/typography/render.rs` — shaped-glyph rendering helpers.
 - `src/typography/text.rs` — text layout, text blocks, and `TypeLabel`.
 - `src/tailwind/mod.rs` — module docs and public re-exports.
 - `src/tailwind/builder.rs` — `Tw` data structure, `new`, stable ids.
-- `src/tailwind/render.rs` — `Tw::to_frame` and `Tw::show` render contract, including R100-002 exact-first selection for eligible Tailwind drop shadows and explicit app-provided backdrop blur with bounded fallback.
-- `src/tailwind/exact_effects.rs` — R100-002 WGPU-gated exact Tailwind source-layer helper for the solid non-rounded rectangular drop-shadow subset.
+- `src/tailwind/render.rs` — `Tw::to_frame` and `Tw::show` render contract, including fidelity item exact-first selection for eligible Tailwind drop shadows and explicit app-provided backdrop blur with bounded fallback.
+- `src/tailwind/exact_effects.rs` — fidelity item WGPU-gated exact Tailwind source-layer helper for the solid non-rounded rectangular drop-shadow subset.
 - `src/tailwind/responsive.rs` — `ResponsiveTw` style resolution and show helpers.
 - `src/tailwind/theme_tokens.rs` — theme-token style helpers.
 - `src/tailwind/box_model.rs` — margin, padding, frame aliases.
@@ -102,7 +102,7 @@ Use this map to find the right file without spelunking through the crate.
 - `src/tailwind/spacing.rs` — spacing constants and edge values.
 - `src/tailwind/shadow.rs` — elevation/shadow conversion.
 - `src/tailwind/types.rs` — small value enums such as size, font weight, and `TwBackdropSource`.
-- `src/tailwind/typography.rs` — text size, weight, and tracking utilities; R100-005A propagates Tailwind numeric weight intent into `TypeSpec` without claiming weight-specific font-face selection.
+- `src/tailwind/typography.rs` — text size, weight, and tracking utilities; fidelity item propagates Tailwind numeric weight intent into `TypeSpec` without claiming weight-specific font-face selection.
 - `src/tailwind/border.rs` — uniform/directional border and corner radius utilities.
 - `src/tailwind/position.rs` — position, inset, translate, and z-index utilities.
 - `src/tailwind/state.rs` — `hover:`/`focus:`/`disabled:`-style variant resolver and bounded transition interpolation.
@@ -112,8 +112,8 @@ Use this map to find the right file without spelunking through the crate.
 - `src/style/text.rs` — text styles, styled text, scrollbar styling.
 - `src/theme/mod.rs` — semantic colors, theme presets, elevation, borders.
 - `src/icons/mod.rs` — icon families, glyph lookup, and icon text helpers.
-- `docs/ui-framework/tw-render-contract.md` — canonical Tailwind/CSS-style utility support matrix and bounded-effect contract, including R100-005A typography weight-intent propagation and bounded RichText emphasis.
-- `docs/ui-framework/tokens.md` — Stage 7 guide for tokens, typography, fonts, icons, M3 visuals, and visual recipes; keeps R100-005A numeric weight intent separate from future font registry/fallback/font-face work.
+- `docs/ui-framework/tw-render-contract.md` — canonical Tailwind/CSS-style utility support matrix and bounded-effect contract, including fidelity item typography weight-intent propagation and bounded RichText emphasis.
+- `docs/ui-framework/tokens.md` — the current release candidate guide for tokens, typography, fonts, icons, M3 visuals, and visual recipes; keeps fidelity item numeric weight intent separate from future font registry/fallback/font-face work.
 
 ## Animation / Effects
 
@@ -127,10 +127,10 @@ Use this map to find the right file without spelunking through the crate.
 - `src/animation/memory.rs` — animation memory/state storage helpers.
 - `src/animation/tests.rs` — animation tests.
 - `src/blur/mod.rs` — blur/backdrop blur helper surface.
-- `src/platform/backdrop.rs` — R100-001A app-provided backdrop snapshot provider contract, request/snapshot validation, and context-scoped provider install/load. R100-001B also owns the WGPU-gated app-owned offscreen backdrop source metadata and context-scoped install/load contract. These surfaces are single egui context/surface only and do not own OS/native capture.
-- `src/platform/native_backdrop/mod.rs` — R100-001B feature-gated common native backdrop adapter substrate. It owns reserved native feature names, platform labels, and initialization errors only; platform-specific capture providers require later child blockers.
-- `src/backdrop.rs` — R100-001A runtime helper layer that preflights app-provided snapshot backdrop blur reports and builds exact `GpuSourceLayerEffectCallback` shapes after provider capture and snapshot validation. R100-001B B3 also preflights app-owned WGPU source metadata, current installed source allocation, and renderer-bound sidecars before building app-owned callback shapes after exact source-qualified report success.
-- `src/draw/app_owned_backdrop_blur_shader.wgsl` — R100-001B B3 first-pass shader that maps a validated app-owned source subrect into callback-local UV space before the existing vertical blur and present passes.
+- `src/platform/backdrop.rs` — fidelity item app-provided backdrop snapshot provider contract, request/snapshot validation, and context-scoped provider install/load. fidelity item also owns the WGPU-gated app-owned offscreen backdrop source metadata and context-scoped install/load contract. These surfaces are single egui context/surface only and do not own OS/native capture.
+- `src/platform/native_backdrop/mod.rs` — fidelity item feature-gated common native backdrop adapter substrate. It owns reserved native feature names, platform labels, and initialization errors only; platform-specific capture providers require later child blockers.
+- `src/backdrop.rs` — fidelity item runtime helper layer that preflights app-provided snapshot backdrop blur reports and builds exact `GpuSourceLayerEffectCallback` shapes after provider capture and snapshot validation. fidelity item B3 also preflights app-owned WGPU source metadata, current installed source allocation, and renderer-bound sidecars before building app-owned callback shapes after exact source-qualified report success.
+- `src/draw/app_owned_backdrop_blur_shader.wgsl` — fidelity item B3 first-pass shader that maps a validated app-owned source subrect into callback-local UV space before the existing vertical blur and present passes.
 
 ## Draw / Rendering
 
@@ -164,7 +164,7 @@ Use this map to find the right file without spelunking through the crate.
 - `src/m3/color.rs` — Material 3 color roles and palettes.
 - `src/m3/elevation.rs` — elevation tokens and tint helpers.
 - `src/m3/theme.rs` — theme loading and semantic color access.
-- `src/m3/typography.rs` — type scale and text styling; R100-005A exposes M3 Regular/Medium/Bold as numeric `TypeSpec` weight intent while `to_font_id()` remains size/family-only.
+- `src/m3/typography.rs` — type scale and text styling; fidelity item exposes M3 Regular/Medium/Bold as numeric `TypeSpec` weight intent while `to_font_id()` remains size/family-only.
 - `src/m3/components.rs` — component-family docs and public re-exports.
 - `src/m3/components/button.rs` — button widget family.
 - `src/m3/components/inputs.rs` — switch, checkbox, radio, chip, slider.
@@ -202,7 +202,7 @@ Use this map to find the right file without spelunking through the crate.
 - `src/interaction/feedback_tests.rs` — feedback queue/live-region tests split from `feedback.rs` to keep the implementation file below the size target.
 - `src/state/mod.rs` — persistence registry, audio bridge, and shared primitive state helpers.
 - `docs/ui-framework/accessibility.md` — keyboard, metadata, live-region, screen-reader audit, and i18n/RTL guide.
-- `docs/ui-framework/platform.md` — clipboard, file dialog/drop, system theme, high-DPI, dependency-review guide, and R100-001B app-owned WGPU backdrop support matrix/manual smoke checklist.
+- `docs/ui-framework/platform.md` — clipboard, file dialog/drop, system theme, high-DPI, dependency-review guide, and fidelity item app-owned WGPU backdrop support matrix/manual smoke checklist.
 
 ## Developer Tooling / Diagnostics
 
@@ -211,7 +211,7 @@ Use this map to find the right file without spelunking through the crate.
 - `src/devtools/macros.rs` — devtools registration macros.
 - `src/devtools/panel.rs` — devtools panel UI.
 - `src/devtools/registry.rs` — devtools registry state.
-- `src/daw/mod.rs` — DAW-named compatibility namespace pending Stage 6 rename/extract/generic-retention decision.
+- `src/daw/mod.rs` — DAW-named compatibility namespace pending the current release candidate rename/extract/generic-retention decision.
 
 ## Responsive UI
 
@@ -261,33 +261,33 @@ Forms wrap egui's input widgets rather than reimplement low-level input handling
 - `src/editor/value_lane.rs` — automation/value range mapping.
 - `src/editor/persistence.rs` — view-state and interaction snapshots for undo integration.
 - `src/surface/mod.rs` — `LargeCanvas`, `ViewportCuller`.
-- `docs/ui-framework/editor-canvas.md` — Stage 6 editor/canvas recipes, decisions, and deferrals.
+- `docs/ui-framework/editor-canvas.md` — the current release candidate editor/canvas recipes, decisions, and deferrals.
 
-## Stage 2 Examples
+## the current release candidate Examples
 
-Scope note: these are the Stage 2 app-shell proofs referenced by this plan, not a full crate example inventory.
+Scope note: these are the current release candidate app-shell proofs referenced by this plan, not a full crate example inventory.
 
-- `examples/responsive_dashboard.rs` — canonical Stage 2 app-shell proof using persistent layout state, dock/split layout, sidebar collapse, breadcrumbs, tabs, and status bar composition.
-- `examples/data_explorer_dashboard.rs` — Stage 3 proof combining Stage 2 app-shell chrome with data table, tree-table, property grid, and state demos.
-- `examples/command_center_shell.rs` — Stage 4 proof combining action registry, menu/palette construction, scoped shortcuts, pure focus traversal, undo/redo, and feedback dispatch.
-- `examples/forms_gallery.rs` — Stage 5 proof for Forms v2 schema, validation, input correctness, rich inputs, and inline edit descriptors.
-- `examples/generic_editor_canvas.rs` — Stage 6 proof for DAW-free editor interactions, inspector hooks, drop descriptors, and undo snapshots.
-- `examples/tailwind_style_gallery.rs` — Stage 7 proof for Tailwind-style utilities, responsive values, theme tokens, effects, and bounded transitions.
-- `examples/accessibility_platform_gallery.rs` — Stage 8 proof for roving focus, live-region feedback, input/i18n contracts, and platform descriptors.
-- `examples/neutraudio_shell.rs` — existing domain-flavored shell proof that must keep building across Stage 2 app-shell changes.
+- `examples/responsive_dashboard.rs` — canonical the current release candidate app-shell proof using persistent layout state, dock/split layout, sidebar collapse, breadcrumbs, tabs, and status bar composition.
+- `examples/data_explorer_dashboard.rs` — the current release candidate proof combining the current release candidate app-shell chrome with data table, tree-table, property grid, and state demos.
+- `examples/command_center_shell.rs` — the current release candidate proof combining action registry, menu/palette construction, scoped shortcuts, pure focus traversal, undo/redo, and feedback dispatch.
+- `examples/forms_gallery.rs` — the current release candidate proof for Forms v2 schema, validation, input correctness, rich inputs, and inline edit descriptors.
+- `examples/generic_editor_canvas.rs` — the current release candidate proof for DAW-free editor interactions, inspector hooks, drop descriptors, and undo snapshots.
+- `examples/tailwind_style_gallery.rs` — the current release candidate proof for Tailwind-style utilities, responsive values, theme tokens, effects, and bounded transitions.
+- `examples/accessibility_platform_gallery.rs` — the current release candidate proof for roving focus, live-region feedback, input/i18n contracts, and platform descriptors.
+- `examples/neutraudio_shell.rs` — existing domain-flavored shell proof that must keep building across the current release candidate app-shell changes.
 
 ## Scene / Render Plan
 
 - `src/render/mod.rs` — Phase 1A render fidelity vocabulary (`RenderQuality`, `RenderCapabilities`, `RenderReport`, `RenderIssue`) used to separate exact, approximate, and unsupported visual paths without changing egui's immediate-mode authoring model.
 - `src/scene.rs` — active scene implementation and public re-exports, pinned by `src/lib.rs`.
-- `src/scene/effects_geom.rs`, `src/scene/fill.rs`, `src/scene/model.rs`, `src/scene/render.rs`, `src/scene/stroke.rs` — active scene submodules wired by `src/scene.rs`. `effects_geom.rs` owns source-layer effect selection and, after R100-003A, routes approved rounded-rect, ellipse, closed-path, and rotated-rect-as-closed-path scene sources through rasterized RGBA plus the existing WGPU callback path while preserving fallback for excluded shapes/effects.
+- `src/scene/effects_geom.rs`, `src/scene/fill.rs`, `src/scene/model.rs`, `src/scene/render.rs`, `src/scene/stroke.rs` — active scene submodules wired by `src/scene.rs`. `effects_geom.rs` owns source-layer effect selection and, after fidelity item, routes approved rounded-rect, ellipse, closed-path, and rotated-rect-as-closed-path scene sources through rasterized RGBA plus the existing WGPU callback path while preserving fallback for excluded shapes/effects.
 - `src/scene/tests.rs` — active scene tests wired by `src/scene.rs` under `cfg(test)`.
-- Stage 9 removed inactive scene split leftovers (`mod.rs`, `appearance.rs`, `geom.rs`, `geom_extra.rs`, `stroke_extra.rs`, `tests_a.rs`, `tests_b.rs`, `tests_c.rs`) after verifying active scene wiring remains `src/scene.rs` + the six routed submodules above.
+- the current release candidate removed inactive scene split leftovers (`mod.rs`, `appearance.rs`, `geom.rs`, `geom_extra.rs`, `stroke_extra.rs`, `tests_a.rs`, `tests_b.rs`, `tests_c.rs`) after verifying active scene wiring remains `src/scene.rs` + the six routed submodules above.
 - `src/draw/composite_core.rs` plus `src/draw/rasterize.rs` — active compositor/raster group implementation. Report-returning APIs such as `composite_layers_report` and `clipped_layers_gpu_report` are the Phase 1A exactness seam; compatibility wrappers remain for older callers.
 - `src/draw/transform_clip_layout.rs` — active clip/layout helpers plus Phase 2 `ClipMask` / `ClipFillRule` model for CPU offscreen polygon, rect, rounded-rect, compound even-odd/non-zero, and alpha-mask clipping.
 - `src/draw/raster_pixels.rs` — active per-pixel mask application for polygon and `ClipMask` CPU compositing.
 - `src/draw/composite_core.rs::clipped_layers_mask_report` — Phase 2 CPU offscreen compound/alpha mask entry point; compatibility wrapper `clipped_layers_mask` preserves immediate-mode call style.
-- `src/gpu.rs` — Phase 3/3B optional `wgpu` backend resources and `GpuCompositeCallback` for egui-wgpu callback presentation of CPU-composited textures. Phase 5 also owns `GpuSourceLayerEffectCallback` and `wgpu_source_layer_effect_report` for bounded source-layer blur/backdrop reporting on library-owned RGBA pixels. Phase 9A hardens `GpuSourceLayerEffectCallback` into a two-pass separable blur path for exact context-marked initialized, solid-rect source-layer `GaussianBlur`/`Feather` scene evidence. Phase 9B extends the same callback/report path to exact context-marked initialized, padded solid-rect source-layer `DropShadow`/`OuterGlow` scene evidence only when requested blur/radius is at least `1.0`. R100-001A uses `GpuEffectSource::AppProvidedBackdropSnapshot` for source-qualified exact snapshot backdrop blur reports without making backend-global native capture claims. R100-001B B2 adds `GpuEffectSource::AppOwnedOffscreenBackdrop` as WGPU-first app-owned source vocabulary; B3 keeps direct generic reports non-exact but adds renderer-bound sidecar binding plus app-owned callback sampling for explicit helper paths. Native adapters still feed the snapshot path and do not promote `HostFramebufferBackdrop`. `init_gpu_effects_for_context` marks a specific egui context exact-ready so one renderer cannot globally enable scene callbacks for unrelated contexts. The caches are bounded and keyed by source/request/shader inputs; callback paths use callback-owned offscreen texture passes before main-pass presentation.
+- `src/gpu.rs` — Phase 3/3B optional `wgpu` backend resources and `GpuCompositeCallback` for egui-wgpu callback presentation of CPU-composited textures. Phase 5 also owns `GpuSourceLayerEffectCallback` and `wgpu_source_layer_effect_report` for bounded source-layer blur/backdrop reporting on library-owned RGBA pixels. Phase 9A hardens `GpuSourceLayerEffectCallback` into a two-pass separable blur path for exact context-marked initialized, solid-rect source-layer `GaussianBlur`/`Feather` scene evidence. Phase 9B extends the same callback/report path to exact context-marked initialized, padded solid-rect source-layer `DropShadow`/`OuterGlow` scene evidence only when requested blur/radius is at least `1.0`. fidelity item uses `GpuEffectSource::AppProvidedBackdropSnapshot` for source-qualified exact snapshot backdrop blur reports without making backend-global native capture claims. fidelity item B2 adds `GpuEffectSource::AppOwnedOffscreenBackdrop` as WGPU-first app-owned source vocabulary; B3 keeps direct generic reports non-exact but adds renderer-bound sidecar binding plus app-owned callback sampling for explicit helper paths. Native adapters still feed the snapshot path and do not promote `HostFramebufferBackdrop`. `init_gpu_effects_for_context` marks a specific egui context exact-ready so one renderer cannot globally enable scene callbacks for unrelated contexts. The caches are bounded and keyed by source/request/shader inputs; callback paths use callback-owned offscreen texture passes before main-pass presentation.
 - `src/draw/blend_shader.wgsl` and `src/draw/blur_shader.wgsl` — Phase 3/3B blend/offscreen/presentation shader contract plus Phase 9A/9B source-layer blur/shadow shader contract. CPU-composited or source-layer pixels render into callback-owned offscreen targets with callback uniforms and no fixed-function alpha blending, then present with normal/1.0 uniforms to avoid double-applying blend state. This is not framebuffer/backdrop capture.
 - Historical duplicate compositor/effects files that are not wired by `src/draw/mod.rs` are not active ownership surfaces. Wire or remove them in a later cleanup stage before using them for fidelity claims.
 
@@ -295,14 +295,14 @@ Scope note: these are the Stage 2 app-shell proofs referenced by this plan, not 
 
 - `tests/interaction_smoke.rs` — GUI-free release smoke coverage for data grid, undo, focus, feedback, Forms schema flows, and editor/canvas interaction descriptors.
 - `tests/performance_smoke.rs` — deterministic large-input/performance-smoke proxies for data, focus, undo, viewport culling, and editor/canvas many-item operations without wall-clock thresholds.
-- `tests/visual_diff_harness.rs` — manifest-driven visual regression/parity harness. Phase 7 fixture checks keep exact external vector/compositing assets under 300 KiB and exact headless Tailwind/typography/M3 rows dimension-pinned. Phase 9A pins exact source-layer blur/feather rows to 96×64 PNG pairs; Phase 9B adds exact source-layer shadow/glow rows with the same dimension/score-class governance. R100-002 adds exact Tailwind drop-shadow and app-provided backdrop rows, including source-vs-output guards for the app-provided snapshot row. R100-003A adds exact shaped scene source-layer rows for rounded-rect blur, ellipse drop shadow, path feather, and rotated-rect drop shadow.
-- `src/draw/current_render_visual_proof_tests.rs` — unit-test-only current-code proof subset that regenerates nine exact draw/composite/clip cases through active draw/raster helpers and diffs them at zero tolerance against `tests/visual_diff/fixtures/current-render/` baselines. R100-009A adds `phase7-supported-compound-hole-fill` and hardens `vector-clip-nested` so green content passes through `BlendLayer::clip_polygon`; R100-009B adds `compositing-blend-boundary` with decoded-RGBA equality against the committed headless pair, using the helper path plus an asserted blue-mask green-channel quantization correction for `egui::Color32` alpha storage. This narrows current-render proof for named rows only; the manifest corpus remains committed-pair regression evidence unless another row gets its own generator.
+- `tests/visual_diff_harness.rs` — manifest-driven visual regression/parity harness. Phase 7 fixture checks keep exact external vector/compositing assets under 300 KiB and exact headless Tailwind/typography/M3 rows dimension-pinned. Phase 9A pins exact source-layer blur/feather rows to 96×64 PNG pairs; Phase 9B adds exact source-layer shadow/glow rows with the same dimension/score-class governance. fidelity item adds exact Tailwind drop-shadow and app-provided backdrop rows, including source-vs-output guards for the app-provided snapshot row. fidelity item adds exact shaped scene source-layer rows for rounded-rect blur, ellipse drop shadow, path feather, and rotated-rect drop shadow.
+- `src/draw/current_render_visual_proof_tests.rs` — unit-test-only current-code proof subset that regenerates ten exact draw/composite/clip/static endpoint cases through active draw/raster helpers and diffs them at zero tolerance against `tests/visual_diff/fixtures/current-render/` baselines. fidelity item adds `phase7-supported-compound-hole-fill` and hardens `vector-clip-nested` so green content passes through `BlendLayer::clip_polygon`; fidelity item adds `compositing-blend-boundary` with decoded-RGBA equality against the committed headless pair, using the helper path plus an asserted blue-mask green-channel quantization correction for `egui::Color32` alpha storage; fidelity item adds `m3-top-app-bar-states` with decoded-RGBA equality against the committed headless pair, opaque source constants, and no post-raster correction. This narrows current-render proof for named rows only; the manifest corpus remains committed-pair regression evidence unless another row gets its own generator.
 - `tests/raster_vectorization.rs` — raster-to-scene-node vectorization regression proof included by the all-targets release gate.
 - `docs/ui-framework/index.md` — release-facing docs index.
 - `docs/release-checklist.md` — release gate checklist.
 - `docs/versioning-policy.md` — SemVer and compatibility policy.
 - `docs/migration-guide.md` — downstream migration guidance.
-- `docs/exec-plans/file-size-exceptions.md` — Stage 9 >400-line remeasurement and justified exceptions.
+- `the public release checklist` — file-size notes and release checklist.
 
 ## Widgets
 
@@ -339,7 +339,7 @@ Scope note: these are the Stage 2 app-shell proofs referenced by this plan, not 
 - `src/widgets/data/mod.rs` — data-widget docs and public re-exports.
 - `src/widgets/data/state.rs` — data-grid sort/filter/selection/view-state values.
 - `src/widgets/data/model.rs` — data-grid row/column/cell descriptors and row provider model.
-- `src/widgets/data/data_table.rs` — virtualized read-only data table surface.
+- `src/widgets/data/data_table.rs` — read-only data table surface that renders materialized row views.
 - `src/widgets/data/editing.rs` — additive Forms v2 data-cell/property edit descriptors.
 - `src/widgets/data/virtual_window.rs` — pure visible-range helper for large row sets.
 - `src/widgets/data/tree_table.rs` — tree-table row model, flattening, and read-only display contract.

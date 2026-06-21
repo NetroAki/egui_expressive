@@ -1,0 +1,38 @@
+[package]
+name = "egui_expressive_android_showcase"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["android-smoke-minimal", "android-smoke-verbose"]
+# Deterministic Android diagnostic app used by device smoke tests. Disable with
+# `--no-default-features --features shared-showcase` to run the full showcase.
+android-smoke-minimal = []
+# High-detail Android logcat instrumentation. Disable with `--no-default-features`
+# or remove this feature once the surface/lifecycle issue is resolved.
+android-smoke-verbose = []
+shared-showcase = ["egui_expressive"]
+
+[dependencies]
+android_logger = "0.15"
+eframe = { version = "0.34", default-features = false, features = [
+    "android-native-activity",
+    "default_fonts",
+    "glow",
+] }
+egui_expressive = { path = "../..", default-features = false, optional = true }
+log = "0.4"
+winit = { version = "0.30", default-features = false, features = ["android-native-activity"] }
+
+[package.metadata.android]
+package = "dev.egui_expressive.showcase"
+build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
+application_name = "egui_expressive Showcase"
+
+[package.metadata.android.sdk]
+min_sdk_version = 23
+target_sdk_version = 35

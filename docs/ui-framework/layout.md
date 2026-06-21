@@ -1,13 +1,13 @@
 # Layout and App Shell
 
-Stage 2 adds a reusable app-shell layer for dashboard/editor-style egui apps.
+the current release candidate adds a reusable app-shell layer for dashboard/editor-style egui apps.
 
 ## App-Shell Modules
 
 - `src/widgets/dock/` owns dock-specific value types, split widgets, and dock-zone overlay geometry.
 - `src/widgets/app_shell/` owns generic chrome: layout persistence state, sidebars, status bars, and breadcrumbs.
 - `src/widgets/tabs.rs` owns tab selection and tab-set fallback behavior.
-- `src/state/mod.rs` can register bounded persistence slots; Stage 2 uses the existing `layout.panels` convention instead of inventing a second registry.
+- `src/state/mod.rs` can register bounded persistence slots; the current release candidate uses the existing `layout.panels` convention instead of inventing a second registry.
 
 ## Persistent Layout State
 
@@ -60,8 +60,8 @@ ResizableSplit::new("dashboard", &mut split_fraction, SplitAxis::Horizontal).sho
 );
 ```
 
-See `examples/responsive_dashboard.rs` for the canonical Stage 2 proof.
+See `examples/responsive_dashboard.rs` for the canonical the current release candidate proof.
 
 ## Surface Relationship
 
-`src/surface/mod.rs` remains the large-canvas/viewport-culling layer. Stage 2 documents how shell layouts can host surfaces; deeper editor/surface integration remains Stage 6.
+`src/surface/mod.rs` remains the large-canvas/viewport-culling layer. the current release candidate documents how shell layouts can host surfaces; deeper editor/surface integration remains the current release candidate.

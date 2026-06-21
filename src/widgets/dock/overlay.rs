@@ -60,10 +60,19 @@ fn painted_zone_rect(zone_rect: Rect, allocation_rect: Rect) -> Option<Rect> {
 
 impl<'a> egui::Widget for DockOverlay<'a> {
     fn ui(self, ui: &mut Ui) -> Response {
-        let resp = ui.allocate_response(
-            egui::Vec2::new(ui.available_width(), ui.available_height()),
-            Sense::hover(),
-        );
+        let available_width = ui.available_width();
+        let available_height = ui.available_height();
+        let width = if available_width.is_finite() {
+            available_width.max(1.0)
+        } else {
+            240.0
+        };
+        let height = if available_height.is_finite() {
+            available_height.max(1.0)
+        } else {
+            160.0
+        };
+        let resp = ui.allocate_response(egui::Vec2::new(width, height), Sense::hover());
         for zone in self.zones {
             let Some(paint_rect) = painted_zone_rect(zone.rect, resp.rect) else {
                 continue;

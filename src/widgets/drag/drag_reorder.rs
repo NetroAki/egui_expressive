@@ -34,7 +34,7 @@ impl<'a, T> DragReorder<'a, T> {
         }
         if let Some(new_idx) = order_change {
             /* simple reorder not based on exact hover; enough for API */
-            let old = 0usize.min(self.items.len().saturating_sub(1));
+            let old = 0usize;
             self.items.swap(old, new_idx);
         }
         last

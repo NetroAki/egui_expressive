@@ -211,8 +211,9 @@ impl Widget for M3TextField<'_> {
             text_edit = text_edit.password(true);
         }
         let text_response = ui.put(text_rect, text_edit);
+        let text_has_focus = text_response.has_focus();
         ui.ctx()
-            .data_mut(|d| d.insert_temp(focused_id, text_response.has_focus()));
+            .data_mut(|d| d.insert_temp(focused_id, text_has_focus));
         outer_response | text_response
     }
 }

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ExtensionManifest Version="7.0" ExtensionBundleId="com.egui-expressive.illustrator-exporter"
-                   ExtensionBundleVersion="1.0.0"
+                   ExtensionBundleVersion="0.1.0"
                    ExtensionBundleName="egui_expressive Exporter"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 
   <ExtensionList>
-    <Extension Id="com.egui-expressive.illustrator-exporter.panel" Version="1.0.0" />
+    <Extension Id="com.egui-expressive.illustrator-exporter.panel" Version="0.1.0" />
   </ExtensionList>
 
   <ExecutionEnvironment>

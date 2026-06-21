@@ -41,6 +41,102 @@ pub enum NativeBackdropPlatform {
     WaylandPortal,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NativeBackdropSupportFamily {
+    LinuxX11,
+    WaylandPortal,
+    Windows,
+    Macos,
+    Ios,
+    Android,
+    Web,
+}
+
+impl NativeBackdropSupportFamily {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::LinuxX11 => "linux-x11",
+            Self::WaylandPortal => "wayland-portal",
+            Self::Windows => "windows",
+            Self::Macos => "macos",
+            Self::Ios => "ios-support-family",
+            Self::Android => "android-support-family",
+            Self::Web => "web-support-family",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NativeBackdropSupportState {
+    Unsupported,
+    ContractOnly,
+    PermissionRequired,
+    SmokeTestRequired,
+    SmokeTestPassed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NativeBackdropPermissionState {
+    NotRequested,
+    Required,
+    Granted,
+    Denied,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NativeBackdropSourceScope {
+    AppWindowSurface,
+    ForeignWindow,
+    Monitor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NativeBackdropContractDiagnostic {
+    PermissionRequired,
+    PermissionDenied,
+    UnsupportedPlatform,
+    UnsupportedSession,
+    InvalidSurfaceHandle,
+    SourceOwnershipMismatch,
+    SmokeArtifactMissing,
+}
+
+impl NativeBackdropContractDiagnostic {
+    pub const fn redacted_message(self) -> &'static str {
+        match self {
+            Self::PermissionRequired => "native backdrop permission is required",
+            Self::PermissionDenied => "native backdrop permission was denied",
+            Self::UnsupportedPlatform => "native backdrop platform is unsupported",
+            Self::UnsupportedSession => "native backdrop session is unsupported",
+            Self::InvalidSurfaceHandle => "native backdrop surface handle is invalid",
+            Self::SourceOwnershipMismatch => {
+                "native backdrop source is outside the app/window contract"
+            }
+            Self::SmokeArtifactMissing => {
+                "native backdrop production label requires a smoke artifact"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeBackdropSmokeArtifact {
+    pub family: NativeBackdropSupportFamily,
+    pub support_state: NativeBackdropSupportState,
+    pub permission_state: NativeBackdropPermissionState,
+    pub source_scope: NativeBackdropSourceScope,
+    pub redaction_confirmed: bool,
+}
+
+impl NativeBackdropSmokeArtifact {
+    pub fn is_production_evidence(&self) -> bool {
+        self.support_state == NativeBackdropSupportState::SmokeTestPassed
+            && self.permission_state == NativeBackdropPermissionState::Granted
+            && self.source_scope == NativeBackdropSourceScope::AppWindowSurface
+            && self.redaction_confirmed
+    }
+}
+
 impl NativeBackdropPlatform {
     /// Returns the Cargo feature name reserved for this platform adapter.
     pub const fn feature_name(self) -> &'static str {
@@ -87,9 +183,7 @@ impl fmt::Display for NativeBackdropInitError {
             Self::PermissionRequired => {
                 f.write_str("native backdrop capture requires user permission")
             }
-            Self::BackendUnavailable(message) => {
-                write!(f, "native backdrop backend unavailable: {message}")
-            }
+            Self::BackendUnavailable(_) => f.write_str("native backdrop backend unavailable"),
         }
     }
 }
@@ -122,6 +216,66 @@ mod tests {
     }
 
     #[test]
+    fn support_family_labels_cover_stage3_matrix() {
+        let families = [
+            NativeBackdropSupportFamily::LinuxX11,
+            NativeBackdropSupportFamily::WaylandPortal,
+            NativeBackdropSupportFamily::Windows,
+            NativeBackdropSupportFamily::Macos,
+            NativeBackdropSupportFamily::Ios,
+            NativeBackdropSupportFamily::Android,
+            NativeBackdropSupportFamily::Web,
+        ];
+
+        for family in families {
+            assert!(!family.label().is_empty());
+        }
+    }
+
+    #[test]
+    fn smoke_artifact_requires_app_scope_permission_and_redaction() {
+        let artifact = NativeBackdropSmokeArtifact {
+            family: NativeBackdropSupportFamily::Windows,
+            support_state: NativeBackdropSupportState::SmokeTestPassed,
+            permission_state: NativeBackdropPermissionState::Granted,
+            source_scope: NativeBackdropSourceScope::AppWindowSurface,
+            redaction_confirmed: true,
+        };
+        assert!(artifact.is_production_evidence());
+
+        let foreign = NativeBackdropSmokeArtifact {
+            source_scope: NativeBackdropSourceScope::ForeignWindow,
+            ..artifact.clone()
+        };
+        assert!(!foreign.is_production_evidence());
+
+        let permission_not_requested = NativeBackdropSmokeArtifact {
+            permission_state: NativeBackdropPermissionState::NotRequested,
+            ..artifact
+        };
+        assert!(!permission_not_requested.is_production_evidence());
+    }
+
+    #[test]
+    fn native_contract_diagnostics_are_redacted() {
+        for diagnostic in [
+            NativeBackdropContractDiagnostic::PermissionRequired,
+            NativeBackdropContractDiagnostic::PermissionDenied,
+            NativeBackdropContractDiagnostic::UnsupportedPlatform,
+            NativeBackdropContractDiagnostic::UnsupportedSession,
+            NativeBackdropContractDiagnostic::InvalidSurfaceHandle,
+            NativeBackdropContractDiagnostic::SourceOwnershipMismatch,
+            NativeBackdropContractDiagnostic::SmokeArtifactMissing,
+        ] {
+            let message = diagnostic.redacted_message();
+            assert!(!message.is_empty());
+            assert!(!message.contains("/home/"));
+            assert!(!message.contains("token"));
+            assert!(!message.contains("password"));
+        }
+    }
+
+    #[test]
     fn init_errors_display_without_sensitive_state() {
         let variants = [
             NativeBackdropInitError::UnsupportedPlatform,
@@ -129,7 +283,9 @@ mod tests {
             NativeBackdropInitError::InvalidSurfaceHandle,
             NativeBackdropInitError::PermissionDenied,
             NativeBackdropInitError::PermissionRequired,
-            NativeBackdropInitError::BackendUnavailable("x11 connection failed".to_owned()),
+            NativeBackdropInitError::BackendUnavailable(
+                "x11 connection failed for /home/user/window token password".to_owned(),
+            ),
         ];
 
         for error in variants {
@@ -137,6 +293,8 @@ mod tests {
             assert!(!message.is_empty());
             assert!(!message.contains("password"));
             assert!(!message.contains("token"));
+            assert!(!message.contains("/home/"));
+            assert!(!message.contains("x11"));
         }
     }
 }

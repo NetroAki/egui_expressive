@@ -1,5 +1,5 @@
 use crate::interaction::DragAxis;
-use egui::{Pos2, Rect, Response, Sense, Ui, Vec2};
+use egui::{Pos2, Response, Sense, Ui, Vec2};
 use std::ops::RangeInclusive;
 
 use super::{
@@ -92,10 +92,7 @@ impl<'a> egui::Widget for Knob<'a> {
             diameter = preset.to_px();
         }
         let size = Vec2::splat(diameter);
-        let response = ui.allocate_rect(
-            Rect::from_center_size(ui.cursor().center(), size),
-            Sense::click_and_drag(),
-        );
+        let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
 
         let t = {
             let mut ctrl = ContinuousControl::new(self.value, self.range.clone())
@@ -110,7 +107,6 @@ impl<'a> egui::Widget for Knob<'a> {
             ctrl.handle(ui, &response)
         };
 
-        let rect = response.rect;
         let center = rect.center();
         let radius = diameter / 2.0 - 2.0;
 

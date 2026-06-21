@@ -26,6 +26,8 @@ pub enum RenderFeature {
     Blur,
     BackdropBlur,
     Shadow,
+    SceneEffect,
+    GradientMesh,
     Mask,
     TextureComposite,
     TextShaping,
@@ -149,8 +151,36 @@ pub enum RenderIssueKind {
     UnsupportedShape,
     SizeBudgetExceeded,
     MissingBackend,
+    MissingWgpuRuntime,
+    MissingContextBinding,
+    UnsupportedWgpuAdapter,
+    UnsupportedWgpuDevice,
+    WgpuDeviceLost,
+    PipelineCreationFailed,
+    ResourceAllocationFailed,
+    WgpuBudgetExceeded,
+    UnsupportedSceneSource,
+    UnsupportedSceneEffect,
+    UnsupportedBlendMode,
+    GradientMeshUnsupported,
     ApproximateFallback,
     UnsupportedFeature,
+}
+
+impl RenderIssueKind {
+    pub fn is_wgpu_lifecycle(self) -> bool {
+        matches!(
+            self,
+            Self::MissingWgpuRuntime
+                | Self::MissingContextBinding
+                | Self::UnsupportedWgpuAdapter
+                | Self::UnsupportedWgpuDevice
+                | Self::WgpuDeviceLost
+                | Self::PipelineCreationFailed
+                | Self::ResourceAllocationFailed
+                | Self::WgpuBudgetExceeded
+        )
+    }
 }
 
 /// One explicit fidelity issue discovered while satisfying a render request.
@@ -310,5 +340,41 @@ mod tests {
         ));
         assert_eq!(report.actual_quality, RenderQuality::Approximate);
         assert!(!report.is_exact());
+    }
+
+    #[test]
+    fn wgpu_lifecycle_issue_kinds_are_classified() {
+        let lifecycle_kinds = [
+            RenderIssueKind::MissingWgpuRuntime,
+            RenderIssueKind::MissingContextBinding,
+            RenderIssueKind::UnsupportedWgpuAdapter,
+            RenderIssueKind::UnsupportedWgpuDevice,
+            RenderIssueKind::WgpuDeviceLost,
+            RenderIssueKind::PipelineCreationFailed,
+            RenderIssueKind::ResourceAllocationFailed,
+            RenderIssueKind::WgpuBudgetExceeded,
+        ];
+
+        for kind in lifecycle_kinds {
+            assert!(kind.is_wgpu_lifecycle(), "{kind:?} must be WGPU lifecycle");
+        }
+        assert!(!RenderIssueKind::MissingBackend.is_wgpu_lifecycle());
+        assert!(!RenderIssueKind::SizeBudgetExceeded.is_wgpu_lifecycle());
+    }
+
+    #[test]
+    fn wgpu_lifecycle_issue_degrades_exact_report() {
+        let mut report = RenderReport::new(RenderBackendKind::WgpuOffscreen, RenderQuality::Exact);
+        report.add_issue(RenderIssue::new(
+            RenderFeature::BackdropBlur,
+            RenderIssueKind::MissingContextBinding,
+            RenderQuality::Exact,
+            RenderQuality::Unsupported,
+            "WGPU context binding is required for production fidelity",
+        ));
+
+        assert_eq!(report.actual_quality, RenderQuality::Unsupported);
+        assert!(!report.is_exact());
+        assert!(report.issues[0].kind.is_wgpu_lifecycle());
     }
 }

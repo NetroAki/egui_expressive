@@ -99,20 +99,34 @@ fn render_text_internal(
             let galley = painter.layout(display_text.clone(), font_id.clone(), color, max_w);
             if galley.rect.width() > max_w {
                 let ellipsis = "\u{2026}";
-                let mut truncated = display_text.clone();
-                while !truncated.is_empty() {
-                    truncated.pop();
-                    let test_text = truncated.clone() + ellipsis;
+                let boundaries: Vec<usize> = display_text
+                    .char_indices()
+                    .map(|(index, _)| index)
+                    .chain(std::iter::once(display_text.len()))
+                    .collect();
+                let mut lo = 0usize;
+                let mut hi = boundaries.len().saturating_sub(1);
+                let mut best = 0usize;
+                while lo <= hi {
+                    let mid = lo + (hi - lo) / 2;
+                    let byte_end = boundaries[mid];
+                    let mut test_text = String::with_capacity(byte_end + ellipsis.len());
+                    test_text.push_str(&display_text[..byte_end]);
+                    test_text.push_str(ellipsis);
                     let test_galley = painter.layout(test_text, font_id.clone(), color, max_w);
                     if test_galley.rect.width() <= max_w {
+                        best = mid;
+                        lo = mid + 1;
+                    } else if mid == 0 {
                         break;
+                    } else {
+                        hi = mid - 1;
                     }
                 }
-                if truncated.is_empty() {
-                    truncated = ellipsis.to_string();
-                } else {
-                    truncated.push_str(ellipsis);
-                }
+                let byte_end = boundaries[best];
+                let mut truncated = String::with_capacity(byte_end + ellipsis.len());
+                truncated.push_str(&display_text[..byte_end]);
+                truncated.push_str(ellipsis);
                 truncated
             } else {
                 display_text

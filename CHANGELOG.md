@@ -1,20 +1,32 @@
 # Changelog
 
-All notable user-facing changes to `egui_expressive` should be recorded here.
-
-This project follows the versioning policy in `docs/versioning-policy.md`. Until the first public release, the changelog groups changes by staged readiness rather than published crate versions.
+This project follows the versioning policy in `docs/versioning-policy.md`.
 
 ## Unreleased
 
 ### Added
 
-- Release-readiness validation for Stage 9: interaction smoke tests, deterministic performance-smoke tests, expanded CI gates, and release documentation.
-- Documentation index, migration guide, versioning policy, and release checklist.
+- Linux virtual-desktop smoke scripts for X11/Xvfb/Openbox and Wayland/Sway.
+- Bounded Web and Android showcase harnesses and platform-smoke docs.
+- Additional claim-boundary tests for public docs and platform support wording.
+- Illustrator plugin integrity/signing checks and stricter parity sidecar behavior.
 
 ### Changed
 
-- Data-widget advanced column interactions are documented as explicit unsupported release scope unless a later hardening stage opts into them.
+- Public docs now describe platform support as evidence-scoped and pre-1.0.
+- README install guidance points to the Git repository until a registry release is
+  explicitly published.
+- Release checklist now distinguishes release-candidate validation from registry
+  publish approval.
 
-### Removed
+### Fixed
 
-- Historical orphan split files under `src/{codegen,draw,scene}/legacy_parts`, inactive scene split leftovers, and orphan `src/bin/ai_parser_parts` files after reference audit.
+- Hardened non-finite coordinate handling in layout/codegen inference.
+- Tightened Illustrator plugin parser discovery and unsigned package behavior.
+- Improved Linux runtime smoke coverage for normal/high-DPI render paths.
+
+### Not yet claimed
+
+- Windows, macOS, and iOS runtime support require their own runtime artifacts.
+- Full design-tool parity and every platform/renderer path remain outside the
+  bounded release-candidate claims.

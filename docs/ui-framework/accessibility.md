@@ -1,6 +1,6 @@
 # Accessibility, Keyboard, and Internationalization Guide
 
-Stage 8 makes accessibility semantics explicit and auditable while leaving native
+the current release candidate makes accessibility semantics explicit and auditable while leaving native
 screen-reader integration to egui/the host platform. This is not a browser DOM or
 ARIA tree; the framework provides metadata, focus, motion, and live-region
 contracts so custom-painted widgets do not bury important semantics in draw code.
@@ -100,7 +100,7 @@ For each custom widget or example:
 
 ## Internationalization and RTL
 
-Stage 8 does not add a localization framework or custom bidi renderer. App code
+the current release candidate does not add a localization framework or custom bidi renderer. App code
 owns string catalogs, locale-specific formatting, and final text direction. The
 library exposes `InputTextContract` and `TextDirection` so forms/examples can
 state their assumptions clearly.
@@ -120,8 +120,8 @@ Guidance:
 
 ## Example Proof
 
-- `examples/state_accessibility_gallery.rs` — Stage 7/8 baseline for metadata,
+- `examples/state_accessibility_gallery.rs` — the current release candidate baseline for metadata,
   focus rings, state variants, and reduced motion.
-- `examples/accessibility_platform_gallery.rs` — Stage 8 walkthrough for roving
+- `examples/accessibility_platform_gallery.rs` — the current release candidate walkthrough for roving
   focus, live-region feedback, RTL/input contract, clipboard/drop/system/DPI
   descriptors.

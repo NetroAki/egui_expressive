@@ -9,6 +9,7 @@ pub mod clipboard;
 pub mod file_drop;
 #[cfg(feature = "native-backdrop")]
 pub mod native_backdrop;
+pub mod support;
 pub mod system;
 
 #[cfg(feature = "wgpu")]
@@ -18,16 +19,27 @@ pub use backdrop::{
     AppOwnedOffscreenBackdropSource, SharedAppOwnedOffscreenBackdropSource,
 };
 pub use backdrop::{
-    install_backdrop_snapshot_provider, load_backdrop_snapshot_provider, BackdropCaptureError,
-    BackdropCaptureRequest, BackdropSnapshot, BackdropSnapshotProvider,
-    SharedBackdropSnapshotProvider, MAX_BACKDROP_SNAPSHOT_AXIS,
+    install_backdrop_capture_source_contract, install_backdrop_snapshot_provider,
+    install_backdrop_snapshot_provider_with_source_contract, load_backdrop_capture_source_contract,
+    load_backdrop_snapshot_provider, BackdropCaptureConsent, BackdropCaptureError,
+    BackdropCaptureFrameToken, BackdropCapturePixelFormat, BackdropCaptureProviderId,
+    BackdropCaptureRequest, BackdropCaptureSourceContract, BackdropCaptureSourceId,
+    BackdropCaptureSurfaceToken, BackdropFrameFreshness, BackdropOcclusionState, BackdropSnapshot,
+    BackdropSnapshotProvider, SharedBackdropSnapshotProvider, MAX_BACKDROP_SNAPSHOT_AXIS,
 };
 pub use clipboard::ClipboardCommand;
 pub use file_drop::{DroppedFileDescriptor, PlatformDropBatch};
 #[cfg(feature = "native-backdrop")]
 pub use native_backdrop::{
-    NativeBackdropInitError, NativeBackdropPlatform, NATIVE_BACKDROP_FEATURE,
+    NativeBackdropContractDiagnostic, NativeBackdropInitError, NativeBackdropPermissionState,
+    NativeBackdropPlatform, NativeBackdropSmokeArtifact, NativeBackdropSourceScope,
+    NativeBackdropSupportFamily, NativeBackdropSupportState, NATIVE_BACKDROP_FEATURE,
     NATIVE_BACKDROP_MACOS_FEATURE, NATIVE_BACKDROP_WAYLAND_FEATURE,
     NATIVE_BACKDROP_WINDOWS_FEATURE, NATIVE_BACKDROP_X11_FEATURE,
+};
+pub use support::{
+    planned_platform_support_matrix, required_lifecycle_check_names, PlatformFamily,
+    PlatformLifecycleCheck, PlatformPerformanceSample, PlatformSmokeResult,
+    PlatformSupportArtifact, PlatformSupportStatus,
 };
 pub use system::{DisplayScale, SystemThemePreference};

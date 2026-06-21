@@ -1,6 +1,8 @@
 //! Read-only data-heavy widgets and models.
 //!
-//! Stage 3 owns virtualized data tables, tree-tables, and property grids here.
+//! `DataTable`, `TreeTable`, and `PropertyGrid` render materialized model views.
+//! For very large datasets, use app-owned caching/windowing with helpers such as
+//! [`bounded_visible_range`].
 
 mod data_table;
 mod editing;

@@ -1,43 +1,96 @@
 # Release Checklist
 
-Use this checklist before publishing or tagging a release of `egui_expressive`.
+Use this checklist before tagging, pushing a release branch, or publishing
+`egui_expressive` to a package registry.
 
-## Required Local Gate
+Current status: release candidate only. This working tree has Linux-focused
+runtime evidence and bounded Web/Android evidence, but the repository owner has
+not approved a push or registry publish in the current review. Keep all public
+claims evidence-scoped until that approval is explicit.
 
-Run on Linux unless another stage adds additional runners:
+## Initial Release Scope
+
+| Area | Release position |
+| --- | --- |
+| Core crate | Candidate pre-1.0 egui-native design layer. Breaking changes may occur before `1.0`. |
+| Linux | Primary runtime-validated path with local X11 and Wayland virtual-desktop smoke evidence. |
+| Web and Android | Bounded showcase evidence exists; broader support still requires app-specific validation. |
+| Windows, macOS, iOS | Planned until runtime artifacts are supplied. Compile-only checks are not support claims. |
+| Design-tool integrations | Useful integration paths, but not blanket fidelity/support guarantees. |
+| Registry publish | Not authorized by this checklist alone. Requires explicit owner approval and a clean package dry-run. |
+
+## Required Local Validation
+
+Run on Linux before any release push or registry publish:
 
 ```bash
 cargo fmt --check
-cargo test --all-targets
-cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-targets -j 1
 cargo build --examples
-cargo test --test visual_diff_harness
+cargo clippy --all-targets --all-features -- -D warnings
+
 node --check illustrator-plugin/plugin.js
 node --check illustrator-plugin/plugin.test.cjs
 node illustrator-plugin/plugin.test.cjs
-cargo check --manifest-path preview/Cargo.toml
-cargo test --manifest-path preview/Cargo.toml
+
+bash -n tools/linux_cross_platform_smoke.sh
+bash -n tools/linux_wayland_sway_smoke.sh
+cargo package --allow-dirty --list
+cargo package --allow-dirty
 ```
 
-## Documentation Gate
+Linux platform probes for the current release-candidate scope:
 
-- `README.md` describes current product scope and links the docs index.
-- `docs/ui-framework/index.md` links all user-facing framework docs.
-- `docs/migration-guide.md` records migration notes for changed/deprecated public surfaces.
-- `docs/versioning-policy.md` states SemVer and compatibility rules.
-- `CHANGELOG.md` has user-facing entries for the release.
+```bash
+tools/linux_cross_platform_smoke.sh
+tools/linux_wayland_sway_smoke.sh
+```
 
-## Compatibility Gate
+Optional bounded probes for other platform slices:
 
-- Compatibility aliases kept for DAW/creative-editor names unless a migration entry says otherwise.
-- Unsupported/approximate rendering behavior remains documented in `docs/ui-framework/tw-render-contract.md`.
-- Platform/native integrations do not claim behavior beyond the dependency-free descriptors in `docs/ui-framework/platform.md`.
-- Advanced data-grid column interactions remain explicitly unsupported unless a later hardening stage implements them.
+```bash
+cargo check --manifest-path platform/web/Cargo.toml
+cargo build --manifest-path platform/web/Cargo.toml --target wasm32-unknown-unknown --release
+cargo check --manifest-path platform/android/Cargo.toml \
+  --target aarch64-linux-android --no-default-features --features shared-showcase
+```
 
-## Artifact Gate
+Windows runtime support remains unclaimed until supplied on an appropriate host,
+and compile-only evidence does not replace runtime proof. Linux, Android, and Web
+evidence is recorded under `docs/platform-smoke/`; support claims must stay
+within those documented bounds.
 
-- Visual-diff fixture manifest uses committed fixture pairs for regression/parity governance.
-- `backdrop-supported-app-snapshot-blur` is an exact app-provided snapshot artifact row only; it proves snapshot-input blur with a deterministic source PNG and does not certify native framebuffer capture or Tailwind backdrop parity.
-- Current-code visual proof exists only for the named draw subset covered by `cargo test --lib current_render` / `cargo test --all-targets`, including the R100-009A `phase7-supported-compound-hole-fill` proof, the hardened `vector-clip-nested` clip-path proof, and the R100-009B `compositing-blend-boundary` decoded-RGBA proof against the committed headless pair with a bounded asserted blue-mask `Color32` quantization correction; it does not upgrade the whole committed fixture corpus to current-render proof.
-- Failed visual-diff heatmaps are uploaded by CI when available.
-- No secrets, paid services, network-only validation, or OS mutation are required by release gates.
+## Claim Rules
+
+- Do not describe the whole crate as production-ready until all claimed platform,
+  renderer, packaging, and integration gates have corresponding artifacts.
+- Cross-platform support claims for Linux, Windows, macOS, iOS, Android, or Web
+  require a docs artifact that records platform/runtime, build pass, renderer
+  backend, visible-render proof, lifecycle checks, logs/artifacts, and final
+  result.
+- Linux support claims require the Linux smoke in `docs/platform-smoke/linux.md`.
+  The current artifacts prove bounded local virtual-desktop X11/Xvfb/Openbox and
+  Wayland/Sway/wlroots paths; they do not prove every distro, compositor,
+  GNOME/KDE/DRM session, real GPU, focus manager, or device-loss scenario.
+- Android support claims require APK build and emulator/device identity, OS/API
+  version, renderer/backend, visible-render screenshot or log path,
+  rotation/density/lifecycle result, and final result.
+- Web support claims require wasm/Web compile, browser/version, renderer backend,
+  visible-render screenshot or log path, resize/DPI behavior, lifecycle result,
+  and renderer fallback status.
+- Design-tool export claims must preserve fail-closed behavior: unsupported
+  rasters, plugin items, charts, text effects, blend modes, and live effects must
+  remain visible as unsupported/approximate rather than silently exact.
+- Package publish requires `cargo package --list` review, clean package dry-run,
+  and confirmation that no private/local artifacts are included.
+
+## Release-owner checklist
+
+Before broadening any support claim, record:
+
+1. Platform, OS/runtime version, Rust target, renderer/backend, and build command.
+2. Visible-render screenshots or equivalent logs.
+3. Resize/focus/lifecycle behavior where applicable.
+4. App stdout/stderr or platform logs.
+5. Explicit boundaries for unsupported or untested environments.
+6. A clean package list/dry-run when publishing a crate.

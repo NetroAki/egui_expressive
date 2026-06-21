@@ -5,11 +5,13 @@
 
 use egui_expressive::{
     app_provided_backdrop_blur_report, app_provided_backdrop_blur_shape,
-    install_backdrop_snapshot_provider, load_backdrop_snapshot_provider, BackdropCaptureError,
-    BackdropCaptureRequest, BackdropSnapshot, BackdropSnapshotProvider, BlurQuality,
-    BreakpointName, Breakpoints, DataCell, DataColumn, DataGridModel, DataGridState, DataRow,
-    FocusScope, FormSchema, InteractionState, Knob, LargeCanvas, Meter, Responsive, SelectionModel,
-    SnapGrid, StateMachine, StateSlot, StepGrid, Tw, ViewportCuller, VisualDiffConfig,
+    install_backdrop_capture_source_contract, install_backdrop_snapshot_provider,
+    install_backdrop_snapshot_provider_with_source_contract, load_backdrop_capture_source_contract,
+    load_backdrop_snapshot_provider, BackdropCaptureError, BackdropCaptureRequest,
+    BackdropSnapshot, BackdropSnapshotProvider, BlurQuality, BreakpointName, Breakpoints, DataCell,
+    DataColumn, DataGridModel, DataGridState, DataRow, FocusScope, FormSchema, InteractionState,
+    Knob, LargeCanvas, Meter, Responsive, SelectionModel, SnapGrid, StateMachine, StateSlot,
+    StepGrid, Tw, ViewportCuller, VisualDiffConfig,
 };
 
 // ---------------------------------------------------------------------------
@@ -143,6 +145,17 @@ fn breadcrumbs_type_reference() {
 
 #[test]
 fn backdrop_snapshot_public_api_paths_compile() {
+    let _source_install_fn: fn(&egui::Context, egui_expressive::BackdropCaptureSourceContract) =
+        install_backdrop_capture_source_contract;
+    let _source_load_fn: fn(
+        &egui::Context,
+    ) -> Option<egui_expressive::BackdropCaptureSourceContract> =
+        load_backdrop_capture_source_contract;
+    let _install_with_source_fn: fn(
+        &egui::Context,
+        egui_expressive::SharedBackdropSnapshotProvider,
+        egui_expressive::BackdropCaptureSourceContract,
+    ) = install_backdrop_snapshot_provider_with_source_contract;
     let _report_fn: fn(&egui::Context, egui::Rect, f32) -> egui_expressive::RenderReport =
         app_provided_backdrop_blur_report;
     let _shape_fn: fn(
@@ -150,12 +163,31 @@ fn backdrop_snapshot_public_api_paths_compile() {
         egui::Rect,
         f32,
     ) -> (Option<egui::Shape>, egui_expressive::RenderReport) = app_provided_backdrop_blur_shape;
+    let _expected_contract_fn: fn(
+        egui::Rect,
+        f32,
+        egui_expressive::BackdropCaptureSourceContract,
+        egui_expressive::BackdropCaptureSourceId,
+        egui_expressive::BackdropCaptureProviderId,
+    ) -> Result<
+        egui_expressive::BackdropCaptureRequest,
+        egui_expressive::BackdropCaptureError,
+    > = egui_expressive::BackdropCaptureRequest::with_expected_source_contract;
     let _install_fn: fn(&egui::Context, egui_expressive::SharedBackdropSnapshotProvider) =
         install_backdrop_snapshot_provider;
     let _load_fn: fn(&egui::Context) -> Option<egui_expressive::SharedBackdropSnapshotProvider> =
         load_backdrop_snapshot_provider;
 
     let _ = std::marker::PhantomData::<BackdropCaptureRequest>;
+    let _ = std::marker::PhantomData::<egui_expressive::BackdropCaptureSourceId>;
+    let _ = std::marker::PhantomData::<egui_expressive::BackdropCaptureProviderId>;
+    let _ = std::marker::PhantomData::<egui_expressive::BackdropCaptureSurfaceToken>;
+    let _ = std::marker::PhantomData::<egui_expressive::BackdropCaptureFrameToken>;
+    let _ = egui_expressive::BackdropCaptureConsent::AppOwnedSurface;
+    let _ = egui_expressive::BackdropFrameFreshness::CurrentFrame;
+    let _ = egui_expressive::BackdropOcclusionState::Unoccluded;
+    let _ = egui_expressive::BackdropOcclusionState::NotChecked;
+    let _ = egui_expressive::BackdropCapturePixelFormat::Rgba8SrgbStraightAlpha;
     let _ = std::marker::PhantomData::<BackdropSnapshot>;
     let _ = std::marker::PhantomData::<BackdropCaptureError>;
     let _ = std::marker::PhantomData::<dyn BackdropSnapshotProvider + Send + Sync>;
@@ -165,7 +197,9 @@ fn backdrop_snapshot_public_api_paths_compile() {
 #[test]
 fn native_backdrop_common_api_paths_compile() {
     use egui_expressive::{
-        NativeBackdropInitError, NativeBackdropPlatform, NATIVE_BACKDROP_FEATURE,
+        NativeBackdropContractDiagnostic, NativeBackdropInitError, NativeBackdropPermissionState,
+        NativeBackdropPlatform, NativeBackdropSmokeArtifact, NativeBackdropSourceScope,
+        NativeBackdropSupportFamily, NativeBackdropSupportState, NATIVE_BACKDROP_FEATURE,
         NATIVE_BACKDROP_MACOS_FEATURE, NATIVE_BACKDROP_WAYLAND_FEATURE,
         NATIVE_BACKDROP_WINDOWS_FEATURE, NATIVE_BACKDROP_X11_FEATURE,
     };
@@ -180,6 +214,15 @@ fn native_backdrop_common_api_paths_compile() {
         NATIVE_BACKDROP_X11_FEATURE
     );
     let _ = std::marker::PhantomData::<NativeBackdropInitError>;
+    let _ = NativeBackdropSupportFamily::Android.label();
+    let _ = NativeBackdropContractDiagnostic::SmokeArtifactMissing.redacted_message();
+    let _ = NativeBackdropSmokeArtifact {
+        family: NativeBackdropSupportFamily::LinuxX11,
+        support_state: NativeBackdropSupportState::ContractOnly,
+        permission_state: NativeBackdropPermissionState::NotRequested,
+        source_scope: NativeBackdropSourceScope::AppWindowSurface,
+        redaction_confirmed: true,
+    };
 }
 
 #[cfg(feature = "wgpu")]
@@ -187,10 +230,12 @@ fn native_backdrop_common_api_paths_compile() {
 fn app_owned_offscreen_backdrop_public_api_paths_compile() {
     use egui_expressive::{
         app_owned_offscreen_backdrop_blur_report, app_owned_offscreen_backdrop_blur_shape,
-        bind_app_owned_offscreen_backdrop_source_for_context,
-        install_app_owned_offscreen_backdrop_source, load_app_owned_offscreen_backdrop_source,
-        AppOwnedBackdropAlphaMode, AppOwnedBackdropFrameId, AppOwnedBackdropSurfaceId,
-        AppOwnedOffscreenBackdropSource, SharedAppOwnedOffscreenBackdropSource,
+        bind_app_owned_offscreen_backdrop_source_for_context, init_gpu_effects,
+        init_gpu_effects_for_context, install_app_owned_offscreen_backdrop_source,
+        load_app_owned_offscreen_backdrop_source, AppOwnedBackdropAlphaMode,
+        AppOwnedBackdropFrameId, AppOwnedBackdropSurfaceId, AppOwnedOffscreenBackdropSource,
+        OffscreenRequest, RenderBackendKind, RenderCapabilities, RenderFeature, RenderIssueKind,
+        RenderQuality, SharedAppOwnedOffscreenBackdropSource, WgpuLifecycleFailure,
     };
 
     let _install_fn: fn(&egui::Context, SharedAppOwnedOffscreenBackdropSource) =
@@ -220,8 +265,47 @@ fn app_owned_offscreen_backdrop_public_api_paths_compile() {
         AppOwnedBackdropSurfaceId,
         AppOwnedBackdropFrameId,
     ) -> egui_expressive::RenderReport = bind_app_owned_offscreen_backdrop_source_for_context;
+    let _init_fn: fn(&egui_wgpu::RenderState) = init_gpu_effects;
+    let _init_for_context_fn: fn(&egui_wgpu::RenderState, &egui::Context) =
+        init_gpu_effects_for_context;
+    let _lifecycle_report_fn: fn(
+        RenderFeature,
+        RenderBackendKind,
+        WgpuLifecycleFailure,
+        &'static str,
+    ) -> egui_expressive::RenderReport = egui_expressive::wgpu_lifecycle_report;
+    let _host_framebuffer_report_fn: fn(
+        &egui_expressive::RenderCapabilities,
+        OffscreenRequest,
+    ) -> egui_expressive::RenderReport = egui_expressive::host_framebuffer_backdrop_report;
+    let _app_provided_report_fn: fn(
+        &egui_expressive::RenderCapabilities,
+        OffscreenRequest,
+        egui_expressive::BackdropCaptureSourceContract,
+    ) -> egui_expressive::RenderReport =
+        egui_expressive::wgpu_app_provided_backdrop_snapshot_report;
+
+    let callback_caps = RenderCapabilities::egui_wgpu_callback(4_096);
+    let offscreen_caps = RenderCapabilities::wgpu_offscreen(4_096, true);
+    assert_eq!(callback_caps.backend, RenderBackendKind::EguiWgpuCallback);
+    assert_eq!(offscreen_caps.backend, RenderBackendKind::WgpuOffscreen);
+
+    let report = egui_expressive::wgpu_lifecycle_report(
+        RenderFeature::BackdropBlur,
+        callback_caps.backend,
+        WgpuLifecycleFailure::MissingContextBinding,
+        WgpuLifecycleFailure::MissingContextBinding.default_message(),
+    );
+    assert_eq!(report.actual_quality, RenderQuality::Unsupported);
+    assert_eq!(
+        report.issues[0].kind,
+        RenderIssueKind::MissingContextBinding
+    );
+    assert!(report.issues[0].kind.is_wgpu_lifecycle());
+
     let _ = std::marker::PhantomData::<AppOwnedBackdropSurfaceId>;
     let _ = std::marker::PhantomData::<AppOwnedBackdropFrameId>;
     let _ = std::marker::PhantomData::<AppOwnedBackdropAlphaMode>;
     let _ = std::marker::PhantomData::<AppOwnedOffscreenBackdropSource>;
+    let _ = WgpuLifecycleFailure::MissingRuntime;
 }

@@ -54,7 +54,7 @@ let states = schema.evaluate_dependencies(&values);
 
 Fields can carry stable IDs, labels, help text, kind, action ID, focus ID,
 validation rules, and dependency rules. App code chooses how to render fields and
-how to route action IDs into Stage 4 command/focus systems.
+how to route action IDs into the current release candidate command/focus systems.
 
 ## Validation
 
@@ -88,7 +88,7 @@ defines the request/result data boundary.
 - `InputTextContract` documents that egui/platform code owns IME composition and
   that full RTL/bidi behavior is platform-limited here.
 
-Stage 5 intentionally does not claim platform IME/RTL certification. Stage 8 owns
+the current release candidate intentionally does not claim platform IME/RTL certification. the current release candidate owns
 broader accessibility/i18n/platform guidance.
 
 ## Rich input descriptors
@@ -106,10 +106,10 @@ broader accessibility/i18n/platform guidance.
 `InlineEditSession`, `InlineEditTarget`, `InlineEditCommit`, and
 `InlineEditController` provide pure edit descriptors for forms, property grids,
 and data cells. They do not mutate app models automatically and do not create a
-Stage 6 editor/canvas history layer.
+the current release candidate editor/canvas history layer.
 
 Use `src/widgets/data/editing.rs` adapters to apply commits to data/property edit
-descriptors while keeping Stage 3 `DataTable` and `PropertyGrid` read-only.
+descriptors while keeping the current release candidate `DataTable` and `PropertyGrid` read-only.
 
 ## Example
 
@@ -119,6 +119,6 @@ descriptors while keeping Stage 3 `DataTable` and `PropertyGrid` read-only.
 
 ## Deferrals
 
-- Stage 6: editor/canvas object graph, object/file drag/drop, DAW namespace cleanup.
-- Stage 8: platform accessibility, screen-reader/live-region patterns, full IME/RTL guidance.
-- Stage 9: release-scale benchmarks, CI/release harness, advanced data-grid hardening.
+- the current release candidate: editor/canvas object graph, object/file drag/drop, DAW namespace cleanup.
+- the current release candidate: platform accessibility, screen-reader/live-region patterns, full IME/RTL guidance.
+- the current release candidate: release-scale benchmarks, CI/release harness, advanced data-grid hardening.

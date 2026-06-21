@@ -1,6 +1,6 @@
 use crate::interaction::{ActionDef, ActionRegistry};
 use crate::widgets::controls::SearchField;
-use egui::{Key, Response, ScrollArea, Ui};
+use egui::{Key, Response, Ui};
 
 #[derive(Clone, Debug)]
 pub struct CommandPaletteItem {
@@ -87,14 +87,15 @@ impl<'a> egui::Widget for CommandPalette<'a> {
                 *activated = Some(item.id.clone());
             }
         }
-        ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-            for (index, (_, item)) in rows.iter().enumerate() {
-                let label = format!("{} — {}", item.label, item.hint);
-                if ui.selectable_label(index == *selected, label).clicked() {
-                    *selected = index;
-                }
+        for (index, (_, item)) in rows.iter().take(8).enumerate() {
+            let label = format!("{} — {}", item.label, item.hint);
+            if ui.selectable_label(index == *selected, label).clicked() {
+                *selected = index;
             }
-        });
+        }
+        if rows.len() > 8 {
+            ui.label(format!("{} more commands match", rows.len() - 8));
+        }
         ui.allocate_response(egui::Vec2::ZERO, egui::Sense::hover())
     }
 }
