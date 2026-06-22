@@ -18,8 +18,6 @@ use egui_expressive::{
     M3SnackbarState, M3Switch, M3TextField, M3Theme, M3Tooltip, M3TopAppBar, RenderReport,
     SelectField, SelectOption, ShadowOffset, SwitchField, TextAreaField, TextField, Theme,
 };
-use std::sync::Arc;
-
 const DEMO_FX_QUALITY: BlurQuality = BlurQuality::Fast;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2335,25 +2333,6 @@ fn blend_mode_combo(ui: &mut egui::Ui, mode: &mut BlendMode) {
 
 fn configure_gallery_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-
-    fonts.font_data.insert(
-        "noto_symbols".to_owned(),
-        Arc::new(egui::FontData::from_static(include_bytes!(
-            "../Tests/assets/fonts/NotoSansSymbols-Regular.ttf"
-        ))),
-    );
-    fonts.font_data.insert(
-        "noto_symbols2".to_owned(),
-        Arc::new(egui::FontData::from_static(include_bytes!(
-            "../Tests/assets/fonts/NotoSansSymbols2-Regular.ttf"
-        ))),
-    );
-
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-        let entries = fonts.families.entry(family).or_default();
-        entries.push("noto_symbols".to_owned());
-        entries.push("noto_symbols2".to_owned());
-    }
 
     if let Some(proportional) = fonts.families.get(&egui::FontFamily::Proportional).cloned() {
         fonts
