@@ -103,7 +103,7 @@ pub(crate) fn parse_element(elem_value: &serde_json::Value) -> Option<LayoutElem
         .get("stroke")
         .and_then(|v| v.as_str())
         .and_then(crate::svg::parse_svg_color);
-    let stroke = stroke_width.and_then(|w| stroke_color.map(|c| (w, c)));
+    let stroke = stroke_width.zip(stroke_color);
     let opacity = elem_value
         .get("opacity")
         .and_then(|v| v.as_f64())
