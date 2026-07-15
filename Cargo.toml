@@ -127,3 +127,7 @@ path = "examples/accessibility_platform_gallery.rs"
 [[example]]
 name = "effects_evaluator"
 path = "examples/effects_evaluator.rs"
+
+[[example]]
+name = "remote_workspace_showcase"
+path = "examples/remote_workspace_showcase.rs"

@@ -88,7 +88,7 @@ A crates.io version should only be used after a published release is available.
 | `tailwind` | `Tw` style builder with Tailwind-like spacing, sizing, and layout DSL |
 | `theme` | `Border`, `Elevation`, `SemanticColors`, `Theme` — light/dark theme management, border utilities, semantic color tokens |
 | `typography` | Rich text rendering with `TypeScale`, `TypeSpec`, text overflow/decoration/transform support |
-| `widgets` | DAW controls (Knob, Fader, Meter, StepGrid, DragNumber), layout widgets (ResizableSplit, TabBar, TreeView, CollapsePanel, DragReorder), timeline (TimelineClip, Ruler, Waveform), and more |
+| `widgets` | Generic styled primitives (`SurfaceButton`, `PaintedIconButton`, `SegmentedBarMeter`), DAW controls, layout widgets, timelines, data surfaces, and more |
 | `daw` | *(feature-gated)* — Convenience re-export module for DAW-oriented widgets and utilities (gated behind `daw` feature) |
 | `gpu` | *(feature-gated)* — GPU-accelerated effects pipeline using `wgpu` (gated behind `wgpu` feature) |
 | `scene` | Retained-mode scene graph for complex vector rendering and effect compositing |

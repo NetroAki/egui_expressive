@@ -237,12 +237,14 @@ pub use widgets::{
     CollapsePanel, ContextMenuBuilder, ContinuousControl, DataCell, DataColumn, DataColumnFilter,
     DataFilterState, DataGridModel, DataGridState, DataRow, DataRowProvider, DataSelectionState,
     DataSortDirection, DataSortState, DataTable, DataViewStatus, DockPanel, DockPanelId,
-    DockPlacement, DockZone, DotState, DragNumber, DragReorder, Fader, FloatingPanel, Knob,
-    KnobSize, KnobStyle, Meter, Orientation, PropertyGrid, PropertyGridCategory, PropertyGridEntry,
-    PropertyGridGroup, PropertyGridModel, ResizableSplit, Ruler, SidebarItem, SidebarNav,
-    SplitAxis, StatusBar, StatusBarItem, StepGrid, TabBar, TabSetState, TimelineClip, ToggleDot,
-    TransportButton, TransportKind, TreeNode, TreeTable, TreeTableModel, TreeTableNode,
-    TreeTableRow, TreeTableState, TreeView, VerticalDrag, Waveform,
+    DockPlacement, DockZone, DotState, DragNumber, DragReorder, Fader, FloatingPanel,
+    InteractiveFill, Knob, KnobSize, KnobStyle, Meter, Orientation, PaintedIconButton,
+    PaintedIconButtonStyle, PropertyGrid, PropertyGridCategory, PropertyGridEntry,
+    PropertyGridGroup, PropertyGridModel, ResizableSplit, Ruler, SegmentedBarMeter, SidebarItem,
+    SidebarNav, SplitAxis, StatusBar, StatusBarItem, StepGrid, SurfaceButton, SurfaceButtonStyle,
+    TabBar, TabSetState, TimelineClip, ToggleDot, TransportButton, TransportKind, TreeNode,
+    TreeTable, TreeTableModel, TreeTableNode, TreeTableRow, TreeTableState, TreeView, VerticalDrag,
+    Waveform,
 };
 
 // M3 Material Design 3 foundation modules

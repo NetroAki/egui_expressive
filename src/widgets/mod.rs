@@ -16,6 +16,7 @@ pub mod knobs;
 pub mod menus;
 pub mod meters;
 pub mod overlays;
+pub mod primitives;
 pub mod tabs;
 pub mod timeline;
 pub mod toolbar;
@@ -57,6 +58,10 @@ pub use meters::{Meter, MeterBallistics, MeterMode};
 pub use overlays::{
     CommandPalette, CommandPaletteItem, ContextMenuBuilder, ContextMenuEntry, FloatingPanel,
     FloatingPanelState, ModalOverlay, ProgressOverlay, Toast, ToastLayer,
+};
+pub use primitives::{
+    InteractiveFill, PaintedIconButton, PaintedIconButtonStyle, SegmentedBarMeter, SurfaceButton,
+    SurfaceButtonStyle,
 };
 pub use tabs::{TabBar, TabSetState};
 pub use timeline::{
