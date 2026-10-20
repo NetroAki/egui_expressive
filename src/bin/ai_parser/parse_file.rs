@@ -371,8 +371,8 @@ pub fn parse_ai_file(path: &Path) -> Result<AiParseResult, String> {
                 if let Ok(info) = doc.get_object(info_id) {
                     if let Ok(dict) = info.as_dict() {
                         if let Ok(creator_obj) = dict.get(b"Creator") {
-                            if let Ok(s) = creator_obj.as_string() {
-                                let creator_str = String::from_utf8_lossy(s.as_bytes()).to_string();
+                            if let Ok(s) = creator_obj.as_str() {
+                                let creator_str = String::from_utf8_lossy(s).to_string();
                                 if let Ok(re) = Regex::new(r"Adobe Illustrator[^\d]*([\d.]+)") {
                                     if let Some(caps) = re.captures(&creator_str) {
                                         result.ai_version = caps
