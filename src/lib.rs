@@ -64,6 +64,7 @@ pub mod svg;
 pub mod swiftui;
 pub mod theme;
 pub mod typography;
+#[cfg(feature = "vectorize")]
 pub mod vectorize;
 pub mod visual_diff;
 
@@ -224,6 +225,7 @@ pub use typography::{
     TextBlock, TextBlockAlign, TextDecoration, TextOverflow, TextSpan, TextTransform, TypeLabel,
     TypeScale, TypeSpec,
 };
+#[cfg(feature = "vectorize")]
 pub use vectorize::{
     vectorize_image_file_to_scene_nodes, vectorize_rgba_to_scene_nodes, RasterVectorizeConfig,
 };

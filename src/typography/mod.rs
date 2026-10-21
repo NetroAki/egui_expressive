@@ -7,6 +7,7 @@
 
 pub mod core;
 pub mod render;
+#[cfg(feature = "shaping")]
 pub mod shaping;
 pub mod text;
 
@@ -16,7 +17,10 @@ pub use core::{
     FontSelectionReport, FontStretch, FontStyleKind, OpenTypeFeatures, ShapedGlyph, ShapedGlyphRun,
     TextDecoration, TextOverflow, TextTransform, TypeScale, TypeSpec,
 };
-pub use render::{render_shaped_glyph_run, render_text_with_font_bytes};
+pub use render::render_shaped_glyph_run;
+#[cfg(feature = "shaping")]
+pub use render::render_text_with_font_bytes;
+#[cfg(feature = "shaping")]
 pub use shaping::shape_text_with_font_bytes;
 pub use text::{render_text, render_text_block, TextBlock, TextBlockAlign, TextSpan, TypeLabel};
 

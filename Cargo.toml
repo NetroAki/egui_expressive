@@ -25,7 +25,10 @@ exclude = [
 ]
 
 [features]
-default = ["debug"]
+default = ["debug", "vectorize", "shaping", "ai-import"]
+vectorize = ["dep:vtracer", "dep:visioncortex"]
+shaping = ["dep:rustybuzz"]
+ai-import = ["dep:lopdf"]
 debug = []
 daw = []
 creative-editors = []
@@ -42,19 +45,23 @@ native-backdrop-wayland = ["native-backdrop"]
 egui = { version = "0.34", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-lopdf = "0.42"
+lopdf = { version = "0.42", optional = true }
 flate2 = "1.0"
 regex = "1"
 tiny-skia = { version = "0.11", optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 egui-wgpu = { version = "0.34", optional = true }
 lyon_tessellation = "1"
-vtracer = "0.6.5"
-visioncortex = "0.8.10"
-rustybuzz = "0.20"
+vtracer = { version = "0.6.5", optional = true }
+visioncortex = { version = "0.8.10", optional = true }
+rustybuzz = { version = "0.20", optional = true }
 
 [dev-dependencies]
 eframe = "0.34"
+
+[[test]]
+name = "raster_vectorization"
+required-features = ["vectorize"]
 
 [[bin]]
 name = "figma-export"
@@ -63,6 +70,7 @@ path = "src/bin/figma_export.rs"
 [[bin]]
 name = "ai-parser"
 path = "src/bin/ai_parser.rs"
+required-features = ["ai-import"]
 
 [[example]]
 name = "daw_strip"
@@ -127,6 +135,7 @@ path = "examples/accessibility_platform_gallery.rs"
 [[example]]
 name = "effects_evaluator"
 path = "examples/effects_evaluator.rs"
+required-features = ["vectorize"]
 
 [[example]]
 name = "remote_workspace_showcase"

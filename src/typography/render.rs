@@ -2,6 +2,7 @@ use crate::scene::PathContour;
 use egui::{Color32, Pos2, Rect};
 
 use super::core::{shaped_glyph_run_advance_width, TypeSpec};
+#[cfg(feature = "shaping")]
 use super::shaping::shape_text_with_font_bytes;
 
 pub fn render_shaped_glyph_run(
@@ -72,6 +73,7 @@ pub fn render_shaped_glyph_run(
     }
 }
 
+#[cfg(feature = "shaping")]
 pub fn render_text_with_font_bytes(
     painter: &egui::Painter,
     pos: Pos2,
